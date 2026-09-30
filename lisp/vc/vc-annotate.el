@@ -1,8 +1,8 @@
 ;;; vc-annotate.el --- VC Annotate Support  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1997-1998, 2000-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1997-1998, 2000-2026 Free Software Foundation, Inc.
 
-;; Author:     Martin Lorentzson  <emwson@emw.ericsson.se>
+;; Author: Martin Lorentzson <emwson@emw.ericsson.se>
 ;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: vc tools
 ;; Package: vc
@@ -57,7 +57,7 @@ is applied to the background."
   :set (lambda (symbol value)
 	 (set-default symbol value)
 	 (when (boundp 'vc-annotate-color-map)
-	   (with-demoted-errors
+	   (with-demoted-errors "VC color map error: %S"
 	     ;; Update the value of the dependent variable.
 	     (custom-reevaluate-setting 'vc-annotate-color-map))))
   :version "25.1"
@@ -162,22 +162,26 @@ List of factors, used to expand/compress the time scale.  See `vc-annotate'."
   :type '(repeat number)
   :group 'vc)
 
-(defvar vc-annotate-mode-map
-  (let ((m (make-sparse-keymap)))
-    (define-key m "a" 'vc-annotate-revision-previous-to-line)
-    (define-key m "d" 'vc-annotate-show-diff-revision-at-line)
-    (define-key m "=" 'vc-annotate-show-diff-revision-at-line)
-    (define-key m "D" 'vc-annotate-show-changeset-diff-revision-at-line)
-    (define-key m "f" 'vc-annotate-find-revision-at-line)
-    (define-key m "j" 'vc-annotate-revision-at-line)
-    (define-key m "l" 'vc-annotate-show-log-revision-at-line)
-    (define-key m "n" 'vc-annotate-next-revision)
-    (define-key m "p" 'vc-annotate-prev-revision)
-    (define-key m "w" 'vc-annotate-working-revision)
-    (define-key m "v" 'vc-annotate-toggle-annotation-visibility)
-    (define-key m "\C-m" 'vc-annotate-goto-line)
-    m)
-  "Local keymap used for VC-Annotate mode.")
+(defcustom vc-annotate-use-short-revision t
+  "If non-nil, \\[vc-annotate] will use short revisions in its buffer name."
+  :type 'boolean
+  :version "30.1"
+  :group 'vc)
+
+(defvar-keymap vc-annotate-mode-map
+  :doc "Local keymap used for VC-Annotate mode."
+  "a"   #'vc-annotate-revision-previous-to-line
+  "d"   #'vc-annotate-show-diff-revision-at-line
+  "="   #'vc-annotate-show-diff-revision-at-line
+  "D"   #'vc-annotate-show-changeset-diff-revision-at-line
+  "f"   #'vc-annotate-find-revision-at-line
+  "j"   #'vc-annotate-revision-at-line
+  "l"   #'vc-annotate-show-log-revision-at-line
+  "n"   #'vc-annotate-next-revision
+  "p"   #'vc-annotate-prev-revision
+  "w"   #'vc-annotate-working-revision
+  "v"   #'vc-annotate-toggle-annotation-visibility
+  "RET" #'vc-annotate-goto-line)
 
 ;;; Annotate functionality
 
@@ -190,8 +194,6 @@ List of factors, used to expand/compress the time scale.  See `vc-annotate'."
 
 ;; internal buffer-local variables
 (defvar vc-annotate-backend nil)
-(defvar vc-annotate-parent-file nil)
-(defvar vc-annotate-parent-rev nil)
 (defvar vc-annotate-parent-display-mode nil)
 
 (defconst vc-annotate-font-lock-keywords
@@ -208,9 +210,8 @@ menu items."
   ;; it will become a list, to avoid initial annotations being invisible.
   (add-to-invisibility-spec 'foo)
   (remove-from-invisibility-spec 'foo)
-  (set (make-local-variable 'truncate-lines) t)
-  (set (make-local-variable 'font-lock-defaults)
-       '(vc-annotate-font-lock-keywords t))
+  (setq-local truncate-lines t)
+  (setq-local font-lock-defaults '(vc-annotate-font-lock-keywords t))
   (hack-dir-local-variables-non-file-buffer))
 
 (defun vc-annotate-toggle-annotation-visibility ()
@@ -276,22 +277,25 @@ cover the range from the oldest annotation to the newest."
 			 (- current newest))
 	       (format "Spanned to %.1f days old" (- current oldest))))))
 
-;; Menu -- Using easymenu.el
 (easy-menu-define vc-annotate-mode-menu vc-annotate-mode-map
-  "VC Annotate Display Menu"
+  "Menu for VC-Annotate buffers."
   `("VC-Annotate"
+    :filter ,(lambda (items)
+               (let ((o-i-m (vc-annotate-oldest-in-map
+                             (default-value 'vc-annotate-color-map))))
+                 `(,(car items)
+                   ,@(mapcar (lambda (element)
+                               (let ((days (* element o-i-m)))
+                                 `[,(format "Span %.1f days" days)
+                                   (vc-annotate-display-select nil ,days)
+                                   :style toggle :selected
+                                   (eql vc-annotate-display-mode ,days) ]))
+                             vc-annotate-menu-elements)
+                   . ,(cdr items))))
     ["By Color Map Range" (unless (null vc-annotate-display-mode)
                  (setq vc-annotate-display-mode nil)
                  (vc-annotate-display-select))
      :style toggle :selected (null vc-annotate-display-mode)]
-    ,@(let ((oldest-in-map (vc-annotate-oldest-in-map vc-annotate-color-map)))
-        (mapcar (lambda (element)
-                  (let ((days (* element oldest-in-map)))
-                    `[,(format "Span %.1f days" days)
-                      (vc-annotate-display-select nil ,days)
-                      :style toggle :selected
-                      (eql vc-annotate-display-mode ,days) ]))
-                vc-annotate-menu-elements))
     ["Span ..."
      (vc-annotate-display-select
       nil (float (string-to-number (read-string "Span how many days? "))))]
@@ -333,7 +337,7 @@ cover the range from the oldest annotation to the newest."
     ["Show changeset diff of revision at line"
      vc-annotate-show-changeset-diff-revision-at-line
      :enable
-     (eq 'repository (vc-call-backend ,vc-annotate-backend 'revision-granularity))
+     (eq 'repository (vc-call-backend vc-annotate-backend 'revision-granularity))
      :help "Visit the diff of the revision at line from its previous revision"]
     ["Visit revision at line" vc-annotate-find-revision-at-line
      :help "Visit the revision identified in the current line"]))
@@ -365,7 +369,7 @@ use; you may override this using the second optional arg MODE."
 (defvar vc-sentinel-movepoint)
 
 ;;;###autoload
-(defun vc-annotate (file rev &optional display-mode buf move-point-to vc-bk)
+(defun vc-annotate (file rev &optional display-mode buf move-point-to backend)
   "Display the edit history of the current FILE using colors.
 
 This command creates a buffer that shows, for each line of the current
@@ -386,7 +390,7 @@ age, and everything that is older than that is shown in blue.
 
 If MOVE-POINT-TO is given, move the point to that line.
 
-If VC-BK is given used that VC backend.
+If BACKEND is given, use that VC backend.
 
 Customization variables:
 
@@ -398,21 +402,39 @@ mode-specific menu.  `vc-annotate-color-map' and
 should be applied to the background or to the foreground."
   (interactive
    (save-current-buffer
-     (vc-ensure-vc-buffer)
-     (list buffer-file-name
-	   (let ((def (vc-working-revision buffer-file-name)))
-	     (if (null current-prefix-arg) def
-	       (vc-read-revision
-		(format "Annotate from revision (default %s): " def)
-		(list buffer-file-name) nil def)))
-	   (if (null current-prefix-arg)
-	       vc-annotate-display-mode
-	     (float (string-to-number
-		     (read-string "Annotate span days (default 20): "
-				  nil nil "20")))))))
-  (vc-ensure-vc-buffer)
+     (let ((name (if (length= (cadr vc-buffer-overriding-fileset) 1)
+                     (caadr vc-buffer-overriding-fileset)
+                   (vc-ensure-vc-buffer)
+                   buffer-file-name)))
+       (list name
+	     (let ((def (or vc-buffer-revision
+                            (funcall (if vc-annotate-use-short-revision
+                                         #'vc-short-revision
+                                       #'vc-working-revision)
+                                     name))))
+	       (if (null current-prefix-arg) def
+	         (vc-read-revision
+		  (format-prompt "Annotate from revision" def)
+		  (list name) nil def)))
+	     (if (null current-prefix-arg)
+	         vc-annotate-display-mode
+	       (float (string-to-number
+		       (read-string (format-prompt "Annotate span days" 20)
+				    nil nil "20"))))))))
   (setq vc-annotate-display-mode display-mode) ;Not sure why.  --Stef
-  (let* ((temp-buffer-name (format "*Annotate %s (rev %s)*" (buffer-name) rev))
+  (let* ((backend (or backend
+                      (car vc-buffer-overriding-fileset)
+                      (vc-backend file)))
+         (file-buffer (get-file-buffer file))
+         (temp-buffer-name
+          (format "*Annotate %s (rev %s)*"
+                  (if file-buffer
+                      (buffer-name file-buffer)
+                    ;; Try to avoid ambiguity.
+                    (file-relative-name file
+                                        (vc-call-backend backend 'root
+                                                         default-directory)))
+                  rev))
          (temp-buffer-show-function 'vc-annotate-display-select)
          ;; If BUF is specified, we presume the caller maintains current line,
          ;; so we don't need to do it here.  This implementation may give
@@ -429,9 +451,8 @@ should be applied to the background or to the foreground."
 		(rename-buffer temp-buffer-name t)
 		;; In case it had to be uniquified.
 		(setq temp-buffer-name (buffer-name))))
-    (with-output-to-temp-buffer temp-buffer-name
-      (let ((backend (or vc-bk (vc-backend file)))
-	    (coding-system-for-read buffer-file-coding-system))
+    (let ((coding-system-for-read buffer-file-coding-system))
+      (with-output-to-temp-buffer temp-buffer-name
         ;; For a VC backend running on DOS/Windows, it's normal to
         ;; produce CRLF EOLs even if the original file has Unix EOLs,
         ;; which will show ^M characters in the Annotate buffer.  (One
@@ -449,23 +470,23 @@ should be applied to the background or to the foreground."
         (with-current-buffer temp-buffer-name
           (unless (equal major-mode 'vc-annotate-mode)
             (vc-annotate-mode))
-          (set (make-local-variable 'vc-annotate-backend) backend)
-          (set (make-local-variable 'vc-annotate-parent-file) file)
-          (set (make-local-variable 'vc-annotate-parent-rev) rev)
-          (set (make-local-variable 'vc-annotate-parent-display-mode)
-               display-mode))))
+          (setq-local vc-annotate-backend backend)
+          (setq-local vc-buffer-overriding-fileset `(,backend (,file)))
+          (setq-local vc-buffer-revision rev)
+          (setq-local vc-annotate-parent-display-mode display-mode)
+          (kill-local-variable 'revert-buffer-function))))
 
     (with-current-buffer temp-buffer-name
       (vc-run-delayed
-       ;; Ideally, we'd rather not move point if the user has already
-       ;; moved it elsewhere, but really point here is not the position
-       ;; of the user's cursor :-(
-       (when current-line           ;(and (bobp))
-         (goto-char (point-min))
-         (forward-line (1- current-line))
-         (setq vc-sentinel-movepoint (point)))
-       (unless (active-minibuffer-window)
-         (message "Annotating... done"))))))
+        ;; Ideally, we'd rather not move point if the user has already
+        ;; moved it elsewhere, but really point here is not the position
+        ;; of the user's cursor :-(
+        (when current-line              ;(and (bobp))
+          (goto-char (point-min))
+          (forward-line (1- current-line))
+          (setq vc-sentinel-movepoint (point)))
+        (unless (active-minibuffer-window)
+          (message "Annotating... done"))))))
 
 (defun vc-annotate-prev-revision (prefix)
   "Visit the annotation of the revision previous to this one.
@@ -488,8 +509,8 @@ revisions after."
   (interactive)
   (if (not (equal major-mode 'vc-annotate-mode))
       (message "Cannot be invoked outside of a vc annotate buffer")
-    (let ((warp-rev (vc-working-revision vc-annotate-parent-file)))
-      (if (equal warp-rev vc-annotate-parent-rev)
+    (let ((warp-rev (vc-working-revision (caadr vc-buffer-overriding-fileset))))
+      (if (equal warp-rev vc-buffer-revision)
 	  (message "Already at revision %s" warp-rev)
 	(vc-annotate-warp-revision warp-rev)))))
 
@@ -501,7 +522,7 @@ Return a cons (REV . FILENAME)."
 			      'annotate-extract-revision-at-line)))
     (if (or (null rev) (consp rev))
 	rev
-      (cons rev vc-annotate-parent-file))))
+      (cons rev (caadr vc-buffer-overriding-fileset)))))
 
 (defun vc-annotate-revision-at-line ()
   "Visit the annotation of the revision identified in the current line."
@@ -511,8 +532,8 @@ Return a cons (REV . FILENAME)."
     (let ((rev-at-line (vc-annotate-extract-revision-at-line)))
       (if (not rev-at-line)
 	  (message "Cannot extract revision number from the current line")
-	(if (and (equal (car rev-at-line) vc-annotate-parent-rev)
-		 (string= (cdr rev-at-line) vc-annotate-parent-file))
+	(if (and (equal (car rev-at-line) vc-buffer-revision)
+		 (string= (cdr rev-at-line) (caadr vc-buffer-overriding-fileset)))
 	    (message "Already at revision %s" rev-at-line)
 	  (vc-annotate-warp-revision (car rev-at-line) (cdr rev-at-line)))))))
 
@@ -539,12 +560,16 @@ Return a cons (REV . FILENAME)."
       (if (not rev-at-line)
 	  (message "Cannot extract revision number from the current line")
 	(setq prev-rev
-	      (vc-call-backend vc-annotate-backend 'previous-revision
-                               fname rev))
-	(vc-annotate-warp-revision prev-rev fname)))))
+              (let ((vc-use-short-revision vc-annotate-use-short-revision))
+                (vc-call-backend vc-annotate-backend 'previous-revision
+                                 fname rev)))
+	(if (not prev-rev)
+            (message "No previous revisions")
+          (vc-annotate-warp-revision prev-rev fname))))))
 
 (defvar log-view-vc-backend)
 (defvar log-view-vc-fileset)
+(defvar vc-git-print-log-follow)
 
 (defun vc-annotate-show-log-revision-at-line ()
   "Visit the log of the revision at line.
@@ -559,6 +584,8 @@ the file in question, search for the log entry required and move point."
 	  (message "Cannot extract revision number from the current line")
 	(let ((backend vc-annotate-backend)
 	      (log-buf (get-buffer "*vc-change-log*"))
+              ;; No need to follow renames: we specify the historical file name.
+              vc-git-print-log-follow
 	      pos)
 	  (if (and
 	       log-buf
@@ -580,6 +607,7 @@ the file in question, search for the log entry required and move point."
 	     (car rev-at-line) t 1)))))))
 
 (defun vc-annotate-show-diff-revision-at-line-internal (filediff)
+  (defvar vc-allow-async-diff)
   (if (not (derived-mode-p 'vc-annotate-mode))
       (message "Cannot be invoked outside of a vc annotate buffer")
     (let* ((rev-at-line (vc-annotate-extract-revision-at-line))
@@ -589,10 +617,11 @@ the file in question, search for the log entry required and move point."
       (if (not rev-at-line)
 	  (message "Cannot extract revision number from the current line")
 	(setq prev-rev
-	      (vc-call-backend vc-annotate-backend 'previous-revision
-                               (if filediff fname nil) rev))
+              (let ((vc-use-short-revision vc-annotate-use-short-revision))
+                (vc-call-backend vc-annotate-backend 'previous-revision
+                                 (if filediff fname nil) rev)))
 	(vc-diff-internal
-         t
+         vc-allow-async-diff
          ;; The value passed here should follow what
          ;; `vc-deduce-fileset' returns.
          (list vc-annotate-backend
@@ -607,7 +636,8 @@ the file in question, search for the log entry required and move point."
   (vc-annotate-show-diff-revision-at-line-internal t))
 
 (defun vc-annotate-show-changeset-diff-revision-at-line ()
-  "Visit the diff of the revision at line from its previous revision for all files in the changeset."
+  "Show the diffs of revision at current line relative to previous revision.
+This is done for all files in changeset."
   (interactive)
   (when (eq 'file (vc-call-backend vc-annotate-backend 'revision-granularity))
     (error "The %s backend does not support changeset diffs" vc-annotate-backend))
@@ -632,27 +662,48 @@ describes a revision number, so warp to that revision."
 	   (newrev nil))
       (cond
        ((and (integerp revspec) (> revspec 0))
-	(setq newrev vc-annotate-parent-rev)
-	(while (and (> revspec 0) newrev)
-          (setq newrev (vc-call-backend vc-annotate-backend 'next-revision
-                                        (or file vc-annotate-parent-file) newrev))
-          (setq revspec (1- revspec)))
+	(setq newrev vc-buffer-revision)
+        (let ((vc-use-short-revision vc-annotate-use-short-revision))
+	  (while (and (> revspec 0) newrev)
+            (setq newrev
+                  (vc-call-backend vc-annotate-backend 'next-revision
+                                   (or file
+                                       (caadr vc-buffer-overriding-fileset))
+                                   newrev))
+            (setq file (vc-annotate--file-name-change
+                        (or file
+                            (caadr vc-buffer-overriding-fileset))
+                        newrev
+                        vc-annotate-backend))
+            (setq revspec (1- revspec))))
 	(unless newrev
 	  (message "Cannot increment %d revisions from revision %s"
-		   revspeccopy vc-annotate-parent-rev)))
+		   revspeccopy vc-buffer-revision)))
        ((and (integerp revspec) (< revspec 0))
-	(setq newrev vc-annotate-parent-rev)
-	(while (and (< revspec 0) newrev)
-          (setq newrev (vc-call-backend vc-annotate-backend 'previous-revision
-                                        (or file vc-annotate-parent-file) newrev))
-          (setq revspec (1+ revspec)))
+	(setq newrev vc-buffer-revision)
+        (let ((vc-use-short-revision vc-annotate-use-short-revision))
+	  (while (and (< revspec 0) newrev)
+            (setq file (vc-annotate--file-name-change
+                        (or file
+                            (caadr vc-buffer-overriding-fileset))
+                        newrev
+                        vc-annotate-backend
+                        'backward))
+            (setq newrev
+                  (vc-call-backend vc-annotate-backend 'previous-revision
+                                   (or file
+                                       (caadr vc-buffer-overriding-fileset))
+                                   newrev))
+            (setq revspec (1+ revspec))))
 	(unless newrev
 	  (message "Cannot decrement %d revisions from revision %s"
-		   (- 0 revspeccopy) vc-annotate-parent-rev)))
+		   (- 0 revspeccopy) vc-buffer-revision)))
        ((stringp revspec) (setq newrev revspec))
        (t (error "Invalid argument to vc-annotate-warp-revision")))
       (when newrev
-	(vc-annotate (or file vc-annotate-parent-file) newrev
+	(vc-annotate (or file
+                         (caadr vc-buffer-overriding-fileset))
+                     newrev
                      vc-annotate-parent-display-mode
                      buf
 		     ;; Pass the current line so that vc-annotate will
@@ -700,10 +751,10 @@ or OFFSET if present."
 RATIO is the expansion that should be applied to `vc-annotate-color-map'.
 The annotations are relative to the current time, unless overridden by OFFSET."
   (when (/= ratio 1.0)
-    (set (make-local-variable 'vc-annotate-color-map)
+    (setq-local vc-annotate-color-map
 	 (mapcar (lambda (elem) (cons (* (car elem) ratio) (cdr elem)))
 		 vc-annotate-color-map)))
-  (set (make-local-variable 'vc-annotate-offset) offset)
+  (setq-local vc-annotate-offset offset)
   (font-lock-mode 1))
 
 (defun vc-annotate-lines (limit)
@@ -715,22 +766,24 @@ The annotations are relative to the current time, unless overridden by OFFSET."
         (let* ((color (or (vc-annotate-compcar difference vc-annotate-color-map)
                           (cons nil vc-annotate-very-old-color)))
                ;; substring from index 1 to remove any leading `#' in the name
-               (face-name (concat "vc-annotate-face-"
-                                  (if (string-equal
-                                       (substring (cdr color) 0 1) "#")
-                                      (substring (cdr color) 1)
-                                    (cdr color))))
+               (face (intern (concat "vc-annotate-face-"
+                                     (if (string-equal
+                                          (substring (cdr color) 0 1) "#")
+                                         (substring (cdr color) 1)
+                                       (cdr color)))))
                ;; Make the face if not done.
-               (face (or (intern-soft face-name)
-                         (let ((tmp-face (make-face (intern face-name))))
-                           (cond
-                            (vc-annotate-background-mode
-                             (set-face-background tmp-face (cdr color)))
-                            (t
-                             (set-face-foreground tmp-face (cdr color))
-                             (when vc-annotate-background
-			       (set-face-background tmp-face vc-annotate-background))))
-                           tmp-face))))	; Return the face
+               (face (if (facep face)
+                         face
+                       (make-face face)
+                       (set-face-extend face t)
+                       (cond
+                        (vc-annotate-background-mode
+                         (set-face-background face (cdr color)))
+                        (t
+                         (set-face-foreground face (cdr color))
+                         (when vc-annotate-background
+			   (set-face-background face vc-annotate-background))))
+                       face)))
           (put-text-property start end 'face face)))))
   ;; Pretend to font-lock there were no matches.
   nil)
@@ -743,13 +796,13 @@ The annotations are relative to the current time, unless overridden by OFFSET."
   (let ((line (save-restriction
 		(widen)
 		(line-number-at-pos)))
-	(rev vc-annotate-parent-rev))
+	(rev vc-buffer-revision)
+        (file (caadr vc-buffer-overriding-fileset)))
     (pop-to-buffer
      (or (and (buffer-live-p vc-parent-buffer)
 	      vc-parent-buffer)
-	 (and (file-exists-p vc-annotate-parent-file)
-	      (find-file-noselect vc-annotate-parent-file))
-	 (error "File not found: %s" vc-annotate-parent-file)))
+	 (and (file-exists-p file) (find-file-noselect file))
+	 (error "File not found: %s" file)))
     (save-restriction
       (widen)
       (goto-char (point-min))
@@ -764,6 +817,21 @@ The annotations are relative to the current time, unless overridden by OFFSET."
      ((not (equal rev (vc-working-revision buffer-file-name)))
       (message "Annotations were for revision %s; line numbers may be incorrect"
 	       rev)))))
+
+(defun vc-annotate--file-name-change (file rev backend &optional backward)
+  "Return the name of FILE at revision REV using BACKEND.
+If the file name has changed in the given revision, return the new name;
+otherwise, return FILE unchanged.
+If BACKWARD, return the name for FILE before REV."
+  (if (vc-find-backend-function backend 'file-name-changes)
+      (or
+       (if backward
+           (car (rassoc file
+                        (vc-call-backend backend 'file-name-changes rev)))
+         (cdr (assoc file
+                     (vc-call-backend backend 'file-name-changes rev))))
+       file)
+    file))
 
 (provide 'vc-annotate)
 

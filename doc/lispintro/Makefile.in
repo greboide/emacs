@@ -1,6 +1,6 @@
 ### @configure_input@
 
-# Copyright (C) 1994-1999, 2001-2018 Free Software Foundation, Inc.
+# Copyright (C) 1994-1999, 2001-2026 Free Software Foundation, Inc.
 
 # This file is part of GNU Emacs.
 
@@ -20,6 +20,7 @@
 SHELL = @SHELL@
 
 srcdir = @srcdir@
+top_builddir = @top_builddir@
 
 buildinfodir = $(srcdir)/../../info
 # Directory with the (customized) texinfo.tex file.
@@ -55,20 +56,14 @@ TEXI2DVI = texi2dvi
 TEXI2PDF = texi2pdf
 DVIPS = dvips
 
-# 'make' verbosity.
-AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
-
-AM_V_GEN = $(am__v_GEN_@AM_V@)
-am__v_GEN_ = $(am__v_GEN_@AM_DEFAULT_V@)
-am__v_GEN_0 = @echo "  GEN     " $@;
-am__v_GEN_1 =
+-include ${top_builddir}/src/verbose.mk
 
 ENVADD = \
   $(AM_V_GEN)TEXINPUTS="$(srcdir):$(texinfodir):$(emacsdir):$(TEXINPUTS)" \
   MAKEINFO="$(MAKEINFO) $(MAKEINFO_OPTS)"
 
 DVI_TARGETS = emacs-lisp-intro.dvi
-HTML_TARGETS = emacs-lisp-intro.html
+HTML_TARGETS = eintr.html
 PDF_TARGETS = emacs-lisp-intro.pdf
 PS_TARGETS = emacs-lisp-intro.ps
 
@@ -89,9 +84,37 @@ ps: $(PS_TARGETS)
 ${buildinfodir}:
 	${MKDIR_P} $@
 
+auxfiles = \
+	${buildinfodir}/cons-1.png \
+	${buildinfodir}/cons-1.txt \
+	${buildinfodir}/cons-2.png \
+	${buildinfodir}/cons-2.txt \
+	${buildinfodir}/cons-2a.png \
+	${buildinfodir}/cons-2a.txt \
+	${buildinfodir}/cons-3.png \
+	${buildinfodir}/cons-3.txt \
+	${buildinfodir}/cons-4.png \
+	${buildinfodir}/cons-4.txt \
+	${buildinfodir}/cons-5.png \
+	${buildinfodir}/cons-5.txt \
+	${buildinfodir}/drawers.png \
+	${buildinfodir}/drawers.txt \
+	${buildinfodir}/lambda-1.png \
+	${buildinfodir}/lambda-1.txt \
+	${buildinfodir}/lambda-2.png \
+	${buildinfodir}/lambda-2.txt \
+	${buildinfodir}/lambda-3.png \
+	${buildinfodir}/lambda-3.txt
+
+${buildinfodir}/%.txt: ${srcdir}/%.txt | ${buildinfodir}
+	cp $< $@
+
+${buildinfodir}/%.png: ${srcdir}/%.png | ${buildinfodir}
+	cp $< $@
+
 # The file name eintr must fit within 5 characters, to allow for
 # -NN extensions to fit into DOS 8+3 limits without clashing.
-${buildinfodir}/eintr.info: ${srcs} | ${buildinfodir}
+${buildinfodir}/eintr.info: ${srcs} ${auxfiles} | ${buildinfodir}
 	$(AM_V_GEN)$(MAKEINFO) $(MAKEINFO_OPTS) $(INFO_OPTS) -o $@ $<
 
 emacs-lisp-intro.dvi: ${srcs}
@@ -100,7 +123,7 @@ emacs-lisp-intro.dvi: ${srcs}
 emacs-lisp-intro.pdf: ${srcs}
 	$(ENVADD) $(TEXI2PDF) $<
 
-emacs-lisp-intro.html: ${srcs}
+eintr.html: ${srcs}
 	$(AM_V_GEN)$(MAKEINFO) $(MAKEINFO_OPTS) $(HTML_OPTS) -o $@ $<
 
 emacs-lisp-intro.ps: emacs-lisp-intro.dvi
@@ -109,8 +132,8 @@ emacs-lisp-intro.ps: emacs-lisp-intro.dvi
 .PHONY: mostlyclean clean distclean bootstrap-clean maintainer-clean infoclean
 
 mostlyclean:
-	rm -f *.aux *.log *.toc *.cp *.cps *.fn *.fns *.ky *.kys \
-	  *.op *.ops *.pg *.pgs *.tp *.tps *.vr *.vrs
+	rm -f ./*.aux ./*.log ./*.toc ./*.cp ./*.cps ./*.fn ./*.fns ./*.ky ./*.kys \
+	  ./*.op ./*.ops ./*.pg ./*.pgs ./*.tp ./*.tps ./*.vr ./*.vrs
 
 clean: mostlyclean
 	rm -f $(DVI_TARGETS) $(HTML_TARGETS) $(PDF_TARGETS) $(PS_TARGETS)
@@ -122,8 +145,10 @@ infoclean:
 	rm -f \
 	  $(buildinfodir)/eintr.info \
 	  $(buildinfodir)/eintr.info-[1-9]
+	rm -f $(auxfiles)
 
 bootstrap-clean maintainer-clean: distclean infoclean
+	rm -f TAGS
 
 .PHONY: install-dvi install-html install-pdf install-ps install-doc
 
@@ -145,7 +170,7 @@ install-ps: ps
 	  ${GZIP_PROG} -9n "$(DESTDIR)$(psdir)/$${file}"; \
 	done
 
-## Top-level Makefile installs the info pages.
+## Top-level Makefile installs the Info manuals.
 install-doc: install-dvi install-html install-pdf install-ps
 
 
@@ -171,5 +196,20 @@ uninstall-pdf:
 
 uninstall-doc: uninstall-dvi uninstall-html uninstall-pdf uninstall-ps
 
+ETAGS = ../../lib-src/etags${EXEEXT}
+
+${ETAGS}: FORCE
+	$(MAKE) -C $(dir $@) $(notdir $@)
+
+texifiles = $(wildcard ${srcdir}/*.texi)
+
+TAGS: ${ETAGS} $(texifiles)
+	$(AM_V_GEN)${ETAGS} $(texifiles)
+
+tags: TAGS
+.PHONY: tags
+
+FORCE:
+.PHONY: FORCE
 
 ### Makefile ends here

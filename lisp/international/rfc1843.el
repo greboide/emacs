@@ -1,6 +1,6 @@
-;;; rfc1843.el --- HZ (rfc1843) decoding  -*- lexical-binding:t -*-
+;;; rfc1843.el --- HZ (RFC 1843) decoding  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1998-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1998-2026 Free Software Foundation, Inc.
 
 ;; Author: Shenghuo Zhu <zsh@cs.rochester.edu>
 ;; Keywords: news HZ HZ+ mail i18n
@@ -22,12 +22,13 @@
 
 ;;; Commentary:
 
+;; HZ (RFC 1843) decoding.  HZ is a data format for exchanging files
+;; of arbitrarily mixed Chinese and ASCII characters.
+;;
 ;; Test:
 ;; (rfc1843-decode-string  "~{<:Ky2;S{#,NpJ)l6HK!#~}")
 
 ;;; Code:
-
-(eval-when-compile (require 'cl-lib))
 
 (defvar rfc1843-word-regexp
   "~\\({\\([\041-\167][\041-\176]\\| \\)+\\)\\(~}\\|$\\)")
@@ -60,7 +61,7 @@ e-mail transmission, news posting, etc."
 
 (defcustom rfc1843-newsgroups-regexp "chinese\\|hz"
   "Regexp of newsgroups in which might be HZ encoded."
-  :type 'string
+  :type 'regexp
   :group 'mime)
 
 (defun rfc1843-decode-region (from to)
@@ -113,15 +114,15 @@ e-mail transmission, news posting, etc."
   "Decode HZ WORD and return it."
   (let ((i -1) (s (substring word 0)) v)
     (if (or (not firstc) (eq firstc ?{))
-	(while (< (cl-incf i) (length s))
+        (while (< (incf i) (length s))
 	  (if (eq (setq v (aref s i)) ? ) nil
 	    (aset s i (+ 128 v))))
-      (while (< (cl-incf i) (length s))
+      (while (< (incf i) (length s))
 	(if (eq (setq v (aref s i)) ? ) nil
 	  (setq v (+ (* 94 v) (aref s (1+ i)) -3135))
 	  (aset s i (+ (/ v 157) (if (eq firstc ?<) 201 161)))
 	  (setq v (% v 157))
-	  (aset s (cl-incf i) (+ v (if (< v 63) 64 98))))))
+          (aset s (incf i) (+ v (if (< v 63) 64 98))))))
     s))
 
 (provide 'rfc1843)

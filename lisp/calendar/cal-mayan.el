@@ -1,11 +1,11 @@
-;;; cal-mayan.el --- calendar functions for the Mayan calendars
+;;; cal-mayan.el --- calendar functions for the Mayan calendars  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1992-1993, 1995, 1997, 2001-2018 Free Software
+;; Copyright (C) 1992-1993, 1995, 1997, 2001-2026 Free Software
 ;; Foundation, Inc.
 
 ;; Author: Stewart M. Clamen <clamen@cs.cmu.edu>
 ;;         Edward M. Reingold <reingold@cs.uiuc.edu>
-;; Maintainer: Glenn Morris <rgm@gnu.org>
+;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: calendar
 ;; Human-Keywords: Mayan calendar, Maya, calendar, diary
 ;; Package: calendar
@@ -70,7 +70,7 @@ but some use 1137140.  Using 1232041 gives you Spinden's correlation; using
 
 (defun calendar-mayan-long-count-to-string (mayan-long-count)
   "Convert MAYAN-LONG-COUNT into traditional written form."
-  (apply 'format (cons "%s.%s.%s.%s.%s" mayan-long-count)))
+  (apply #'format (cons "%s.%s.%s.%s.%s" mayan-long-count)))
 
 (defun calendar-mayan-string-from-long-count (str)
   "Given STR, a string of format \"%d.%d.%d.%d.%d\", return list of numbers."
@@ -135,15 +135,16 @@ but some use 1137140.  Using 1232041 gives you Spinden's correlation; using
 (defun calendar-mayan-read-haab-date ()
   "Prompt for a Mayan haab date."
   (let* ((completion-ignore-case t)
-         (haab-day (calendar-read
-                    "Haab kin (0-19): "
-                    (lambda (x) (and (>= x 0) (< x 20)))))
+         (haab-day (calendar-read-sexp
+                    "Haab kin (0-19)"
+                    (lambda (x) (and (>= x 0) (< x 20)))
+                    0))
          (haab-month-list (append calendar-mayan-haab-month-name-array
                                   (and (< haab-day 5) '("Uayeb"))))
          (haab-month (cdr
                       (assoc-string
                        (completing-read "Haab uinal: "
-                                        (mapcar 'list haab-month-list)
+                                        haab-month-list
                                         nil t)
                        (calendar-make-alist haab-month-list 1) t))))
     (cons haab-day haab-month)))
@@ -151,14 +152,15 @@ but some use 1137140.  Using 1232041 gives you Spinden's correlation; using
 (defun calendar-mayan-read-tzolkin-date ()
   "Prompt for a Mayan tzolkin date."
   (let* ((completion-ignore-case t)
-         (tzolkin-count (calendar-read
-                         "Tzolkin kin (1-13): "
-                         (lambda (x) (and (> x 0) (< x 14)))))
+         (tzolkin-count (calendar-read-sexp
+                         "Tzolkin kin (1-13)"
+                         (lambda (x) (and (> x 0) (< x 14)))
+                         1))
          (tzolkin-name-list (append calendar-mayan-tzolkin-names-array nil))
          (tzolkin-name (cdr
                         (assoc-string
                          (completing-read "Tzolkin uinal: "
-                                          (mapcar 'list tzolkin-name-list)
+                                          tzolkin-name-list
                                           nil t)
                          (calendar-make-alist tzolkin-name-list 1) t))))
     (cons tzolkin-count tzolkin-name)))
@@ -314,7 +316,7 @@ Echo Mayan date unless NOECHO is non-nil."
 
 (defun calendar-mayan-long-count-to-absolute (c)
   "Compute the absolute date corresponding to the Mayan Long Count C.
-Long count is a list (baktun katun tun uinal kin)"
+Long count is a list (baktun katun tun uinal kin)."
   (+ (* (nth 0 c) 144000)               ; baktun
      (* (nth 1 c) 7200)                 ; katun
      (* (nth 2 c) 360)                  ; tun
@@ -353,9 +355,13 @@ Echo Mayan date unless NOECHO is non-nil."
     (calendar-mayan-long-count-to-absolute date)))
   (or noecho (calendar-mayan-print-date)))
 
-(defvar date)
+;; The function below is designed to be used in sexp diary entries,
+;; and may be present in users' diary files, so suppress the warning
+;; about this prefix-less dynamic variable.  It's called from
+;; `diary-list-sexp-entries', which binds the variable.
+(with-suppressed-warnings ((lexical date))
+  (defvar date))
 
-;; To be called from diary-list-sexp-entries, where DATE is bound.
 ;;;###diary-autoload
 (defun diary-mayan-date ()
   "Show the Mayan long count, haab, and tzolkin dates as a diary entry."

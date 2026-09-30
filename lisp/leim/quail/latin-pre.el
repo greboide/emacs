@@ -1,6 +1,6 @@
-;;; latin-pre.el --- Quail packages for inputting various European characters  -*-coding: utf-8;-*-
+;;; latin-pre.el --- Quail packages for inputting various European characters  -*-coding: utf-8; lexical-binding: t -*-
 
-;; Copyright (C) 1997-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1997-2026 Free Software Foundation, Inc.
 ;; Copyright (C) 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,
 ;;   2006, 2007, 2008, 2009, 2010, 2011
 ;;   National Institute of Advanced Industrial Science and Technology (AIST)
@@ -32,7 +32,6 @@
 ;;
 ;; polish-slash:
 ;; Author: Włodek Bzyl <matwb@univ.gda.pl>
-;; Maintainer: Włodek Bzyl <matwb@univ.gda.pl>
 ;;
 ;; latin-[89]-prefix: Dave Love <fx@gnu.org>
 ;;
@@ -320,7 +319,7 @@ Key translation rules are:
 
     effect   | prefix | examples
  ------------+--------+------------------
-    tilde    |   ~    | ~a -> ă
+    breve    |   ~    | ~a -> ă
   circumflex |   ^    | ^a -> â, ^i -> î
    cedilla   |   ,    | ,s -> ş, ,t -> ţ
    ~         |   ~    | ~~ -> ~
@@ -342,11 +341,11 @@ Key translation rules are:
 
     effect   | prefix | examples
  ------------+--------+------------------
-    tilde    |   \"    | \"a -> â
-  circumflex |   \\='    | \\='a -> â, \\='i -> î
-   cedilla   |   \\='    | \\='s -> ş, \\='t -> ţ
-   \\='         |   \\='    | \\='\\=' -> \\='
-   \"         |   \"    | \"\" -> \"
+    breve    |   \\='    | \\='a -> ă
+ circumflex  |  \" \\='   | \"a -> â  \\='i -> î
+   cedilla   |   \\='    | \\='s -> ş  \\='t -> ţ
+      \\='      |   \\='    | \\='\\=' -> \\='
+      \"      |   \"    | \"\" -> \"
 " nil t nil nil nil nil nil nil nil nil t)
 
 (quail-define-rules
@@ -498,7 +497,15 @@ Key translation rules are:
    cedilla   |   \\=`    | \\=`c -> ç   \\=`e -> ?ę
     misc     | \\=' \\=` ~  | \\='d -> đ   \\=`l -> ł   \\=`z -> ż   ~o -> ő   ~u -> ű
    symbol    |   ~    | \\=`. -> ˙   ~~ -> ˘   ~. -> ?¸
-" nil t nil nil nil nil nil nil nil nil t)
+"
+ '(("\C-?" . quail-delete-last-char)
+   (">" . quail-next-translation)
+   ("\C-f" . quail-next-translation)
+   ([right] . quail-next-translation)
+   ("<" . quail-prev-translation)
+   ("\C-b" . quail-prev-translation)
+   ([left] . quail-prev-translation))
+ t nil nil nil nil nil nil nil nil t)
 
 (quail-define-rules
  ("'A" ?Á)
@@ -533,15 +540,15 @@ Key translation rules are:
  ("`C" ?Ç)
  ("`E" ?Ę)
  ("`L" ?Ł)
- ("`S" ?Ş)
- ("`T" ?Ţ)
+ ("`S" "ŞȘ")
+ ("`T" "ŢȚ") ; the second variant is for Romanian
  ("`Z" ?Ż)
  ("`a" ?ą)
  ("`l" ?ł)
  ("`c" ?ç)
  ("`e" ?ę)
- ("`s" ?ş)
- ("`t" ?ţ)
+ ("`s" "şș")
+ ("`t" "ţț") ; the second variant is for Romanian
  ("`z" ?ż)
  ("``" ?Ş)
  ("`." ?˙)
@@ -606,7 +613,7 @@ Key translation rules are:
   circumflex |   ^    | ^a -> â
   diaeresis  |   \"    | \"a -> ä   \"\" -> ¨
    cedilla   |   ~    | ~c -> ç   ~s -> ş   ~~ -> ¸
-  dot above  |   / .  | /g -> ġ   .o -> ġ
+  dot above  |   / .  | /g -> ġ   .g -> ġ
     misc     | \" ~ /  | \"s -> ß   ~g -> ğ   ~u -> ŭ   /h -> ħ   /i -> ı
    symbol    |   ~    | ~\\=` -> ˘   /# -> £   /$ -> ¤   // -> °
 " nil t nil nil nil nil nil nil nil nil t)
@@ -782,9 +789,9 @@ and Silesian (both Steuer and Ślabikŏrzowy szrajbōnek) scripts."
  ("'Z" ?Ź)
  (".z" ?ż)
  (".Z" ?Ż)
- ;; Explicit input of prefix characters. Normally, to input a prefix
- ;; character itself, one needs to press <Tab>. Definitions below
- ;; allow to input those characters by entering them twice.
+ ;; Explicit input of prefix characters.  Normally, to input a prefix
+ ;; character itself, one needs to press <Tab>.  Definitions below
+ ;; allow inputting those characters by entering them twice.
  ("//" ?/)
  ("\\\\" ?\\)
  ("~~" ?~)
@@ -1089,30 +1096,58 @@ of characters from a single Latin-N charset.
 
     effect   | prefix | examples
  ------------+--------+----------
-    acute    |   \\='    | \\='a -> á, \\='\\=' -> ´
+    acute    |   \\='    | \\='a -> á  \\='\\=' -> ´
     grave    |   \\=`    | \\=`a -> à
   circumflex |   ^    | ^a -> â
   diaeresis  |   \"    | \"a -> ä  \"\" -> ¨
     tilde    |   ~    | ~a -> ã
-   cedilla   |   ~    | ~c -> ç
+   cedilla   |  , ~   | ,c -> ç  ~c -> ç
+    caron    |   ~    | ~c -> č  ~g -> ğ
     breve    |   ~    | ~a -> ă
-    caron    |   ~    | ~c -> č
-  dot above  | ~ / .  | ~o -> ġ   /o -> ġ   .o -> ġ
+    macron   |   -    | -a -> ā  -/e -> ǣ  -- -> ¯
+  dot above  |   / .  | /g -> ġ   .g -> ġ
     misc     | \" ~ /  | \"s -> ß  ~d -> ð  ~t -> þ  /a -> å  /e -> æ  /o -> ø
+             |   [    | [\\=' -> ‘  [\" -> “
+             |   ]    | ]\\=' -> ’  ]\" -> ”
+             |   ,    | ,\\=' -> ‚  ,\" -> „
    symbol    |   ~    | ~> -> »  ~< -> «  ~! -> ¡  ~? -> ¿  ~~ -> ¸
    symbol    |  _ /   | _o -> º  _a -> ª  // -> °  /\\ -> ×  _y -> ¥
-   symbol    |   ^    | ^r -> ®  ^c -> ©  ^1 -> ¹  ^2 -> ²  ^3 -> ³
+   symbol    |   ^    | ^r -> ®  ^t -> ™  ^c -> ©  ^1 -> ¹  ^2 -> ²  ^3 -> ³
 " nil t nil nil nil nil nil nil nil nil t)
 
 (quail-define-rules
+ ("--" ?¯)
+ ("-A" ?Ā)
+ ("-a" ?ā)
+ ("-E" ?Ē)
+ ("-e" ?ē)
+ ("-/E" ?Ǣ)
+ ("-/e" ?ǣ)
+ ("-G" ?Ḡ)
+ ("-g" ?ḡ)
+ ("-I" ?Ī)
+ ("-i" ?ī)
+ ("-O" ?Ō)
+ ("-o" ?ō)
+ ("-U" ?Ū)
+ ("-u" ?ū)
+ ("-Y" ?Ȳ)
+ ("-y" ?ȳ)
  ("' " ?')
  ("''" ?´)
+ ("['" ?‘)
+ ("]'" ?’)
+ ("[\"" ?“)
+ ("]\"" ?”)
+ (",\"" ?„)
+ (",'" ?‚)
  ("'A" ?Á)
  ("'E" ?É)
  ("'I" ?Í)
  ("'O" ?Ó)
  ("'U" ?Ú)
  ("'W" ?Ẃ)
+ ("'-W" ?Ⱳ)
  ("'Y" ?Ý)
  ("'a" ?á)
  ("'e" ?é)
@@ -1120,6 +1155,7 @@ of characters from a single Latin-N charset.
  ("'o" ?ó)
  ("'u" ?ú)
  ("'w" ?ẃ)
+ ("'-w" ?ⱳ)
  ("'y" ?ý)
  (".B" ?Ḃ)
  (".C" ?Ċ)
@@ -1131,6 +1167,8 @@ of characters from a single Latin-N charset.
  (".P" ?Ṗ)
  (".S" ?Ṡ)
  (".T" ?Ṫ)
+ (".W" ?Ẇ)
+ (".-W" ?Ẉ)
  (".Z" ?Ż)
  (".b" ?ḃ)
  (".c" ?ċ)
@@ -1141,6 +1179,8 @@ of characters from a single Latin-N charset.
  (".p" ?ṗ)
  (".s" ?ṡ)
  (".t" ?ṫ)
+ (".w" ?ẇ)
+ (".-w" ?ẉ)
  (".z" ?ż)
  ("/ " ?/)
  ("/#" ?£)
@@ -1170,6 +1210,7 @@ of characters from a single Latin-N charset.
  ("/i" ?ı)
  ("/o" ?ø)
  ("/o" ?œ)
+ ("/w" ?ẘ)
  ("/z" ?ż)
  ("\" " ?\")
  ("\"A" ?Ä)
@@ -1190,9 +1231,16 @@ of characters from a single Latin-N charset.
  ("\"w" ?ẅ)
  ("\"y" ?ÿ)
  ("^ " ?^)
+ ("^0" ?⁰)
  ("^1" ?¹)
  ("^2" ?²)
  ("^3" ?³)
+ ("^4" ?⁴)
+ ("^5" ?⁵)
+ ("^6" ?⁶)
+ ("^7" ?⁷)
+ ("^8" ?⁸)
+ ("^9" ?⁹)
  ("^A" ?Â)
  ("^C" ?Ĉ)
  ("^E" ?Ê)
@@ -1217,9 +1265,24 @@ of characters from a single Latin-N charset.
  ("^o" ?ô)
  ("^r" ?®)
  ("^s" ?ŝ)
+ ("^t" ?™)
  ("^u" ?û)
  ("^w" ?ŵ)
  ("^y" ?ŷ)
+ ("^+" ?⁺)
+ ("^-" ?⁻)
+ ("_0" ?₀)
+ ("_1" ?₁)
+ ("_2" ?₂)
+ ("_3" ?₃)
+ ("_4" ?₄)
+ ("_5" ?₅)
+ ("_6" ?₆)
+ ("_7" ?₇)
+ ("_8" ?₈)
+ ("_9" ?₉)
+ ("_++" ?₊)
+ ("_-" ?₋)
  ("_+" ?±)
  ("_:" ?÷)
  ("_a" ?ª)
@@ -1248,11 +1311,16 @@ of characters from a single Latin-N charset.
  ("~-" ?­)
  ("~." ?·)
  ("~<" ?\«)
+ ("~~<" ?\‹)
  ("~=" ?¯)
  ("~>" ?\»)
+ ("~~>" ?\›)
  ("~?" ?¿)
  ("~A" ?Ã)
+ ("~A" ?Ă)
  ("~C" ?Ç)
+ ("~C" ?Č)
+ (",C" ?Ç)
  ("~D" ?Ð)
  ("~G" ?Ğ)
  ("~N" ?Ñ)
@@ -1265,13 +1333,15 @@ of characters from a single Latin-N charset.
  ("~Z" ?Ž)
  ("~`" ?˘)
  ("~a" ?ã)
+ ("~a" ?ă)
  ("~c" ?ç)
+ ("~c" ?č)
+ (",c" ?ç)
  ("~d" ?ð)
  ("~e" ?€)
  ("~g" ?ğ)
  ("~n" ?ñ)
  ("~o" ?õ)
- ("~o" ?ġ)
  ("~p" ?¶)
  ("~s" ?§)
  ("~s" ?ş)
@@ -1284,5 +1354,82 @@ of characters from a single Latin-N charset.
  ("~|" ?¦)
  ("~~" ?¸)
 )
+
+;;; Hawaiian prefix input method. It's a small subset of Latin-4
+;;; with the addition of an ʻokina mapping.  Hopefully the ʻokina shows
+;;; correctly on most displays.
+
+;;; This reference is an authoritative guide to Hawaiian orthography:
+;;; https://www2.hawaii.edu/~strauch/tips/HawaiianOrthography.html
+
+;;; Initial coding 2018-09-08 Bob Newell, Honolulu, Hawaiʻi
+;;; Comments to bobnewell@bobnewell.net
+
+(quail-define-package
+ "hawaiian-prefix" "Hawaiian Prefix" "H>" t
+ "Hawaiian characters input method with postfix modifiers
+
+             | prefix | examples
+ ------------+---------+----------
+  ʻokina     |    \\=`    | \\=` -> ʻ
+  kahakō     |    -    | -a -> ā
+
+Doubling the prefix separates the letter and prefix. --a -> -a
+" nil t nil nil nil nil nil nil nil nil t)
+
+(quail-define-rules
+ ("-A" ?Ā)
+ ("-E" ?Ē)
+ ("~I" ?Ĩ)
+ ("-O" ?Ō)
+ ("-U" ?Ū)
+ ("-a" ?ā)
+ ("-e" ?ē)
+ ("-i" ?ī)
+ ("-o" ?ō)
+ ("-u" ?ū)
+ ("`" ?ʻ)
+
+ ("--A" ["-A"])
+ ("--E" ["-E"])
+ ("--I" ["-I"])
+ ("--O" ["-O"])
+ ("--U" ["-U"])
+ ("--a" ["-a"])
+ ("--e" ["-e"])
+ ("--i" ["-i"])
+ ("--o" ["-o"])
+ ("--u" ["-u"])
+ ("``"  ["`"])
+ )
+
+(quail-define-package
+ "lakota-slo-prefix" "Lakota" "SLO " t
+ "Suggested Lakota Orthography input method with prefix modifier.
+To add stress to a vowel, simply type the single quote ' before the vowel.
+The glottal stop is produced by repeating the ' character.  All other
+characters are bound to a single key.  Mitákuyepi philámayayapi ló."
+nil t nil nil nil nil nil nil nil nil t)
+
+(quail-define-rules
+ ;; accented vowels
+ ("'a" ?á) ("'A" ?Á)
+ ("'e" ?é) ("'E" ?É)
+ ("'i" ?í) ("'I" ?Í)
+ ("'o" ?ó) ("'O" ?Ó)
+ ("'u" ?ú) ("'U" ?Ú)
+
+ ;; consonants with caron
+ ("c" ?č) ("C" ?Č)
+ ("j" ?ȟ) ("J" ?Ȟ)
+ ("q" ?ǧ) ("Q" ?Ǧ)
+ ("x" ?ž) ("X" ?Ž)
+ ("r" ?š) ("R" ?Š)
+
+ ;; velar nasal n
+ ("f" ?ŋ)
+
+ ;; glottal stop
+ ("''" ?’))
 
 ;;; latin-pre.el ends here

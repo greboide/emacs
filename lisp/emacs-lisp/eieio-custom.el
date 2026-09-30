@@ -1,6 +1,6 @@
-;;; eieio-custom.el -- eieio object customization  -*- lexical-binding:t -*-
+;;; eieio-custom.el --- eieio object customization  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1999-2001, 2005, 2007-2018 Free Software Foundation,
+;; Copyright (C) 1999-2001, 2005, 2007-2026 Free Software Foundation,
 ;; Inc.
 
 ;; Author: Eric M. Ludlam <zappo@gnu.org>
@@ -31,16 +31,11 @@
 ;; `:custom'.
 
 (require 'eieio)
+(require 'eieio-base) ;; For `eieio-named's slot.
 (require 'widget)
 (require 'wid-edit)
-(require 'custom)
 
 ;;; Compatibility
-
-;; (eval-and-compile
-;;   (if (featurep 'xemacs)
-;;       (defalias 'eieio-overlay-lists (lambda () (list (extent-list))))
-;;     (defalias 'eieio-overlay-lists 'overlay-lists)))
 
 ;;; Code:
 (defclass eieio-widget-test-class nil
@@ -52,7 +47,7 @@
 	     :documentation "A string for testing custom.
 This is the next line of documentation.")
    (listostuff :initarg :listostuff
-	       :initform ("1" "2" "3")
+	       :initform '("1" "2" "3")
 	       :type list
 	       :custom (repeat (string :tag "Stuff"))
 	       :label "List of Strings"
@@ -81,7 +76,7 @@ of these.")
 				      (((class color)
 					(background light))
 				       (:foreground "blue"))
-				      (t (:italic t)))
+				      (t (:slant italic)))
   "Face used for unpushable variable tags."
   :group 'custom-faces)
 
@@ -317,7 +312,8 @@ Optional argument IGNORE is an extraneous parameter."
                             (car (widget-apply (car chil) :value-inline))))
               (setq chil (cdr chil))))))
     ;; Set any name updates on it.
-    (if name (eieio-object-set-name-string obj name))
+    (when name
+      (setf (slot-value obj 'object-name) name))
     ;; This is the same object we had before.
     obj))
 
@@ -334,11 +330,9 @@ Argument OBJ is the object that has been customized."
 Optional argument GROUP is the sub-group of slots to display."
   (eieio-customize-object obj group))
 
-(defvar eieio-custom-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map widget-keymap)
-    map)
-  "Keymap for EIEIO Custom mode")
+(defvar-keymap eieio-custom-mode-map
+  :doc "Keymap for EIEIO Custom mode."
+  :parent widget-keymap)
 
 (define-derived-mode eieio-custom-mode fundamental-mode "EIEIO Custom"
   "Major mode for customizing EIEIO objects.
@@ -370,8 +364,7 @@ These groups are specified with the `:group' slot flag."
     (widget-insert "\n\n")
     (widget-insert "Edit object " (eieio-object-name obj) "\n\n")
     ;; Create the widget editing the object.
-    (make-local-variable 'eieio-wo)
-    (setq eieio-wo (eieio-custom-widget-insert obj :eieio-group g))
+    (setq-local eieio-wo (eieio-custom-widget-insert obj :eieio-group g))
     ;;Now generate the apply buttons
     (widget-insert "\n")
     (eieio-custom-object-apply-reset obj)
@@ -380,10 +373,8 @@ These groups are specified with the `:group' slot flag."
     ;;(widget-minor-mode)
     (goto-char (point-min))
     (widget-forward 3)
-    (make-local-variable 'eieio-co)
-    (setq eieio-co obj)
-    (make-local-variable 'eieio-cog)
-    (setq eieio-cog g)))
+    (setq-local eieio-co obj)
+    (setq-local eieio-cog g)))
 
 (cl-defmethod eieio-custom-object-apply-reset ((_obj eieio-default-superclass))
   "Insert an Apply and Reset button into the object editor.
@@ -458,7 +449,7 @@ Must return the created widget."
 
 (cl-defmethod eieio-read-customization-group ((obj eieio-default-superclass))
   "Do a completing read on the name of a customization group in OBJ.
-Return the symbol for the group, or nil"
+Return the symbol for the group, or nil."
   (let ((g (eieio--class-option (eieio--object-class obj)
                                 :custom-groups)))
     (if (= (length g) 1)
@@ -466,14 +457,15 @@ Return the symbol for the group, or nil"
       ;; Make the association list
       (setq g (mapcar (lambda (g) (cons (symbol-name g) g)) g))
       (cdr (assoc
-	    (completing-read (concat (oref obj name)  " Custom Group: ")
-			     g nil t nil 'eieio-read-custom-group-history)
+	    (completing-read
+             (concat
+              (if (slot-exists-p obj 'name)
+                  (concat (slot-value obj (intern "name" obarray)) "")
+                "")
+              "Custom Group: ")
+	     g nil t nil 'eieio-read-custom-group-history)
 	    g)))))
 
 (provide 'eieio-custom)
-
-;; Local variables:
-;; generated-autoload-file: "eieio-loaddefs.el"
-;; End:
 
 ;;; eieio-custom.el ends here

@@ -1,6 +1,6 @@
 # emacs-buffer.gdb --- gdb macros for recovering buffers from emacs coredumps
 
-# Copyright (C) 2005-2018 Free Software Foundation, Inc.
+# Copyright (C) 2005-2026 Free Software Foundation, Inc.
 
 # Author: Noah Friedman <friedman@splode.com>
 # Created: 2005-04-28
@@ -265,7 +265,11 @@ document ysave-buffer
 end
 
 define ybuffer-contents
-  ydump-buffer $arg0 /dev/stdout
+  if defined_WINDOWSNT
+    ydump-buffer $arg0 CONOUT$
+  else
+    ydump-buffer $arg0 /dev/stdout
+  end
   if $yverbose && $buf->z_byte <= 1
     yget-current-buffer-name
     printf "[Buffer \"%s\" is empty.]\n", $ycurrent_buffer_name

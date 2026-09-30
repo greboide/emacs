@@ -1,6 +1,6 @@
-;;; ses-tests.el --- Tests for ses.el              -*- lexical-binding: t; -*-
+;;; SES-tests.el --- Tests for ses.el              -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2015-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2026 Free Software Foundation, Inc.
 
 ;; Author: Vincent Belaïche <vincentb1@users.sourceforge.net>
 
@@ -22,8 +22,37 @@
 ;;; Code:
 
 (require 'ert)
+(eval-when-compile (require 'ert-x))
 (require 'ses)
 
+;; Silence byte-compiler.
+(with-suppressed-warnings ((lexical ses--cells)
+                           (lexical A2)
+                           (lexical A3)
+                           (lexical ses--foo)
+                           (lexical ses--bar)
+                           (lexical B2)
+                           (lexical ses--toto))
+  (defvar ses--cells)
+  (defvar A2)
+  (defvar A3)
+  (defvar ses--foo)
+  (defvar ses--bar)
+  (defvar B2)
+  (defvar ses--toto))
+
+;; Check no border effects
+;; ======================================================================
+(defun ses-tests-check-no-border-effect ()
+  (dolist (symb ses-localvars)
+    (when (consp symb) (setq symb (car symb)))
+    (when (string-match "\\`ses--" (symbol-name symb))
+      (should (null (boundp symb))))))
+
+(defun ses-tests-unbind-local-vars ()
+  (dolist (symb ses-localvars)
+    (when (consp symb) (setq symb (car symb)))
+    (when (string-match "\\`ses--" (symbol-name symb)) (makunbound symb))))
 
 ;; PLAIN FORMULA TESTS
 ;; ======================================================================
@@ -32,36 +61,38 @@
   "Check that setting A1 to 1 and A2 to (1+ A1), makes A2 value
 equal to 2. This is done with low level functions calls, not like
 interactively."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
       (dolist (c '((0 0 1) (1 0 (1+ A1))))
         (apply 'ses-cell-set-formula c)
         (apply 'ses-calculate-cell (list (car c) (cadr c) nil)))
-      (should (eq (bound-and-true-p A2) 2)))))
+      (should (eq (bound-and-true-p A2) 2))))
+  (ses-tests-check-no-border-effect))
 
 (ert-deftest ses-tests-plain-formula ()
   "Check that setting A1 to 1 and A2 to (1+ A1), makes A2 value
 equal to 2. This is done  using interactive calls."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
       (dolist (c '((0 0 1) (1 0 (1+ A1))))
         (apply 'funcall-interactively 'ses-edit-cell c))
       (ses-command-hook)
-      (should (eq (bound-and-true-p A2) 2)))))
+      (should (eq (bound-and-true-p A2) 2))))
+  (ses-tests-check-no-border-effect))
 
 ;; PLAIN CELL RENAMING TESTS
 ;; ======================================================================
-
-(defvar ses--foo)
-(defvar ses--cells)
 
 (ert-deftest ses-tests-lowlevel-renamed-cell ()
   "Check that renaming A1 to `ses--foo' and setting `ses--foo' to 1 and A2 to (1+ ses--foo), makes A2 value equal to 2.
 This is done using low level functions, `ses-rename-cell' is not
 called but instead we use text replacement in the buffer
 previously passed in text mode."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -77,11 +108,13 @@ previously passed in text mode."
       (should-not  (local-variable-p 'A1))
       (should (eq ses--foo 1))
       (should (equal (ses-cell-formula 1 0) '(ses-safe-formula (1+ ses--foo))))
-      (should (eq (bound-and-true-p A2) 2)))))
+      (should (eq (bound-and-true-p A2) 2))))
+  (ses-tests-check-no-border-effect))
 
 (ert-deftest ses-tests-renamed-cell ()
   "Check that renaming A1 to `ses--foo' and setting `ses--foo' to 1 and A2
 to (1+ ses--foo), makes A2 value equal to 2."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -92,11 +125,13 @@ to (1+ ses--foo), makes A2 value equal to 2."
       (should-not  (local-variable-p 'A1))
       (should (eq ses--foo 1))
       (should (equal (ses-cell-formula 1 0) '(1+ ses--foo)))
-      (should (eq (bound-and-true-p A2) 2)))))
+      (should (eq (bound-and-true-p A2) 2))))
+  (ses-tests-check-no-border-effect))
 
 (ert-deftest ses-tests-renamed-cell-after-setting ()
   "Check that setting A1 to 1 and A2 to (1+ A1), and then
 renaming A1 to `ses--foo' makes `ses--foo' value equal to 2."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -107,12 +142,14 @@ renaming A1 to `ses--foo' makes `ses--foo' value equal to 2."
       (should-not  (local-variable-p 'A1))
       (should (eq ses--foo 1))
       (should (equal (ses-cell-formula 1 0) '(1+ ses--foo)))
-      (should (eq (bound-and-true-p A2) 2)))))
+      (should (eq (bound-and-true-p A2) 2))))
+  (ses-tests-check-no-border-effect))
 
 (ert-deftest ses-tests-renaming-cell-with-one-symbol-formula ()
   "Check that setting A1 to 1 and A2 to A1, and then renaming A1
 to `ses--foo' makes `ses--foo' value equal to 1. Then set A1 to 2 and check
 that `ses--foo' becomes 2."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(3 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -128,7 +165,8 @@ that `ses--foo' becomes 2."
       (funcall-interactively 'ses-edit-cell 0 0 2)
       (ses-command-hook); deferred recalc
       (should (eq (bound-and-true-p A2) 2))
-      (should (eq ses--foo 2)))))
+      (should (eq ses--foo 2))))
+  (ses-tests-check-no-border-effect))
 
 
 ;; ROW INSERTION TESTS
@@ -138,6 +176,7 @@ that `ses--foo' becomes 2."
   "Check that setting A1 to 1 and A2 to (1+ A1), and then jumping
 to A2 and inserting a row, makes A2 value empty, and A3 equal to
 2."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -148,14 +187,15 @@ to A2 and inserting a row, makes A2 value empty, and A3 equal to
       (ses-insert-row 1)
       (ses-command-hook)
       (should-not (bound-and-true-p A2))
-      (should (eq (bound-and-true-p A3) 2)))))
+      (should (eq (bound-and-true-p A3) 2))))
+  (ses-tests-check-no-border-effect))
 
-(defvar ses--bar)
 
 (ert-deftest ses-tests-renamed-cells-row-insertion ()
   "Check that setting A1 to 1 and A2 to (1+ A1), and then renaming A1 to `ses--foo' and A2 to `ses--bar' jumping
 to `ses--bar' and inserting a row, makes A2 value empty, and `ses--bar' equal to
 2."
+  (ses-tests-unbind-local-vars)
   (let ((ses-initial-size '(2 . 1)))
     (with-temp-buffer
       (ses-mode)
@@ -171,7 +211,99 @@ to `ses--bar' and inserting a row, makes A2 value empty, and `ses--bar' equal to
       (ses-insert-row 1)
       (ses-command-hook)
       (should-not (bound-and-true-p A2))
-      (should (eq ses--bar 2)))))
+      (should (eq ses--bar 2))))
+  (ses-tests-check-no-border-effect))
 
+
+;; JUMP tests
+;; ======================================================================
+(ert-deftest ses-tests-jump-B2-prefix-arg ()
+  "Test jumping to cell B2 by use of prefix argument"
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(3 . 3))
+        ses-after-entry-functions)
+    (with-temp-buffer
+      (ses-mode)
+      ;; C-u 4 M-x ses-jump
+      (let ((current-prefix-arg 4))
+        (call-interactively 'ses-jump))
+      (should (eq (ses--cell-at-pos (point)) 'B2))))
+  (ses-tests-check-no-border-effect))
+
+
+(ert-deftest ses-tests-jump-B2-lowcase ()
+  "Test jumping to cell B2 by use of lowercase cell name string"
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(3 . 3))
+        ses-after-entry-functions)
+    (with-temp-buffer
+      (ses-mode)
+      (funcall-interactively 'ses-jump "b2")
+      (ses-command-hook)
+      (should (eq (ses--cell-at-pos (point)) 'B2))))
+  (ses-tests-check-no-border-effect))
+
+(ert-deftest ses-tests-jump-B2-lowcase-keys ()
+  "Test jumping to cell B2 by use of lowercase cell name string with simulating keys"
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(3 . 3))
+        ses-after-entry-functions)
+    (with-temp-buffer
+      (ses-mode)
+      (ert-simulate-keys [ ?b ?2 return] (ses-jump))
+      (ses-command-hook)
+      (should (eq (ses--cell-at-pos (point)) 'B2))))
+  (ses-tests-check-no-border-effect))
+
+(ert-deftest ses-tests-jump-B2-symbol ()
+  "Test jumping to cell B2 by use of cell name symbol"
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(3 . 3))
+        ses-after-entry-functions)
+    (with-temp-buffer
+      (ses-mode)
+      (funcall-interactively 'ses-jump 'B2)
+      (ses-command-hook)
+      (should (eq (ses--cell-at-pos (point)) 'B2))))
+  (ses-tests-check-no-border-effect))
+
+(ert-deftest ses-tests-jump-B2-renamed ()
+  "Test jumping to cell B2 after renaming it `ses--toto'."
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(3 . 3))
+        ses-after-entry-functions)
+    (with-temp-buffer
+      (ses-mode)
+      (ses-rename-cell 'ses--toto (ses-get-cell 1 1))
+      (ses-jump 'ses--toto)
+      (ses-command-hook)
+      (should (eq (ses--cell-at-pos (point)) 'ses--toto))))
+  (ses-tests-check-no-border-effect))
+
+(ert-deftest ses-tests-set-formula-write-cells-with-changed-references ()
+  "Test fix of bug#5852.
+When setting a formula has some cell with changed references, this
+cell has to be rewritten to data area."
+  (ses-tests-unbind-local-vars)
+  (let ((ses-initial-size '(4 . 3))
+        (ses-after-entry-functions nil))
+    (with-temp-buffer
+      (ses-mode)
+      (dolist (c '((0 1 1); B1
+                   (1 0 2) (1 1 (+ B1 A2)); A2 B2
+                   (2 0 4); A3
+                   (3 0 3) (3 1 (+ B2 A4))));A4 B4
+        (apply 'ses-cell-set-formula c)
+        (apply 'ses-calculate-cell (list (car c) (cadr c) nil)))
+      (ses-cell-set-formula 2 1 '(+ B2 A3)); B3
+      (ses-command-hook)
+      (ses-cell-set-formula 3 1 '(+ B3 A4)); B4
+      (ses-command-hook)
+      (should (equal (ses-cell-references 1 1) '(B3)))
+      (ses-mode)
+      (should (equal (ses-cell-references 1 1) '(B3)))))
+  (ses-tests-check-no-border-effect))
 
 (provide 'ses-tests)
+
+;;; ses-tests.el ends here

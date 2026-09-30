@@ -1,10 +1,10 @@
 /* floating point to accurate string
 
-   Copyright (C) 2010-2018 Free Software Foundation, Inc.
+   Copyright (C) 2010-2026 Free Software Foundation, Inc.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
+   the Free Software Foundation, either version 3 of the License, or
    (at your option) any later version.
 
    This program is distributed in the hope that it will be useful,
@@ -33,22 +33,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef C_LOCALE
+# include "c-snprintf.h"
+# include "c-strtod.h"
+# define PREFIX(name) c_ ## name
+#else
+# define PREFIX(name) name
+#endif
+
 #if LENGTH == 3
 # define FLOAT long double
 # define FLOAT_DIG LDBL_DIG
 # define FLOAT_MIN LDBL_MIN
 # define FLOAT_PREC_BOUND _GL_LDBL_PREC_BOUND
-# define FTOASTR ldtoastr
+# define FTOASTR PREFIX (ldtoastr)
 # define PROMOTED_FLOAT long double
-# if HAVE_C99_STRTOLD
-#  define STRTOF strtold
-# endif
+# define STRTOF PREFIX (strtold)
 #elif LENGTH == 2
 # define FLOAT double
 # define FLOAT_DIG DBL_DIG
 # define FLOAT_MIN DBL_MIN
 # define FLOAT_PREC_BOUND _GL_DBL_PREC_BOUND
-# define FTOASTR dtoastr
+# define FTOASTR PREFIX (dtoastr)
 # define PROMOTED_FLOAT double
 #else
 # define LENGTH 1
@@ -56,24 +62,27 @@
 # define FLOAT_DIG FLT_DIG
 # define FLOAT_MIN FLT_MIN
 # define FLOAT_PREC_BOUND _GL_FLT_PREC_BOUND
-# define FTOASTR ftoastr
+# define FTOASTR PREFIX (ftoastr)
 # define PROMOTED_FLOAT double
 # if HAVE_STRTOF
 #  define STRTOF strtof
 # endif
 #endif
 
-/* On pre-C99 hosts, approximate strtof and strtold with strtod.  This
+/* On pre-C99 hosts, approximate strtof with strtod.  This
    may generate one or two extra digits, but that's better than not
    working at all.  */
 #ifndef STRTOF
-# define STRTOF strtod
+# define STRTOF PREFIX (strtod)
 #endif
 
 /* On hosts where it's not known that snprintf works, use sprintf to
    implement the subset needed here.  Typically BUFSIZE is big enough
    and there's little or no performance hit.  */
-#if ! GNULIB_SNPRINTF
+#ifdef C_LOCALE
+# undef snprintf
+# define snprintf c_snprintf
+#elif ! GNULIB_SNPRINTF
 # undef snprintf
 # define snprintf ftoastr_snprintf
 static int
@@ -105,15 +114,16 @@ FTOASTR (char *buf, size_t bufsize, int flags, int width, FLOAT x)
   /* The following method is simple but slow.
      For ideas about speeding things up, please see:
 
-     Andrysco M, Jhala R, Lerner S. Printing floating-point numbers:
-     a faster, always correct method. ACM SIGPLAN notices - POPL '16.
-     2016;51(1):555-67 <http://dx.doi.org/10.1145/2914770.2837654>; draft at
-     <https://cseweb.ucsd.edu/~lerner/papers/fp-printing-popl16.pdf>.  */
+     Jeon J. Dragonbox: a new floating-point binary-to-decimal
+     conversion algorithm. 2024. <https://github.com/jk-jeon/dragonbox/>.
+     Used in {fmt} <https://github.com/fmtlib/fmt>.
+
+     Adams U. Ryū: fast float-to-string conversion.
+     PLDI 2018. 270–282. <https://doi.org/10.1145/3192366.3192369>.  */
 
   PROMOTED_FLOAT promoted_x = x;
   char format[sizeof "%-+ 0*.*Lg"];
   FLOAT abs_x = x < 0 ? -x : x;
-  int prec;
 
   char *p = format;
   *p++ = '%';
@@ -131,7 +141,7 @@ FTOASTR (char *buf, size_t bufsize, int flags, int width, FLOAT x)
   *p++ = flags & FTOASTR_UPPER_E ? 'G' : 'g';
   *p = '\0';
 
-  for (prec = abs_x < FLOAT_MIN ? 1 : FLOAT_DIG; ; prec++)
+  for (int prec = abs_x < FLOAT_MIN ? 1 : FLOAT_DIG; ; prec++)
     {
       int n = snprintf (buf, bufsize, format, width, prec, promoted_x);
       if (n < 0

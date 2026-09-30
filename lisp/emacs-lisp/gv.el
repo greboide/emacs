@@ -1,6 +1,6 @@
 ;;; gv.el --- generalized variables  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2012-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2012-2026 Free Software Foundation, Inc.
 
 ;; Author: Stefan Monnier <monnier@iro.umontreal.ca>
 ;; Keywords: extensions
@@ -24,7 +24,7 @@
 ;;; Commentary:
 
 ;; This is a re-implementation of the setf machinery using a different
-;; underlying approach than the one used earlier in CL, which was based on
+;; underlying approach from the one used earlier in CL, which was based on
 ;; define-setf-expander.
 ;; `define-setf-expander' makes every "place-expander" return a 5-tuple
 ;;   (VARS VALUES STORES GETTER SETTER)
@@ -38,7 +38,7 @@
 ;;
 ;; Instead, we use here a higher-order approach: instead
 ;; of a 5-tuple, a place-expander returns a function.
-;; If you think about types, the old approach return things of type
+;; If you think about types, the old approach returns things of type
 ;;    {vars: List Var, values: List Exp,
 ;;     stores: List Var, getter: Exp, setter: Exp}
 ;; whereas the new approach returns a function of type
@@ -74,7 +74,7 @@
 ;; (defvar gv--macro-environment nil
 ;;   "Macro expanders for generalized variables.")
 
-(define-error 'gv-invalid-place "%S is not a valid place expression")
+(define-error 'gv-invalid-place "Invalid place expression")
 
 ;;;###autoload
 (defun gv-get (place do)
@@ -87,11 +87,18 @@ with a (not necessarily copyable) Elisp expression that returns the value to
 set it to.
 DO must return an Elisp expression."
   (cond
-   ((symbolp place) (funcall do place (lambda (v) `(setq ,place ,v))))
+   ((symbolp place)
+    (let ((me (macroexpand-1 place macroexpand-all-environment)))
+      (if (eq me place)
+          (funcall do place (lambda (v) `(setq ,place ,v)))
+        (gv-get me do))))
    ((not (consp place)) (signal 'gv-invalid-place (list place)))
    (t
     (let* ((head (car place))
            (gf (function-get head 'gv-expander 'autoload)))
+      (when (and (symbolp head)
+                 (get head 'byte-obsolete-generalized-variable))
+        (byte-compile-warn-obsolete head "generalized variable"))
       (if gf (apply gf do (cdr place))
         (let ((me (macroexpand-1 place
                                  ;; (append macroexpand-all-environment
@@ -135,7 +142,7 @@ The returned value will then be an Elisp expression that first evaluates
 all the parts of PLACE that can be evaluated and then runs E.
 
 \(fn (GETTER SETTER) PLACE &rest BODY)"
-  (declare (indent 2) (debug (sexp form body)))
+  (declare (indent 2) (debug (sexp form def-body)))
   `(gv-get ,place (lambda ,vars ,@body)))
 
 ;; Different ways to declare a generalized variable.
@@ -166,16 +173,45 @@ arguments as NAME.  DO is a function as defined in `gv-get'."
         ;; (`(expand ,expander) `(gv-define-expand ,name ,expander))
         (_ (message "Unknown %s declaration %S" symbol handler) nil))))
 
+(defun make-obsolete-generalized-variable (obsolete-name current-name when)
+  "Make byte-compiler warn that generalized variable OBSOLETE-NAME is obsolete.
+The warning will say that CURRENT-NAME should be used instead.
+
+If CURRENT-NAME is a string, that is the `use instead' message.
+
+WHEN should be a string indicating when the variable was first
+made obsolete, for example a date or a release number."
+  (put obsolete-name 'byte-obsolete-generalized-variable
+       (list current-name when))
+  obsolete-name)
+
+;; Additions for `declare'.  We specify the values as named aliases so
+;; that `describe-variable' prints something useful; cf. Bug#40491.
+
+;;;###autoload
+(defsubst gv--expander-defun-declaration (&rest args)
+  (apply #'gv--defun-declaration 'gv-expander args))
+
+;;;###autoload
+(defsubst gv--setter-defun-declaration (&rest args)
+  (apply #'gv--defun-declaration 'gv-setter args))
+
 ;;;###autoload
 (or (assq 'gv-expander defun-declarations-alist)
-    (let ((x `(gv-expander
-               ,(apply-partially #'gv--defun-declaration 'gv-expander))))
+    (let ((x (list 'gv-expander #'gv--expander-defun-declaration)))
       (push x macro-declarations-alist)
       (push x defun-declarations-alist)))
 ;;;###autoload
 (or (assq 'gv-setter defun-declarations-alist)
-    (push `(gv-setter ,(apply-partially #'gv--defun-declaration 'gv-setter))
+    (push (list 'gv-setter #'gv--setter-defun-declaration)
 	  defun-declarations-alist))
+
+;;;###autoload
+(let ((spec (get 'compiler-macro 'edebug-declaration-spec)))
+  ;; It so happens that it's the same spec for gv-* as for compiler-macros.
+  ;; '(&or symbolp ("lambda" &define lambda-list lambda-doc def-body))
+  (put 'gv-expander 'edebug-declaration-spec spec)
+  (put 'gv-setter 'edebug-declaration-spec spec))
 
 ;; (defmacro gv-define-expand (name expander)
 ;;   "Use EXPANDER to handle NAME as a generalized var.
@@ -214,7 +250,8 @@ The first arg in ARGLIST (the one that receives VAL) receives an expression
 which can do arbitrary things, whereas the other arguments are all guaranteed
 to be pure and copyable.  Example use:
   (gv-define-setter aref (v a i) \\=`(aset ,a ,i ,v))"
-  (declare (indent 2) (debug (&define name sexp body)))
+  (declare (indent 2)
+           (debug (&define [&name symbolp "@gv-setter"] sexp def-body)))
   `(gv-define-expander ,name
      (lambda (do &rest args)
        (declare-function
@@ -234,7 +271,7 @@ instead the assignment is turned into something equivalent to
     (SETTER ARGS... temp)
     temp)
 so as to preserve the semantics of `setf'."
-  (declare (debug (sexp (&or symbolp lambda-expr) &optional sexp)))
+  (declare (debug (sexp [&or symbolp lambda-expr] &optional sexp)))
   (when (eq 'lambda (car-safe setter))
     (message "Use `gv-define-setter' or name %s's setter function" name))
   `(gv-define-setter ,name (val &rest args)
@@ -257,7 +294,7 @@ The return value is the last VAL in the list.
 
 \(fn PLACE VAL PLACE VAL ...)"
   (declare (debug (&rest [gv-place form])))
-  (if (/= (logand (length args) 1) 0)
+  (if (oddp (length args))
       (signal 'wrong-number-of-arguments (list 'setf (length args))))
   (if (and args (null (cddr args)))
       (let ((place (pop args))
@@ -278,17 +315,35 @@ The return value is the last VAL in the list.
 ;;       `(if (member ,v ,getter) nil
 ;;          ,(funcall setter `(cons ,v ,getter))))))
 
-;; (defmacro gv-inc! (place &optional val)
-;;   "Increment PLACE by VAL (default to 1)."
-;;   (declare (debug (gv-place &optional form)))
-;;   (gv-letplace (getter setter) place
-;;     (funcall setter `(+ ,getter ,(or val 1)))))
+;;;###autoload
+(defmacro incf (place &optional delta)
+  "Increment generalized variable PLACE by DELTA (default to 1).
 
-;; (defmacro gv-dec! (place &optional val)
-;;   "Decrement PLACE by VAL (default to 1)."
-;;   (declare (debug (gv-place &optional form)))
-;;   (gv-letplace (getter setter) place
-;;     (funcall setter `(- ,getter ,(or val 1)))))
+The DELTA is first added to PLACE, and then stored in PLACE.
+Return the incremented value of PLACE.
+
+For more information about generalized variables, see Info node
+`(elisp) Generalized Variables'.
+
+See also `decf'."
+  (declare (debug (gv-place &optional form)))
+  (gv-letplace (getter setter) place
+    (funcall setter `(+ ,getter ,(or delta 1)))))
+
+;;;###autoload
+(defmacro decf (place &optional delta)
+  "Decrement generalized variable PLACE by DELTA (default to 1).
+
+The DELTA is first subtracted from PLACE, and then stored in PLACE.
+Return the decremented value of PLACE.
+
+For more information about generalized variables, see Info node
+`(elisp) Generalized Variables'.
+
+See also `incf'."
+  (declare (debug (gv-place &optional form)))
+  (gv-letplace (getter setter) place
+    (funcall setter `(- ,getter ,(or delta 1)))))
 
 ;; For Edebug, the idea is to let Edebug instrument gv-places just like it does
 ;; for normal expressions, and then give it a gv-expander to DTRT.
@@ -297,7 +352,7 @@ The return value is the last VAL in the list.
 ;; Autoload this `put' since a user might use C-u C-M-x on an expression
 ;; containing a non-trivial `push' even before gv.el was loaded.
 ;;;###autoload
-(put 'gv-place 'edebug-form-spec 'edebug-match-form)
+(def-edebug-elem-spec 'gv-place '(form))
 
 ;; CL did the equivalent of:
 ;;(gv-define-macroexpand edebug-after (lambda (before index place) place))
@@ -306,13 +361,14 @@ The return value is the last VAL in the list.
        (gv-letplace (getter setter) place
          (funcall do `(edebug-after ,before ,index ,getter)
                   (lambda (store)
-                    `(progn (edebug-after ,before ,index ,getter)
-                            ,(funcall setter store)))))))
+                    `(edebug-after ,before ,index ,(funcall setter store)))))))
 
 ;;; The common generalized variables.
 
 (gv-define-simple-setter aref aset)
 (gv-define-simple-setter char-table-range set-char-table-range)
+(gv-define-simple-setter char-table-extra-slot set-char-table-extra-slot)
+(gv-define-simple-setter char-table-parent set-char-table-parent)
 (gv-define-simple-setter car setcar)
 (gv-define-simple-setter cdr setcdr)
 ;; FIXME: add compiler-macros for `cXXr' instead!
@@ -346,19 +402,26 @@ The return value is the last VAL in the list.
 ;;; Elisp-specific generalized variables.
 
 (gv-define-simple-setter default-value set-default)
+(gv-define-simple-setter default-toplevel-value set-default-toplevel-value t)
 (gv-define-simple-setter frame-parameter set-frame-parameter 'fix)
-(gv-define-simple-setter terminal-parameter set-terminal-parameter)
+(gv-define-simple-setter terminal-parameter set-terminal-parameter t)
 (gv-define-simple-setter keymap-parent set-keymap-parent)
 (gv-define-simple-setter match-data set-match-data 'fix)
+(gv-define-simple-setter marker-insertion-type set-marker-insertion-type)
 (gv-define-simple-setter overlay-get overlay-put)
 (gv-define-setter overlay-start (store ov)
-  `(progn (move-overlay ,ov ,store (overlay-end ,ov)) ,store))
+  (macroexp-let2 nil store store
+    `(progn (move-overlay ,ov ,store (overlay-end ,ov)) ,store)))
 (gv-define-setter overlay-end (store ov)
-  `(progn (move-overlay ,ov (overlay-start ,ov) ,store) ,store))
+  (macroexp-let2 nil store store
+    `(progn (move-overlay ,ov (overlay-start ,ov) ,store) ,store)))
 (gv-define-simple-setter process-buffer set-process-buffer)
 (gv-define-simple-setter process-filter set-process-filter)
 (gv-define-simple-setter process-sentinel set-process-sentinel)
-(gv-define-simple-setter process-get process-put)
+(gv-define-simple-setter process-get process-put 'fix)
+(gv-define-simple-setter process-plist set-process-plist)
+(gv-define-simple-setter process-query-on-exit-flag set-process-query-on-exit-flag)
+(gv-define-simple-setter process-thread set-process-thread)
 (gv-define-simple-setter window-parameter set-window-parameter)
 (gv-define-setter window-buffer (v &optional w)
   (macroexp-let2 nil v v
@@ -371,6 +434,12 @@ The return value is the last VAL in the list.
 (gv-define-setter window-hscroll (v &optional w) `(set-window-hscroll ,w ,v))
 (gv-define-setter window-point (v &optional w) `(set-window-point ,w ,v))
 (gv-define-setter window-start (v &optional w) `(set-window-start ,w ,v))
+(gv-define-setter window-prev-buffers (v &optional w) `(set-window-prev-buffers ,w ,v))
+(gv-define-setter window-next-buffers (v &optional w) `(set-window-next-buffers ,w ,v))
+(gv-define-setter window-new-normal (v &optional w) `(set-window-new-normal ,w ,v))
+(gv-define-simple-setter font-get font-put)
+(gv-define-simple-setter charset-plist set-charset-plist)
+(gv-define-simple-setter get-charset-property put-charset-property t)
 
 (gv-define-setter buffer-local-value (val var buf)
   (macroexp-let2 nil v val
@@ -380,9 +449,9 @@ The return value is the last VAL in the list.
   (lambda (do key alist &optional default remove testfn)
     (macroexp-let2 macroexp-copyable-p k key
       (gv-letplace (getter setter) alist
-        (macroexp-let2 nil p `(if (and ,testfn (not (eq ,testfn 'eq)))
-                                  (assoc ,k ,getter ,testfn)
-                                (assq ,k ,getter))
+        (macroexp-let2 nil p (if (member testfn '(nil 'eq #'eq))
+                                 `(assq ,k ,getter)
+                               `(assoc ,k ,getter ,testfn))
           (funcall do (if (null default) `(cdr ,p)
                         `(if ,p (cdr ,p) ,default))
                    (lambda (v)
@@ -392,19 +461,33 @@ The return value is the last VAL in the list.
                                  ,(funcall setter
                                            `(cons (setq ,p (cons ,k ,v))
                                                   ,getter)))))
-                         (cond
-                          ((null remove) set-exp)
-                          ((or (eql v default)
-                               (and (eq (car-safe v) 'quote)
-                                    (eq (car-safe default) 'quote)
-                                    (eql (cadr v) (cadr default))))
-                           `(if ,p ,(funcall setter `(delq ,p ,getter))))
-                          (t
-                           `(cond
-                             ((not (eql ,default ,v)) ,set-exp)
-                             (,p ,(funcall setter
-                                           `(delq ,p ,getter)))))))))))))))
+                         `(progn
+                            ,(cond
+                             ((null remove) set-exp)
+                             ((or (eql v default)
+                                  (and (eq (car-safe v) 'quote)
+                                       (eq (car-safe default) 'quote)
+                                       (eql (cadr v) (cadr default))))
+                              `(if ,p ,(funcall setter `(delq ,p ,getter))))
+                             (t
+                              `(cond
+                                ((not (eql ,default ,v)) ,set-exp)
+                                (,p ,(funcall setter
+                                              `(delq ,p ,getter))))))
+                            ,v))))))))))
 
+(gv-define-expander plist-get
+  (lambda (do plist prop &optional predicate)
+    (macroexp-let2 macroexp-copyable-p key prop
+      (gv-letplace (getter setter) plist
+        (macroexp-let2 nil p `(cdr (plist-member ,getter ,key ,predicate))
+          (funcall do
+                   `(car ,p)
+                   (lambda (val)
+                     `(if ,p
+                          (setcar ,p ,val)
+                        ,(funcall setter
+                                  `(cons ,key (cons ,val ,getter)))))))))))
 
 ;;; Some occasionally handy extensions.
 
@@ -449,45 +532,59 @@ The return value is the last VAL in the list.
 
 (put 'cond 'gv-expander
      (lambda (do &rest branches)
-       (if (or (not lexical-binding)  ;The other code requires lexical-binding.
-               (macroexp-small-p (funcall do 'dummy (lambda (_) 'dummy))))
-           ;; This duplicates the `do' code, which is a problem if that
-           ;; code is large, but otherwise results in more efficient code.
-           `(cond
-             ,@(mapcar (lambda (branch)
-                         (if (cdr branch)
-                             (cons (car branch)
-                                   (macroexp-unprogn
-                                    (gv-get (macroexp-progn (cdr branch)) do)))
-                           (gv-get (car branch) do)))
-                       branches))
-         (let ((v (gensym "v")))
-           (macroexp-let2 nil
-               gv `(cond
-                    ,@(mapcar
-                       (lambda (branch)
-                         (if (cdr branch)
-                             `(,(car branch)
-                               ,@(macroexp-unprogn
-                                  (gv-letplace (getter setter)
-                                      (macroexp-progn (cdr branch))
-                                    `(cons (lambda () ,getter)
-                                           (lambda (,v) ,(funcall setter v))))))
-                           (gv-letplace (getter setter)
-                               (car branch)
-                             `(cons (lambda () ,getter)
-                                    (lambda (,v) ,(funcall setter v))))))
-                       branches))
-             (funcall do `(funcall (car ,gv))
-                      (lambda (v) `(funcall (cdr ,gv) ,v))))))))
+       (let ((res (apply #'gv--cond-expander do branches))
+             (last-test (caar (last branches))))
+         (if (and (macroexp-const-p last-test)
+                  (if (consp last-test) (cadr last-test) last-test))
+             res
+           ;; There is no setter for the nil expression, so a missing default
+           ;; branch is a bug (bug#81217).  Let's not signal an error, tho,
+           ;; for backward compatibility reasons.
+           (macroexp-warn-and-return "Missing default branch in cond"
+                                     res '(suspicious cond))))))
 
-(defmacro gv-synthetic-place (getter setter)
+(defun gv--cond-expander (do &rest branches)
+  (if (or (not lexical-binding) ;The other code requires lexical-binding.
+          (macroexp-small-p (funcall do 'dummy (lambda (_) 'dummy))))
+      ;; This duplicates the `do' code, which is a problem if that
+      ;; code is large, but otherwise results in more efficient code.
+      `(cond
+        ,@(mapcar (lambda (branch)
+                    (if (cdr branch)
+                        (cons (car branch)
+                              (macroexp-unprogn
+                               (gv-get (macroexp-progn (cdr branch)) do)))
+                      (gv-get (car branch) do)))
+                  branches))
+    (let ((v (gensym "v")))
+      (macroexp-let2 nil
+          gv `(cond
+               ,@(mapcar
+                  (lambda (branch)
+                    (if (cdr branch)
+                        `(,(car branch)
+                          ,@(macroexp-unprogn
+                             (gv-letplace (getter setter)
+                                 (macroexp-progn (cdr branch))
+                               `(cons (lambda () ,getter)
+                                      (lambda (,v) ,(funcall setter v))))))
+                      (gv-letplace (getter setter)
+                          (car branch)
+                        `(cons (lambda () ,getter)
+                               (lambda (,v) ,(funcall setter v))))))
+                  branches))
+        (funcall do `(funcall (car ,gv))
+                 (lambda (v) `(funcall (cdr ,gv) ,v)))))))
+
+(defun gv-synthetic-place (getter setter)
   "Special place described by its setter and getter.
 GETTER and SETTER (typically obtained via `gv-letplace') get and
-set that place.  I.e. This macro allows you to do the \"reverse\" of what
-`gv-letplace' does.
-This macro only makes sense when used in a place."
-  (declare (gv-expander funcall))
+set that place.  I.e. this function allows you to do the
+\"reverse\" of what `gv-letplace' does.
+
+This function is only useful when used in conjunction with
+generalized variables in place forms."
+  (declare (gv-expander funcall) (compiler-macro (lambda (_) getter)))
   (ignore setter)
   getter)
 
@@ -515,9 +612,12 @@ This macro only makes sense when used in a place."
          (gv-letplace (dgetter dsetter) d
            (funcall do
                     `(cons ,agetter ,dgetter)
-                    (lambda (v) `(progn
-                              ,(funcall asetter `(car ,v))
-                              ,(funcall dsetter `(cdr ,v)))))))))
+                    (lambda (v)
+                      (macroexp-let2 nil v v
+                        `(progn
+                           ,(funcall asetter `(car ,v))
+                           ,(funcall dsetter `(cdr ,v))
+                           ,v))))))))
 
 (put 'logand 'gv-expander
      (lambda (do place &rest masks)
@@ -527,9 +627,12 @@ This macro only makes sense when used in a place."
            (funcall
             do `(logand ,getter ,mask)
             (lambda (v)
-              (funcall setter
-                       `(logior (logand ,v ,mask)
-                                (logand ,getter (lognot ,mask))))))))))
+              (macroexp-let2 nil v v
+                `(progn
+                   ,(funcall setter
+                             `(logior (logand ,v ,mask)
+                                      (logand ,getter (lognot ,mask))))
+                   ,v))))))))
 
 ;;; References
 
@@ -551,9 +654,9 @@ binding mode."
             ;; dynamic binding mode as well.
             (eq (car-safe code) 'cons))
         code
-      (macroexp--warn-and-return
+      (macroexp-warn-and-return
        "Use of gv-ref probably requires lexical-binding"
-       code))))
+       code nil nil place))))
 
 (defsubst gv-deref (ref)
   "Dereference REF, returning the referenced value.
@@ -561,17 +664,202 @@ This is like the `*' operator of the C language.
 REF must have been previously obtained with `gv-ref'."
   (funcall (car ref)))
 ;; Don't use `declare' because it seems to introduce circularity problems:
-;; Warning: Eager macro-expansion skipped due to cycle:
+;; Eager macro-expansion skipped due to cycle:
 ;;  … => (load "gv.el") => (macroexpand-all (defsubst gv-deref …)) => (macroexpand (defun …)) => (load "gv.el")
 (gv-define-setter gv-deref (v ref) `(funcall (cdr ,ref) ,v))
 
 ;; (defmacro gv-letref (vars place &rest body)
-;;   (declare (indent 2) (debug (sexp form &rest body)))
+;;   (declare (indent 2) (debug (sexp form body)))
 ;;   (require 'cl-lib) ;Can't require cl-lib at top-level for bootstrap reasons!
 ;;   (gv-letplace (getter setter) place
 ;;     `(cl-macrolet ((,(nth 0 vars) () ',getter)
 ;;                    (,(nth 1 vars) (v) (funcall ',setter v)))
 ;;        ,@body)))
+
+;;; Generalized variables.
+
+;; `error' and `ignore' places come in handy in the default branch
+;; of `cond/pcase' places.
+(gv-define-setter ignore (store &rest _args) store) ;; A kind of >/dev/null
+(gv-define-expander error (lambda (_do &rest args) `(error . ,args)))
+
+;; Some Emacs-related place types.
+(gv-define-simple-setter buffer-file-name set-visited-file-name t)
+(make-obsolete-generalized-variable
+ 'buffer-file-name 'set-visited-file-name "29.1")
+
+(gv-define-setter buffer-modified-p (flag &optional buf)
+  (macroexp-let2 nil buffer `(or ,buf (current-buffer))
+    `(with-current-buffer ,buffer
+       (set-buffer-modified-p ,flag))))
+(make-obsolete-generalized-variable
+ 'buffer-modified-p 'set-buffer-modified-p "29.1")
+
+(gv-define-simple-setter buffer-name rename-buffer t)
+(make-obsolete-generalized-variable 'buffer-name 'rename-buffer "29.1")
+
+(gv-define-setter buffer-string (store)
+  `(insert (prog1 ,store (erase-buffer))))
+(make-obsolete-generalized-variable 'buffer-string nil "29.1")
+
+;; FIXME: Can't use `replace-region-contents' because it's not
+;; expected to be costly, so we need to pass MAX-SECS==0.
+(gv-define-simple-setter buffer-substring cl--set-buffer-substring)
+(make-obsolete-generalized-variable 'buffer-substring nil "29.1")
+
+(gv-define-simple-setter current-buffer set-buffer)
+(make-obsolete-generalized-variable 'current-buffer 'set-buffer "29.1")
+
+(gv-define-simple-setter current-column move-to-column t)
+(make-obsolete-generalized-variable 'current-column 'move-to-column "29.1")
+
+(gv-define-simple-setter current-global-map use-global-map t)
+(make-obsolete-generalized-variable 'current-global-map 'use-global-map "29.1")
+
+(gv-define-setter current-input-mode (store)
+  `(progn (apply #'set-input-mode ,store) ,store))
+(make-obsolete-generalized-variable 'current-input-mode nil "29.1")
+
+(gv-define-simple-setter current-local-map use-local-map t)
+(make-obsolete-generalized-variable 'current-local-map 'use-local-map "29.1")
+
+(gv-define-simple-setter current-window-configuration
+                         set-window-configuration t)
+(make-obsolete-generalized-variable
+ 'current-window-configuration 'set-window-configuration "29.1")
+
+(gv-define-simple-setter default-file-modes set-default-file-modes t)
+(make-obsolete-generalized-variable
+ 'default-file-modes 'set-default-file-modes "29.1")
+
+(gv-define-simple-setter documentation-property put)
+(make-obsolete-generalized-variable 'documentation-property 'put "29.1")
+
+(gv-define-setter face-background (x f &optional s)
+  `(set-face-background ,f ,x ,s))
+(gv-define-setter face-background-pixmap (x f &optional s)
+  `(set-face-stipple ,f ,x ,s))
+(make-obsolete-generalized-variable 'face-background-pixmap 'face-stipple "29.1")
+(gv-define-setter face-stipple (x f &optional s)
+  `(set-face-stipple ,f ,x ,s))
+(gv-define-setter face-font (x f &optional s) `(set-face-font ,f ,x ,s))
+(gv-define-setter face-foreground (x f &optional s)
+  `(set-face-foreground ,f ,x ,s))
+(gv-define-setter face-underline-p (x f &optional s)
+  `(set-face-underline ,f ,x ,s))
+(gv-define-simple-setter file-modes set-file-modes t)
+
+(gv-define-setter frame-height (x &optional frame)
+  `(set-frame-height (or ,frame (selected-frame)) ,x))
+(make-obsolete-generalized-variable 'frame-height 'set-frame-height "29.1")
+
+(gv-define-simple-setter frame-parameters modify-frame-parameters t)
+(gv-define-simple-setter frame-visible-p cl--set-frame-visible-p)
+(make-obsolete-generalized-variable 'frame-visible-p nil "29.1")
+
+(gv-define-setter frame-width (x &optional frame)
+  `(set-frame-width (or ,frame (selected-frame)) ,x))
+(make-obsolete-generalized-variable 'frame-width 'set-frame-width "29.1")
+
+(gv-define-simple-setter getenv setenv t)
+(gv-define-simple-setter get-register set-register)
+
+(gv-define-simple-setter global-key-binding global-set-key)
+(make-obsolete-generalized-variable 'global-key-binding 'global-set-key "29.1")
+
+(gv-define-simple-setter local-key-binding local-set-key)
+(make-obsolete-generalized-variable 'local-key-binding 'local-set-key "29.1")
+
+(gv-define-simple-setter mark set-mark t)
+(make-obsolete-generalized-variable 'mark 'set-mark "29.1")
+
+(gv-define-simple-setter mark-marker set-mark t)
+(make-obsolete-generalized-variable 'mark-marker 'set-mark "29.1")
+
+(gv-define-simple-setter marker-position set-marker t)
+(make-obsolete-generalized-variable 'marker-position 'set-marker "29.1")
+
+(gv-define-setter mouse-position (store scr)
+  `(set-mouse-position ,scr (car ,store) (cadr ,store)
+                       (cddr ,store)))
+(make-obsolete-generalized-variable 'mouse-position 'set-mouse-position "29.1")
+
+(gv-define-simple-setter point goto-char)
+(make-obsolete-generalized-variable 'point 'goto-char "29.1")
+
+(gv-define-simple-setter point-marker goto-char t)
+(make-obsolete-generalized-variable 'point-marker 'goto-char "29.1")
+
+(gv-define-setter point-max (store)
+  `(progn (narrow-to-region (point-min) ,store) ,store))
+(make-obsolete-generalized-variable 'point-max 'narrow-to-region "29.1")
+
+(gv-define-setter point-min (store)
+  `(progn (narrow-to-region ,store (point-max)) ,store))
+(make-obsolete-generalized-variable 'point-min 'narrow-to-region "29.1")
+
+(gv-define-setter read-mouse-position (store scr)
+  `(set-mouse-position ,scr (car ,store) (cdr ,store)))
+(make-obsolete-generalized-variable
+ 'read-mouse-position 'set-mouse-position "29.1")
+
+(gv-define-simple-setter screen-height set-screen-height t)
+(make-obsolete-generalized-variable 'screen-height 'set-screen-height "29.1")
+
+(gv-define-simple-setter screen-width set-screen-width t)
+(make-obsolete-generalized-variable 'screen-width 'set-screen-width "29.1")
+
+(gv-define-simple-setter selected-window select-window)
+(make-obsolete-generalized-variable 'selected-window 'select-window "29.1")
+
+(gv-define-simple-setter selected-screen select-screen)
+(make-obsolete-generalized-variable 'selected-screen 'select-screen "29.1")
+
+(gv-define-simple-setter selected-frame select-frame)
+(make-obsolete-generalized-variable 'selected-frame 'select-frame "29.1")
+
+(gv-define-simple-setter standard-case-table set-standard-case-table)
+(make-obsolete-generalized-variable
+ 'standard-case-table 'set-standard-case-table "29.1")
+
+(gv-define-simple-setter syntax-table set-syntax-table)
+(make-obsolete-generalized-variable 'syntax-table 'set-syntax-table "29.1")
+
+(gv-define-simple-setter visited-file-modtime set-visited-file-modtime t)
+(make-obsolete-generalized-variable
+ 'visited-file-modtime 'set-visited-file-modtime "29.1")
+
+(gv-define-setter window-height (store)
+  `(progn (enlarge-window (- ,store (window-height))) ,store))
+(make-obsolete-generalized-variable 'window-height 'enlarge-window "29.1")
+
+(gv-define-setter window-width (store)
+  `(progn (enlarge-window (- ,store (window-width)) t) ,store))
+(make-obsolete-generalized-variable 'window-width 'enlarge-window "29.1")
+
+(gv-define-simple-setter x-get-secondary-selection x-own-secondary-selection t)
+(make-obsolete-generalized-variable
+ 'x-get-secondary-selection 'x-own-secondary-selection "29.1")
+
+
+;; More complex setf-methods.
+
+;; This is a hack that allows (setf (eq a 7) B) to mean either
+;; (setq a 7) or (setq a nil) depending on whether B is nil or not.
+;; This is useful when you have control over the PLACE but not over
+;; the VALUE, as is the case in define-minor-mode's :variable.
+;; It turned out that :variable needed more flexibility anyway, so
+;; this doesn't seem too useful now.
+(gv-define-expander eq
+  (lambda (do place val)
+    (gv-letplace (getter setter) place
+      (macroexp-let2 nil val val
+        (funcall do `(eq ,getter ,val)
+                 (lambda (v)
+                   `(cond
+                     (,v ,(funcall setter val))
+                     ((eq ,getter ,val) ,(funcall setter `(not ,val))))))))))
+(make-obsolete-generalized-variable 'eq nil "29.1")
 
 (provide 'gv)
 ;;; gv.el ends here

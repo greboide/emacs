@@ -1,9 +1,9 @@
 ;;; utf7.el --- UTF-7 encoding/decoding for Emacs   -*- lexical-binding:t -*-
 
-;; Copyright (C) 1999-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1999-2026 Free Software Foundation, Inc.
 
 ;; Author: Jon K Hellan <hellan@acm.org>
-;; Maintainer: bugs@gnus.org
+;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: mail
 
 ;; This file is part of GNU Emacs.
@@ -63,7 +63,6 @@
 
 ;;; Code:
 
-(require 'base64)
 (require 'mm-util)
 
 (defconst utf7-direct-encoding-chars " -%'-*,-[]-}"

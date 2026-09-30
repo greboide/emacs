@@ -1,10 +1,10 @@
 /* sig2str.c -- convert between signal names and numbers
 
-   Copyright (C) 2002, 2004, 2006, 2009-2018 Free Software Foundation, Inc.
+   Copyright (C) 2002, 2004, 2006, 2009-2026 Free Software Foundation, Inc.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
+   the Free Software Foundation, either version 3 of the License, or
    (at your option) any later version.
 
    This program is distributed in the hope that it will be useful,
@@ -19,8 +19,11 @@
 
 #include <config.h>
 
-#include <limits.h>
+/* Specification.  */
 #include <signal.h>
+
+#include <limits.h>
+#include <stdcountof.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -189,6 +192,11 @@ static struct numname { int num; char const name[8]; } numname_table[] =
     NUMNAME (STKFLT),
 #endif
 
+    /* AIX 7.  */
+#ifdef SIGCPUFAIL
+    NUMNAME (CPUFAIL),
+#endif
+
     /* AIX 5L.  */
 #ifdef SIGDANGER
     NUMNAME (DANGER),
@@ -229,7 +237,12 @@ static struct numname { int num; char const name[8]; } numname_table[] =
     NUMNAME (WINDOW),   /* Older name for SIGWINCH.  */
 #endif
 
-    /* BeOS */
+    /* OpenBSD.  */
+#ifdef SIGTHR
+    NUMNAME (THR),
+#endif
+
+    /* BeOS, Haiku */
 #ifdef SIGKILLTHR
     NUMNAME (KILLTHR),
 #endif
@@ -239,11 +252,14 @@ static struct numname { int num; char const name[8]; } numname_table[] =
     NUMNAME (DIL),
 #endif
 
+    /* native Windows */
+#ifdef SIGBREAK
+    NUMNAME (BREAK),
+#endif
+
     /* Korn shell and Bash, of uncertain vintage.  */
     { 0, "EXIT" }
   };
-
-#define NUMNAME_ENTRIES (sizeof numname_table / sizeof numname_table[0])
 
 /* ISDIGIT differs from isdigit, as follows:
    - Its arg may be any int or unsigned int; it need not be an unsigned char
@@ -269,24 +285,24 @@ str2signum (char const *signame)
     }
   else
     {
-      unsigned int i;
-      for (i = 0; i < NUMNAME_ENTRIES; i++)
-        if (strcmp (numname_table[i].name, signame) == 0)
+      for (int i = 0; i < countof (numname_table); i++)
+        if (streq (numname_table[i].name, signame))
           return numname_table[i].num;
 
       {
-        char *endp;
         int rtmin = SIGRTMIN;
         int rtmax = SIGRTMAX;
 
         if (0 < rtmin && strncmp (signame, "RTMIN", 5) == 0)
           {
+            char *endp;
             long int n = strtol (signame + 5, &endp, 10);
             if (! *endp && 0 <= n && n <= rtmax - rtmin)
               return rtmin + n;
           }
         else if (0 < rtmax && strncmp (signame, "RTMAX", 5) == 0)
           {
+            char *endp;
             long int n = strtol (signame + 5, &endp, 10);
             if (! *endp && rtmin - rtmax <= n && n <= 0)
               return rtmax + n;
@@ -314,8 +330,7 @@ str2sig (char const *signame, int *signum)
 int
 sig2str (int signum, char *signame)
 {
-  unsigned int i;
-  for (i = 0; i < NUMNAME_ENTRIES; i++)
+  for (int i = 0; i < countof (numname_table); i++)
     if (numname_table[i].num == signum)
       {
         strcpy (signame, numname_table[i].name);
@@ -325,11 +340,11 @@ sig2str (int signum, char *signame)
   {
     int rtmin = SIGRTMIN;
     int rtmax = SIGRTMAX;
-    int base, delta;
 
     if (! (rtmin <= signum && signum <= rtmax))
       return -1;
 
+    int base;
     if (signum <= rtmin + (rtmax - rtmin) / 2)
       {
         strcpy (signame, "RTMIN");
@@ -341,7 +356,7 @@ sig2str (int signum, char *signame)
         base = rtmax;
       }
 
-    delta = signum - base;
+    int delta = signum - base;
     if (delta != 0)
       sprintf (signame + 5, "%+d", delta);
     return 0;

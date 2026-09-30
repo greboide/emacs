@@ -1,6 +1,6 @@
 ;;; dom.el --- XML/HTML (etc.) DOM manipulation and searching functions -*- lexical-binding: t -*-
 
-;; Copyright (C) 2014-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2014-2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
 ;; Keywords: xml, html
@@ -25,28 +25,22 @@
 ;;; Code:
 
 (require 'cl-lib)
-(eval-when-compile (require 'subr-x))
+(require 'subr-x)
 
 (defsubst dom-tag (node)
   "Return the NODE tag."
   ;; Called on a list of nodes.  Use the first.
-  (if (consp (car node))
-      (caar node)
-    (car node)))
+  (car (if (consp (car node)) (car node) node)))
 
 (defsubst dom-attributes (node)
   "Return the NODE attributes."
   ;; Called on a list of nodes.  Use the first.
-  (if (consp (car node))
-      (cadr (car node))
-    (cadr node)))
+  (cadr (if (consp (car node)) (car node) node)))
 
 (defsubst dom-children (node)
   "Return the NODE children."
   ;; Called on a list of nodes.  Use the first.
-  (if (consp (car node))
-      (cddr (car node))
-    (cddr node)))
+  (cddr (if (consp (car node)) (car node) node)))
 
 (defun dom-non-text-children (node)
   "Return all non-text-node children of NODE."
@@ -62,10 +56,17 @@
 (defun dom-set-attribute (node attribute value)
   "Set ATTRIBUTE in NODE to VALUE."
   (setq node (dom-ensure-node node))
-  (let ((old (assoc attribute (cadr node))))
+  (let* ((attributes (cadr node))
+         (old (assoc attribute attributes)))
     (if old
 	(setcdr old value)
-      (setcar (cdr node) (nconc (cadr node) (list (cons attribute value)))))))
+      (setcar (cdr node) (cons (cons attribute value) attributes)))))
+
+(defun dom-remove-attribute (node attribute)
+  "Remove ATTRIBUTE from NODE."
+  (setq node (dom-ensure-node node))
+  (when-let* ((old (assoc attribute (cadr node))))
+    (setcar (cdr node) (delq old (cadr node)))))
 
 (defmacro dom-attr (node attr)
   "Return the attribute ATTR from NODE.
@@ -74,25 +75,44 @@ A typical attribute is `href'."
 
 (defun dom-text (node)
   "Return all the text bits in the current node concatenated."
-  (mapconcat 'identity (cl-remove-if-not 'stringp (dom-children node)) " "))
+  (declare (obsolete dom-inner-text "31.1"))
+  (mapconcat #'identity (cl-remove-if-not #'stringp (dom-children node)) " "))
 
 (defun dom-texts (node &optional separator)
   "Return all textual data under NODE concatenated with SEPARATOR in-between."
+  (declare (obsolete dom-inner-text "31.1"))
   (if (eq (dom-tag node) 'script)
       ""
     (mapconcat
-     'identity
-     (mapcar
-      (lambda (elem)
-        (cond
-         ((stringp elem)
-	  elem)
-         ((eq (dom-tag elem) 'script)
-          "")
-         (t
-	  (dom-texts elem separator))))
-      (dom-children node))
+     (lambda (elem)
+       (cond
+        ((stringp elem)
+         elem)
+        ((eq (dom-tag elem) 'script)
+         "")
+        (t
+         (dom-texts elem separator))))
+     (dom-children node)
      (or separator " "))))
+
+(defun dom-inner-text--1 (node)
+  (dolist (child (dom-children node))
+    (cond
+     ((stringp child) (insert child))
+     ((memq (dom-tag child) '(script comment)))
+     (t (dom-inner-text--1 child)))))
+
+(defun dom-inner-text (node)
+  "Return all textual data under NODE as a single string."
+  (let ((children (dom-children node)))
+    (if (and (length= children 1)
+             (stringp (car children)))
+        ;; Copy the string content when returning to be consistent with
+        ;; the other branch of this `if' expression.
+        (copy-sequence (car children))
+    (with-work-buffer
+      (dom-inner-text--1 node)
+      (buffer-string)))))
 
 (defun dom-child-by-tag (dom tag)
   "Return the first child of DOM that is of type TAG."
@@ -107,6 +127,18 @@ A name is a symbol like `td'."
 			  when matches
 			  append matches)))
     (if (equal (dom-tag dom) tag)
+	(cons dom matches)
+      matches)))
+
+(defun dom-search (dom predicate)
+  "Return elements in DOM where PREDICATE is non-nil.
+PREDICATE is called with the node as its only parameter."
+  (let ((matches (cl-loop for child in (dom-children dom)
+			  for matches = (and (not (stringp child))
+					     (dom-search child predicate))
+			  when matches
+			  append matches)))
+    (if (funcall predicate dom)
 	(cons dom matches)
       matches)))
 
@@ -179,9 +211,7 @@ ATTRIBUTE would typically be `class', `id' or the like."
 
 (defun dom-node (tag &optional attributes &rest children)
   "Return a DOM node with TAG and ATTRIBUTES."
-  (if children
-      `(,tag ,attributes ,@children)
-    (list tag attributes)))
+  `(,tag ,attributes ,@children))
 
 (defun dom-append-child (node child)
   "Append CHILD to the end of NODE's children."
@@ -199,11 +229,7 @@ If BEFORE is nil, make CHILD NODE's first child."
     (let ((pos (if before
 		   (cl-position before children)
 		 0)))
-      (if (zerop pos)
-	  ;; First child.
-	  (setcdr (cdr node) (cons child (cddr node)))
-	(setcdr (nthcdr (1- pos) children)
-		(cons child (nthcdr pos children))))))
+      (push child (nthcdr (+ 2 pos) node))))
   node)
 
 (defun dom-ensure-node (node)
@@ -229,9 +255,9 @@ white-space."
 	(insert "(")
 	(dolist (elem attr)
 	  (insert (format "(%S . %S)" (car elem) (cdr elem)))
-	  (if (zerop (cl-decf times))
+          (if (zerop (decf times))
 	      (insert ")")
-	    (insert "\n" (make-string column ? ))))))
+	    (insert "\n" (make-string column ?\s))))))
     (let* ((children (if remove-empty
 			 (cl-remove-if
 			  (lambda (child)
@@ -242,16 +268,69 @@ white-space."
 	   (times (length children)))
       (if (null children)
 	  (insert ")")
-	(insert "\n" (make-string (1+ column) ? ))
+	(insert "\n" (make-string (1+ column) ?\s))
 	(dolist (child children)
 	  (if (stringp child)
-	      (if (or (not remove-empty)
-		      (not (string-match "\\`[\n\r\t  ]*\\'" child)))
+	      (if (not (and remove-empty
+		            (string-match "\\`[\n\r\t  ]*\\'" child)))
 		  (insert (format "%S" child)))
 	    (dom-pp child remove-empty))
-	  (if (zerop (cl-decf times))
+          (if (zerop (decf times))
 	      (insert ")")
-	    (insert "\n" (make-string (1+ column) ? ))))))))
+	    (insert "\n" (make-string (1+ column) ?\s))))))))
+
+(define-inline dom--html-boolean-attribute-p (attr)
+  "Return non-nil if ATTR is an HTML boolean attribute."
+  (inline-quote
+   (memq ,attr
+         ;; Extracted from the HTML Living Standard list of attributes
+         ;; at <https://html.spec.whatwg.org/#attributes-3>.
+         '( allowfullscreen alpha async autofocus autoplay checked
+            controls default defer disabled formnovalidate inert ismap
+            itemscope loop multiple muted nomodule novalidate open
+            playsinline readonly required reversed selected
+            shadowrootclonable shadowrootdelegatesfocus
+            shadowrootserializable))))
+
+(defun dom-print (dom &optional pretty xml)
+  "Print DOM at point as HTML/XML.
+If PRETTY, indent the HTML/XML logically.
+If XML, generate XML instead of HTML."
+  (let ((column (current-column))
+        (indent-tabs-mode nil)) ;; Indent with spaces
+    (insert (format "<%s" (dom-tag dom)))
+    (pcase-dolist (`(,attr . ,value) (dom-attributes dom))
+      ;; Don't print attributes without a value.
+      (when value
+        (insert
+         ;; HTML boolean attributes should not have an = value.  The
+         ;; presence of a boolean attribute on an element represents
+         ;; the true value, and the absence of the attribute
+         ;; represents the false value.
+         (if (and (not xml) (dom--html-boolean-attribute-p attr))
+             (format " %s" attr)
+           (format " %s=%S" attr (url-insert-entities-in-string
+                                  (format "%s" value)))))))
+    (let* ((children (dom-children dom))
+	   (non-text nil)
+           (indent (+ column 2)))
+      (if (null children)
+	  (insert " />")
+	(insert ">")
+        (dolist (child children)
+	  (if (stringp child)
+	      (insert (url-insert-entities-in-string child))
+	    (setq non-text t)
+	    (when pretty
+              (insert "\n")
+              (indent-line-to indent))
+	    (dom-print child pretty xml)))
+	;; If we inserted non-text child nodes, or a text node that
+	;; ends with a newline, then we indent the end tag.
+        (when (and pretty (or (bolp) non-text))
+	  (or (bolp) (insert "\n"))
+	  (indent-line-to column))
+        (insert (format "</%s>" (dom-tag dom)))))))
 
 (provide 'dom)
 

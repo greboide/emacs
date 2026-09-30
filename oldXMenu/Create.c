@@ -1,9 +1,27 @@
 /* Copyright    Massachusetts Institute of Technology    1985	*/
 
-#include "copyright.h"
+/*
+
+Copyright 1985, 1986, 1987 by the Massachusetts Institute of Technology
+
+Permission to use, copy, modify, and distribute this
+software and its documentation for any purpose and without
+fee is hereby granted, provided that the above copyright
+notice appear in all copies and that both that copyright
+notice and this permission notice appear in supporting
+documentation, and that the name of M.I.T. not be used in
+advertising or publicity pertaining to distribution of the
+software without specific, written prior permission.
+M.I.T. makes no representations about the suitability of
+this software for any purpose.  It is provided "as is"
+without express or implied warranty.
+
+*/
+
+
 
 /*
-Copyright (C) 1993-1994, 2001-2018 Free Software Foundation, Inc.
+Copyright (C) 1993-1994, 2001-2026 Free Software Foundation, Inc.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -87,7 +105,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 #define XASSOC_TABLE_SIZE	64
 
-char *x_get_resource_string (char const *, char const *);
+const char *x_get_resource_string (char const *, char const *);
 
 
 
@@ -107,7 +125,7 @@ XMenuCreate(Display *display, Window parent, register char const *def_env)
                   		/* Window ID of the menu's parent window. */
                            	/* X Defaults program environment name. */
 {
-  register char *def_val;	/* X Default value temp variable. */
+  register const char *def_val;	/* X Default value temp variable. */
 
   register XMenu *menu;		/* Pointer to the new menu. */
   XMStyle menu_style;		/* Menu display style. */
@@ -183,7 +201,7 @@ XMenuCreate(Display *display, Window parent, register char const *def_env)
   /*
    * Create the XAssocTable
    */
-  assoc_tab = (XAssocTable *)XCreateAssocTable(XASSOC_TABLE_SIZE);
+  assoc_tab = XCreateAssocTable (XASSOC_TABLE_SIZE);
   if(assoc_tab == NULL) {
     _XMErrorCode= XME_CREATE_ASSOC;
     return(NULL);
@@ -423,31 +441,31 @@ XMenuCreate(Display *display, Window parent, register char const *def_env)
     switch (inact_pnum)
       {
       case 0:
-	data = (char *)dimple1_bits;
+	data = dimple1_bits;
 	width = dimple1_width;
 	height = dimple1_height;
 	break;
 
       case 1:
-	data = (char *)dimple3_bits;
+	data = dimple3_bits;
 	width = dimple3_width;
 	height = dimple3_height;
 	break;
 
       case 2:
-	data = (char *)gray1_bits;
+	data = gray1_bits;
 	width = gray1_width;
 	height = gray1_height;
 	break;
 
       case 3:
-	data = (char *)gray3_bits;
+	data = gray3_bits;
 	width = gray3_width;
 	height = gray3_height;
 	break;
 
       case 4:
-	data = (char *)cross_weave_bits;
+	data = cross_weave_bits;
 	width = cross_weave_width;
 	height = cross_weave_height;
 	break;
@@ -598,6 +616,8 @@ XMenuCreate(Display *display, Window parent, register char const *def_env)
    * Create pane, active, and inactive GC's.
    */
   values = (XGCValues *)malloc(sizeof(XGCValues));
+  if (!values)
+    return NULL;
   valuemask = (GCForeground | GCBackground | GCFont | GCLineWidth);
 
   /*

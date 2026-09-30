@@ -1,23 +1,23 @@
-;;; edebug-test-code.el --- Sample code for the Edebug test suite
+;;; edebug-test-code.el --- Sample code for the Edebug test suite  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2017-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2017-2026 Free Software Foundation, Inc.
 
 ;; Author: Gemini Lasswell
 
 ;; This file is part of GNU Emacs.
 
-;; This program is free software: you can redistribute it and/or
-;; modify it under the terms of the GNU General Public License as
-;; published by the Free Software Foundation, either version 3 of the
-;; License, or (at your option) any later version.
-;;
-;; This program is distributed in the hope that it will be useful, but
-;; WITHOUT ANY WARRANTY; without even the implied warranty of
-;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-;; General Public License for more details.
-;;
+;; GNU Emacs is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; GNU Emacs is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
 ;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -41,9 +41,9 @@
 (defun edebug-test-code-range (num)
   !start!(let ((index 0)
         (result nil))
-    (while (< index num)!test!
+    (while !lt!(< index num)!test!
       (push index result)!loop!
-      (cl-incf index))!end-loop!
+      (incf index))!end-loop!
     (nreverse result)))
 
 (defun edebug-test-code-choices (input)
@@ -62,12 +62,12 @@
 
 (defun edebug-test-code-format-vector-node (node)
   !start!(concat "["
-          (apply 'concat (mapcar 'edebug-test-code-format-node node))!apply!
+          (apply #'concat (mapcar #'edebug-test-code-format-node node))!apply!
           "]"))
 
 (defun edebug-test-code-format-list-node (node)
   !start!(concat "{"
-          (apply 'concat (mapcar 'edebug-test-code-format-node node))!apply!
+          (apply #'concat (mapcar #'edebug-test-code-format-node node))!apply!
           "}"))
 
 (defun edebug-test-code-format-node (node)
@@ -126,9 +126,42 @@
   !start!(with-current-buffer (get-buffer-create "*edebug-test-code-buffer*")
     !body!(format "current-buffer: %s" (current-buffer))))
 
+(defun edebug-test-code-bounce-point ()
+  !start!(with-current-buffer (get-buffer-create "*edebug-test-code-buffer*")
+    (erase-buffer)
+    (insert "123\n567\n9ab\n")
+    (narrow-to-region 5 9)
+    (goto-char 6)!goto-char!
+    (push-mark 1)!push-mark!
+    (set-mark nil)!clear-mark!
+    (+ 1)!1! (+ 6)!6! (+ 10)!10!))
+
 (defun edebug-test-code-use-destructuring-bind ()
   (let ((two 2) (three 3))
     (cl-destructuring-bind (x . y) (cons two three) (+ x!x! y!y!))))
+
+(defun edebug-test-code-use-cl-macrolet (x)
+  (cl-macrolet ((wrap (func &rest args)
+		      `(format "The result of applying %s to %s is %S"
+                               ',func!func! ',args
+                               ,(cons func args))))
+    (wrap + 1 x)))
+
+(defun edebug-test-code-cl-flet1 ()
+  (cl-flet
+      ;; This `&rest' sexp head should not collide with
+      ;; the Edebug spec elem of the same name.
+      ((f (&rest x) x)
+       (gate (x) (+ x 5)))
+    ;; This call to `gate' shouldn't collide with the Edebug spec elem
+    ;; of the same name.
+    (message "Hi %s" (gate 7))))
+
+(defun edebug-test-code-use-gv-expander (x)
+  (declare (gv-expander
+            (lambda (do)
+              (funcall do `(car ,x) (lambda (v) `(setcar ,x ,v))))))
+  (car x))
 
 (provide 'edebug-test-code)
 ;;; edebug-test-code.el ends here

@@ -1,18 +1,18 @@
 /* provide consistent interface to getgroups for systems that don't allow N==0
 
-   Copyright (C) 1996, 1999, 2003, 2006-2018 Free Software Foundation, Inc.
+   Copyright (C) 1996, 1999, 2003, 2006-2026 Free Software Foundation, Inc.
 
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
-   (at your option) any later version.
+   This file is free software: you can redistribute it and/or modify
+   it under the terms of the GNU Lesser General Public License as
+   published by the Free Software Foundation; either version 2.1 of the
+   License, or (at your option) any later version.
 
-   This program is distributed in the hope that it will be useful,
+   This file is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU Lesser General Public License for more details.
 
-   You should have received a copy of the GNU General Public License
+   You should have received a copy of the GNU Lesser General Public License
    along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* written by Jim Meyering */
@@ -30,7 +30,7 @@
 /* Provide a stub that fails with ENOSYS, since there is no group
    information available on mingw.  */
 int
-getgroups (int n _GL_UNUSED, GETGROUPS_T *groups _GL_UNUSED)
+getgroups (_GL_UNUSED int n, _GL_UNUSED GETGROUPS_T *groups)
 {
   errno = ENOSYS;
   return -1;
@@ -58,8 +58,8 @@ int posix_getgroups (int, gid_t []) __asm ("_getgroups");
 #  define getgroups posix_getgroups
 # endif
 
-/* On at least Ultrix 4.3 and NextStep 3.2, getgroups (0, NULL) always
-   fails.  On other systems, it returns the number of supplemental
+/* On at least NeXTstep 3.2, getgroups (0, NULL) always fails.
+   On other systems, it returns the number of supplemental
    groups for the process.  This function handles that special case
    and lets the system-provided function handle all others.  However,
    it can fail with ENOMEM if memory is tight.  It is unspecified
@@ -68,10 +68,6 @@ int posix_getgroups (int, gid_t []) __asm ("_getgroups");
 int
 rpl_getgroups (int n, gid_t *group)
 {
-  int n_groups;
-  GETGROUPS_T *gbuf;
-  int saved_errno;
-
   if (n < 0)
     {
       errno = EINVAL;
@@ -80,28 +76,25 @@ rpl_getgroups (int n, gid_t *group)
 
   if (n != 0 || !GETGROUPS_ZERO_BUG)
     {
-      int result;
-      if (sizeof *group == sizeof *gbuf)
+      if (sizeof *group == sizeof (GETGROUPS_T))
         return getgroups (n, (GETGROUPS_T *) group);
 
-      if (SIZE_MAX / sizeof *gbuf <= n)
+      if (SIZE_MAX / sizeof (GETGROUPS_T) <= n)
         {
           errno = ENOMEM;
           return -1;
         }
-      gbuf = malloc (n * sizeof *gbuf);
+      GETGROUPS_T *gbuf = malloc (n * sizeof *gbuf);
       if (!gbuf)
         return -1;
-      result = getgroups (n, gbuf);
+      int result = getgroups (n, gbuf);
       if (0 <= result)
         {
           n = result;
           while (n--)
             group[n] = gbuf[n];
         }
-      saved_errno = errno;
       free (gbuf);
-      errno = saved_errno;
       return result;
     }
 
@@ -111,21 +104,18 @@ rpl_getgroups (int n, gid_t *group)
       /* No need to worry about address arithmetic overflow here,
          since the ancient systems that we're running on have low
          limits on the number of secondary groups.  */
-      gbuf = malloc (n * sizeof *gbuf);
+      GETGROUPS_T *gbuf = malloc (n * sizeof *gbuf);
       if (!gbuf)
         return -1;
-      n_groups = getgroups (n, gbuf);
+      int n_groups = getgroups (n, gbuf);
       if (n_groups == -1 ? errno != EINVAL : n_groups < n)
-        break;
+        {
+          free (gbuf);
+          return n_groups;
+        }
       free (gbuf);
       n *= 2;
     }
-
-  saved_errno = errno;
-  free (gbuf);
-  errno = saved_errno;
-
-  return n_groups;
 }
 
 #endif /* HAVE_GETGROUPS */

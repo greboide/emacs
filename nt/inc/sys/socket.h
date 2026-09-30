@@ -1,4 +1,4 @@
-/* Copyright (C) 1995, 2001-2018 Free Software Foundation, Inc.
+/* Copyright (C) 1995, 2001-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -43,12 +43,11 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #undef FD_ZERO
 #endif
 
-/* Avoid duplicate definition of timeval.  MinGW uses _TIMEVAL_DEFINED
-   in sys/time.h to avoid that.  */
-#if defined (HAVE_TIMEVAL) && defined (_MSC_VER)
-#define timeval ws_timeval
+#if defined __MINGW32_VERSION && __MINGW32_VERSION >= 5000002L
+/* Need winerror.h before winsock2.h with mingw.org's MinGW 5.x,
+   otherwise some error codes are not defined.  */
+# include <winerror.h>
 #endif
-
 #include <winsock2.h>
 #include <ws2tcpip.h>
 /* process.c uses uint16_t (from C99) for IPv6, but
@@ -77,16 +76,14 @@ typedef unsigned short uint16_t;
 #include "w32.h"
 #endif	/* EMACS_CONFIG_H */
 
-#if defined (HAVE_TIMEVAL) && defined (_MSC_VER)
-#undef timeval
-#endif
-
 /* shadow functions where we provide our own wrapper */
 #define socket         sys_socket
 #define bind           sys_bind
 #define connect        sys_connect
 #define htons          sys_htons
 #define ntohs          sys_ntohs
+#define htonl          sys_htonl
+#define ntohl          sys_ntohl
 #define inet_addr      sys_inet_addr
 #define gethostname    sys_gethostname
 #define gethostbyname  sys_gethostbyname
@@ -107,6 +104,8 @@ int sys_bind (int s, const struct sockaddr *addr, int namelen);
 int sys_connect (int s, const struct sockaddr *addr, int namelen);
 u_short sys_htons (u_short hostshort);
 u_short sys_ntohs (u_short netshort);
+u_long sys_htonl (u_long hostlong);
+u_long sys_ntohl (u_long netlong);
 unsigned long sys_inet_addr (const char * cp);
 int sys_gethostname (char * name, int namelen);
 struct hostent * sys_gethostbyname (const char * name);

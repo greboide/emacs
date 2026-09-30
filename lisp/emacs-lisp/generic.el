@@ -1,8 +1,8 @@
-;;; generic.el --- defining simple major modes with comment and font-lock
+;;; generic.el --- defining simple major modes with comment and font-lock  -*- lexical-binding: t; -*-
 ;;
-;; Copyright (C) 1997, 1999, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1997, 1999, 2001-2026 Free Software Foundation, Inc.
 ;;
-;; Author:  Peter Breton <pbreton@cs.umb.edu>
+;; Author: Peter Breton <pbreton@cs.umb.edu>
 ;; Created: Fri Sep 27 1996
 ;; Keywords: generic, comment, font-lock
 ;; Package: emacs
@@ -96,9 +96,8 @@
 ;; Internal Variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defvar generic-font-lock-keywords nil
+(defvar-local generic-font-lock-keywords nil
   "Keywords for `font-lock-defaults' in a generic mode.")
-(make-variable-buffer-local 'generic-font-lock-keywords)
 
 ;;;###autoload
 (defvar generic-mode-list nil
@@ -115,6 +114,10 @@ instead (which see).")
 				    font-lock-list auto-mode-list
 				    function-list &optional docstring)
   "Create a new generic mode MODE.
+
+A \"generic\" mode is a simple major mode with basic support for
+comment syntax and Font Lock mode, but otherwise does not have
+any special keystrokes or functionality available.
 
 MODE is the name of the command for the generic mode; don't quote it.
 The optional DOCSTRING is the documentation for the mode command.  If
@@ -149,23 +152,27 @@ See the file generic-x.el for some examples of `define-generic-mode'."
   (declare (debug (sexp def-form def-form def-form form def-form
 			[&optional stringp] &rest [keywordp form]))
 	   (indent 1)
-           (doc-string 7))
+           (doc-string 7)
+           (autoload-macro expand))
 
   ;; Backward compatibility.
   (when (eq (car-safe mode) 'quote)
-    (setq mode (eval mode)))
+    (setq mode (eval mode t)))
 
   (let* ((name (symbol-name mode))
 	 (pretty-name (capitalize (replace-regexp-in-string
 				   "-mode\\'" "" name))))
 
     `(progn
-       ;; Add a new entry.
-       (add-to-list 'generic-mode-list ,name)
+       (progn
+         :autoload-end
 
-       ;; Add it to auto-mode-alist
-       (dolist (re ,auto-mode-list)
-	 (add-to-list 'auto-mode-alist (cons re ',mode)))
+         ;; Add a new entry.
+         (add-to-list 'generic-mode-list ,name)
+
+         ;; Add it to auto-mode-alist
+         (dolist (re ,auto-mode-list)
+	   (add-to-list 'auto-mode-alist (cons re ',mode))))
 
        (defun ,mode ()
 	 ,(or docstring
@@ -202,7 +209,7 @@ See the file generic-x.el for some examples of `define-generic-mode'."
     (setq font-lock-defaults '(generic-font-lock-keywords))
 
     ;; Call a list of functions
-    (mapc 'funcall function-list)
+    (mapc #'funcall function-list)
 
     (run-mode-hooks mode-hook)))
 
@@ -241,7 +248,6 @@ Some generic modes are defined in `generic-x.el'."
   "Set up comment functionality for generic mode."
   (let ((chars nil)
 	(comstyles)
-        (comstyle "")
         (comment-start nil))
 
     ;; Go through all the comments.
@@ -265,14 +271,16 @@ Some generic modes are defined in `generic-x.el'."
 	    ;; Store the relevant info but don't update yet.
 	    (push (cons c0 (concat (cdr (assoc c0 chars)) "1")) chars)
 	    (push (cons c1 (concat (cdr (assoc c1 chars))
-				   (concat "2" comstyle))) chars)))
+				   (concat "2" comstyle)))
+		  chars)))
 	(if (= (length end) 1)
 	    (modify-syntax-entry (aref end 0)
 				 (concat ">" comstyle) st)
 	  (let ((c0 (aref end 0)) (c1 (aref end 1)))
 	    ;; Store the relevant info but don't update yet.
 	    (push (cons c0 (concat (cdr (assoc c0 chars))
-				   (concat "3" comstyle))) chars)
+				   (concat "3" comstyle)))
+		  chars)
 	    (push (cons c1 (concat (cdr (assoc c1 chars)) "4")) chars)))))
 
     ;; Process the chars that were part of a 2-char comment marker

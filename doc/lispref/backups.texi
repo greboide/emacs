@@ -1,6 +1,6 @@
 @c -*-texinfo-*-
 @c This is part of the GNU Emacs Lisp Reference Manual.
-@c Copyright (C) 1990-1995, 1999, 2001-2018 Free Software Foundation,
+@c Copyright (C) 1990--1995, 1999, 2001--2026 Free Software Foundation,
 @c Inc.
 @c See the file elisp.texi for copying conditions.
 @node Backups and Auto-Saving
@@ -232,11 +232,11 @@ non-@code{nil}.
 @defopt backup-by-copying-when-privileged-mismatch
 This variable, if non-@code{nil}, specifies the same behavior as
 @code{backup-by-copying-when-mismatch}, but only for certain user-id
-values: namely, those less than or equal to a certain number.  You set
-this variable to that number.
+and group-id values: namely, those less than or equal to a certain number.
+You set this variable to that number.
 
 Thus, if you set @code{backup-by-copying-when-privileged-mismatch}
-to 0, backup by copying is done for the superuser only,
+to 0, backup by copying is done for the superuser and group 0 only,
 when necessary to prevent a change in the owner of the file.
 
 The default is 200.
@@ -414,10 +414,16 @@ version that the caller should consider deleting now.
 @end smallexample
 @end defun
 
-@c Emacs 19 feature
+@defun file-backup-file-names filename
+This function returns a list of all the backup file names for
+@var{filename}, or @code{nil} if there are none.  The files are sorted
+by modification time, descending, so that the most recent files are
+first.
+@end defun
+
 @defun file-newest-backup filename
-This function returns the name of the most recent backup file for
-@var{filename}, or @code{nil} if that file has no backup files.
+This function returns the first element of the list returned by
+@code{file-backup-file-names}.
 
 Some file comparison commands use this function so that they can
 automatically compare a file with its most recent backup.
@@ -460,6 +466,38 @@ Auto Save mode is enabled if @code{buffer-auto-save-file-name} is
 non-@code{nil} and @code{buffer-saved-size} (see below) is non-zero.
 @end deffn
 
+@defvar auto-save-file-name-transforms
+This variable lists transforms to apply to buffer's file name before
+making the auto-save file name.
+
+Each transform is a list of the form @w{@code{(@var{regexp}
+@var{replacement} [@var{uniquify}])}}.  @var{regexp} is a regular
+expression to match against the file name; if it matches,
+@code{replace-match} is used to replace the matching part with
+@var{replacement}.  If the optional element @var{uniquify} is non-@code{nil},
+the auto-save file name is constructed by concatenating the directory
+part of the transformed file name with the buffer's file name in which
+all directory separators were changed to @samp{!} to prevent clashes.
+(This will not work correctly if your filesystem truncates the
+resulting name.)
+
+If @var{uniquify} is one of the members of
+@code{secure-hash-algorithms}, Emacs constructs the nondirectory part
+of the auto-save file name by applying that @code{secure-hash} to the
+buffer file name.  This avoids any risk of excessively long file
+names.
+
+All the transforms in the list are tried, in the order they are listed.
+When one transform applies, its result is final;
+no further transforms are tried.
+
+The default value is set up to put the auto-save files of remote files
+into the temporary directory (@pxref{Unique File Names}).
+
+On MS-DOS filesystems without long names this variable is always
+ignored.
+@end defvar
+
 @defun auto-save-file-name-p filename
 This function returns a non-@code{nil} value if @var{filename} is a
 string that could be the name of an auto-save file.  It assumes
@@ -481,21 +519,6 @@ name.  The argument @var{filename} should not contain a directory part.
      @result{} nil
 @end group
 @end example
-
-The standard definition of this function is as follows:
-
-@example
-@group
-(defun auto-save-file-name-p (filename)
-  "Return non-nil if FILENAME can be yielded by..."
-  (string-match "^#.*#$" filename))
-@end group
-@end example
-
-This function exists so that you can customize it if you wish to
-change the naming convention for auto-save files.  If you redefine it,
-be sure to redefine the function @code{make-auto-save-file-name}
-correspondingly.
 @end defun
 
 @defun make-auto-save-file-name
@@ -511,31 +534,6 @@ function should check that variable first.
      @result{} "/xcssun/users/rms/lewis/#backups.texi#"
 @end group
 @end example
-
-Here is a simplified version of the standard definition of this
-function:
-
-@example
-@group
-(defun make-auto-save-file-name ()
-  "Return file name to use for auto-saves \
-of current buffer.."
-  (if buffer-file-name
-@end group
-@group
-      (concat
-       (file-name-directory buffer-file-name)
-       "#"
-       (file-name-nondirectory buffer-file-name)
-       "#")
-    (expand-file-name
-     (concat "#%" (buffer-name) "#"))))
-@end group
-@end example
-
-This exists as a separate function so that you can redefine it to
-customize the naming convention for auto-save files.  Be sure to
-change @code{auto-save-file-name-p} in a corresponding way.
 @end defun
 
 @defopt auto-save-visited-file-name
@@ -714,10 +712,14 @@ contents and the file contents are identical before the revert
 operation, reverting preserves all the markers.  If they are not
 identical, reverting does change the buffer; in that case, it preserves
 the markers in the unchanged text (if any) at the beginning and end of
-the buffer.  Preserving any additional markers would be problematical.
+the buffer.  Preserving any additional markers would be problematic.
+
+When reverting from non-file sources, markers are usually not
+preserved, but this is up to the specific @code{revert-buffer-function}
+implementation.
 @end deffn
 
-@defvar revert-buffer-in-progress-p
+@defvar revert-buffer-in-progress
 @code{revert-buffer} binds this variable to a non-@code{nil} value
 while it is working.
 @end defvar
@@ -775,6 +777,16 @@ after inserting the modified contents.  A custom @code{revert-buffer-function}
 may or may not run this hook.
 @end defvar
 
+@defvar revert-buffer-restore-functions
+The value of this variable specifies a list of functions that preserve
+the state of the buffer.  Before the revert operation each function from
+this list is called without arguments, and it should return a lambda
+that preserves some particular state (for example, the read-only state).
+After the revert operation each lambda will be called one by one in the
+order of the list, and it should restore the saved state in the reverted
+buffer.
+@end defvar
+
 Emacs can revert buffers automatically.  It does that by default for
 buffers visiting files.  The following describes how to add support
 for auto-reverting new types of buffers.
@@ -807,7 +819,7 @@ If you just want to automatically auto-revert every
 
 @example
 (setq-local buffer-stale-function
-     #'(lambda (&optional noconfirm) 'fast))
+     (lambda (&optional noconfirm) 'fast))
 @end example
 
 @noindent
@@ -839,6 +851,37 @@ unmodified should always keep the buffer marked unmodified.
 It is important to assure that point does not continuously jump around
 as a consequence of auto-reverting.  Of course, moving point might be
 inevitable if the buffer radically changes.
+
+@defvar auto-revert-buffer-in-progress
+@code{auto-revert-buffer} binds this variable to a non-@code{nil} value
+while it is working.  This can be used by major mode
+@code{revert-buffer-function} implementations to suppress messages in
+Auto Revert modes, for example.
+@end defvar
+
+@defvar inhibit-auto-revert-buffers
+When the current buffer is member of this variable (a list of buffers),
+auto-reverting is suppressed for that buffer.  This is useful if serious
+changes are applied to that buffer which would be poisoned by an
+unexpected auto-revert.  After the change is finished, the buffer shall
+be removed from @code{inhibit-auto-revert-buffers}.
+
+The check of membership in @code{inhibit-auto-revert-buffers} is applied
+prior to the call of @code{buffer-stale-function}; any heavy check in
+that function is avoided, therefore.
+
+If auto-reverting is triggered by file notification while
+@code{inhibit-auto-revert-buffers} prevents this, auto-revert will
+happen next time the buffer is polled for changes, unless
+@code{auto-revert-avoid-polling} is non-@code{nil}.  @pxref{(emacs) Auto
+Revert}.
+@end defvar
+
+@defmac inhibit-auto-revert &rest body
+This macro adds the current buffer to
+@code{inhibit-auto-revert-buffers}, runs @var{body}, and removes the
+current buffer from @code{inhibit-auto-revert-buffers} afterwards.
+@end defmac
 
 You should make sure that the @code{revert-buffer-function} does not
 print messages that unnecessarily duplicate Auto Revert's own messages,

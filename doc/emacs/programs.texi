@@ -1,6 +1,6 @@
 @c -*- coding: utf-8 -*-
 @c This is part of the Emacs manual.
-@c Copyright (C) 1985-1987, 1993-1995, 1997, 1999-2018 Free Software
+@c Copyright (C) 1985--1987, 1993--1995, 1997, 1999--2026 Free Software
 @c Foundation, Inc.
 @c See file emacs.texi for copying conditions.
 @node Programs
@@ -83,21 +83,47 @@ mode for the C programming language is @code{c-mode}.
 @cindex DNS mode
 @cindex Javascript mode
 @cindex Awk mode
+@cindex C# mode
+@cindex JSON mode
+@cindex SQL mode
+@cindex TypeScript mode
+@cindex CSS mode
+@cindex Dockerfile mode
+@cindex CMake mode
+@cindex TOML mode
   Emacs has programming language modes for Lisp, Scheme, the
-Scheme-based DSSSL expression language, Ada, ASM, AWK, C, C++,
-Fortran, Icon, IDL (CORBA), IDLWAVE, Java, Javascript, M4, Makefiles,
-Metafont (@TeX{}'s companion for font creation), Modula2, Object
-Pascal, Objective-C, Octave, Pascal, Perl, Pike, PostScript, Prolog,
-Python, Ruby, Simula, SQL, Tcl, Verilog, and VHDL@.  An alternative
-mode for Perl is called CPerl mode.  Modes are also available for the
-scripting languages of the common GNU and Unix shells, and
-MS-DOS/MS-Windows @samp{BAT} files, and for makefiles, DNS master
-files, and various sorts of configuration files.
+Scheme-based DSSSL expression language, Ada, ASM, AWK, C, C++, C#,
+Elixir, Fortran, Icon, IDL (CORBA), HEEx, Java, Javascript,
+Lua, M4, Makefiles, Metafont (@TeX{}'s companion for font creation),
+Modula2, Object Pascal, Objective-C, Octave, Pascal, Perl, PHP, Pike,
+PostScript, Prolog, Python, Ruby, Simula, SQL, Tcl, TypeScript, Verilog,
+and VHDL@.  The recommended mode for Perl is called CPerl mode.  Modes
+are also available for the scripting languages of the common GNU and
+Unix shells, and MS-DOS/MS-Windows @samp{BAT} files, JSON, DNS master
+files, CSS (Cascading Style Sheets), Dockerfiles, CMake files, and
+various sorts of configuration files.
 
   Ideally, Emacs should have a major mode for each programming
 language that you might want to edit.  If it doesn't have a mode for
 your favorite language, the mode might be implemented in a package not
 distributed with Emacs (@pxref{Packages}); or you can contribute one.
+
+@cindex tree-sitter library, supported major modes
+  If Emacs has been compiled with the @samp{tree-sitter} library, it
+offers several optional editing modes based on that library, which
+utilize the incremental parsing capabilities provided by
+@samp{tree-sitter}.  These modes have @samp{-ts-} in their names; for
+example @code{c-ts-mode}, @code{python-ts-mode}, etc.
+
+@cindex LSP
+@cindex language server
+@cindex Eglot
+  Major modes for programming languages can use services of
+@dfn{language servers} via the facilities provided by the Eglot package.
+Eglot implements LSP, the @dfn{language server protocol}, which allows
+Emacs to receive language-specific information and services that enrich
+and extend source code editing capabilities.  @xref{Eglot Features,,,
+eglot, Eglot: The Emacs LSP Client}.
 
 @kindex DEL @r{(programming modes)}
 @findex backward-delete-char-untabify
@@ -124,10 +150,9 @@ For instance, entering C mode runs the hooks @code{prog-mode-hook} and
 @code{c-mode-hook}.  @xref{Hooks}, for information about hooks.
 
 @ifnottex
-  Separate manuals are available for the modes for Ada (@pxref{Top,,
-Ada Mode, ada-mode, Ada Mode}), C/C++/Objective C/Java/Corba
-IDL/Pike/AWK (@pxref{Top, , CC Mode, ccmode, CC Mode}), Octave, VHDL,
-and IDLWAVE (@pxref{Top,, IDLWAVE, idlwave, IDLWAVE User Manual}).
+  Separate manuals are available for the modes for Ada (@pxref{Top,, Ada
+Mode, ada-mode, Ada Mode}), C/C++/Objective C/Java/Corba IDL/Pike/AWK
+(@pxref{Top, , CC Mode, ccmode, CC Mode}), Octave, and VHDL.
 @end ifnottex
 @iftex
   The Emacs distribution contains Info manuals for the major modes for
@@ -147,6 +172,7 @@ Emacs we use it for all languages.
 * Left Margin Paren::   An open-paren or similar opening delimiter
                           starts a defun if it is at the left margin.
 * Moving by Defuns::    Commands to move over or mark a major definition.
+* Moving by Sentences:: Commands to move over certain code units.
 * Imenu::               Making buffer indexes as menus.
 * Which Function::      Which Function mode shows which function you are in.
 @end menu
@@ -238,22 +264,123 @@ they do their standard jobs in a way better fitting a particular
 language.  Other major modes may replace any or all of these key
 bindings for that purpose.
 
+@cindex nested defuns
+@vindex treesit-defun-tactic
+  Some programming languages supported @dfn{nested defuns}, whereby a
+defun (such as a function or a method or a class) can be defined inside
+(i.e., as part of the body) of another defun.  The commands described
+above by default find the beginning and the end of the @emph{innermost}
+defun around point.  Major modes based on the tree-sitter library
+provide control of this behavior: by default, the value of
+@code{treesit-defun-tactic} is set to @code{nested}; if it's set
+to@code{top-level}, the defun commands will find the @emph{outermost}
+defuns instead; if the value is set to @code{parent-first}, the defun
+command always tries to move out of the current enclosing defun rather
+than moving to the previous or next defun around point; if there's no
+enclosing defun, it moves to the previous or next defun.
+
+@node Moving by Sentences
+@subsection Moving by Sentences
+@cindex sentences, in programming languages
+
+  These commands move point or set up the region based on units of
+code, also called @dfn{sentences}.  Even though sentences are usually
+considered when writing human languages, Emacs can use the same
+commands to move over certain constructs in programming languages
+(@pxref{Sentences}, @pxref{Moving by Defuns}).  In a programming
+language a sentence is usually a complete language construct smaller
+than defuns, but larger than sexps (@pxref{List Motion,,, elisp, The
+Emacs Lisp Reference Manual}).  What exactly is a sentence in this
+case depends on the programming language, but usually it is a complete
+statement, such as a variable definition and initialization, or a
+conditional statement.  An example of a sentence in the C language
+could be
+
+@example
+int x = 5;
+@end example
+
+@noindent
+or in the JavaScript language it could look like
+
+@example
+@group
+const thing = () => console.log("Hi");
+@end group
+@group
+const foo = [1] == '1'
+  ? "No way"
+  : "...";
+@end group
+
+@end example
+
+@table @kbd
+@item M-a
+Move to beginning of current or preceding sentence
+(@code{backward-sentence}).
+@item M-e
+Move to end of current or following sentence (@code{forward-sentence}).
+@end table
+
+@cindex move to beginning or end of sentence
+@cindex sentence, move to beginning or end
+@kindex M-a @r{(programming modes)}
+@kindex M-e @r{(programming modes)}
+@findex backward-sentence @r{(programming modes)}
+@findex forward-sentence @r{(programming modes)}
+  The commands to move to the beginning and end of the current
+sentence are @kbd{M-a} (@code{backward-sentence}) and @kbd{M-e}
+(@code{forward-sentence}).  If you repeat one of these commands, or
+use a positive numeric argument, each repetition moves to the next
+sentence in the direction of motion.
+
+  @kbd{M-a} with a negative argument @minus{}@var{n} moves forward
+@var{n} times to the next end of a sentence.  Likewise, @kbd{M-e} with
+a negative argument moves back to the start of a sentence.
+
 @node Imenu
 @subsection Imenu
 @cindex index of buffer definitions
 @cindex buffer definitions index
 
-  The Imenu facility offers a way to find the major definitions in
-a file by name.  It is also useful in text formatter major modes,
-where it treats each chapter, section, etc., as a definition.
-(@xref{Xref}, for a more powerful feature that handles multiple files
-together.)
+  The Imenu facility offers a way to find the major definitions in a
+file by name.  It is useful both in programming-language major modes,
+where the definitions are variables, functions, etc., and in text
+formatter major modes, where it treats each chapter, section, etc., as a
+definition.  (@xref{Xref}, for a more powerful feature that handles
+multiple files together.)
 
 @findex imenu
-  If you type @kbd{M-x imenu}, it reads the name of a definition using
-the minibuffer, then moves point to that definition.  You can use
-completion to specify the name; the command always displays the whole
-list of valid names.
+@vindex imenu-flatten
+  If you type @kbd{M-g i} (@code{imenu}), it reads the name of a
+definition using the minibuffer, then moves point to that definition.
+You can use completion to specify the name; the command displays the
+list of matching valid names in the completions buffer.  If the index is
+hierarchical, then by default the completion candidates are also shown
+hierarchically, as a nested list: first you need to choose a section,
+then a subsection, etc., and finally the name of the definition.
+However, if you set @code{imenu-flatten} to a non-@code{nil} value, then
+instead of the nested menu you can select a completion candidate from a
+flattened list of definitions.  How the sections and subsections are
+shown in the flattened list of completion candidates depends on the
+value of @code{imenu-flatten}, which can be one of the following:
+
+@table @code
+@vindex imenu-level-separator
+@item prefix
+This shows each candidate prefixed by names of its section, subsection,
+subsubsection, etc., with each level separated from the next by the
+string that is the value of @code{imenu-level-separator}, by default
+@samp{:}.
+
+@item annotation
+This shows the section names as annotations, following each definition
+name.
+
+@item group
+This shows the completion candidates grouped by their sections.
+@end table
 
 @findex imenu-add-menubar-index
   Alternatively, you can bind the command @code{imenu} to a mouse
@@ -274,12 +401,30 @@ Rescanning happens automatically if you set @code{imenu-auto-rescan} to
 a non-@code{nil} value.  There is no need to rescan because of small
 changes in the text.
 
+@vindex imenu-auto-rescan-maxout
+@vindex imenu-max-index-time
+  @code{imenu-auto-rescan} will be disabled in buffers that are larger
+than @code{imenu-auto-rescan-maxout} in bytes, and scanning is
+stopped if it takes more than @code{imenu-max-index-time} seconds.
+
 @vindex imenu-sort-function
   You can customize the way the menus are sorted by setting the
 variable @code{imenu-sort-function}.  By default, names are ordered as
 they occur in the buffer; if you want alphabetic sorting, use the
 symbol @code{imenu--sort-by-name} as the value.  You can also
 define your own comparison function by writing Lisp code.
+
+  You can also customize how Imenu completions are sorted by changing
+the variable @code{completion-category-overrides} and setting its
+@code{display-sort-function} for the category @code{imenu}.
+
+@cindex eglot, for producing Imenu index
+  If Eglot is activated for the current buffer's project
+(@pxref{Projects}) and the current buffer's major mode, Eglot provides
+its own facility for producing the buffer's index based on the
+analysis of the program source by the language-server which manages
+the current buffer.  @xref{Eglot Features,,, eglot, Eglot: The Emacs
+LSP Client}.
 
   Imenu provides the information to guide Which Function mode
 @ifnottex
@@ -295,8 +440,8 @@ The Speedbar can also use it (@pxref{Speedbar}).
 @cindex current function name in mode line
 
   Which Function mode is a global minor mode (@pxref{Minor Modes})
-which displays the current function name in the mode line, updating it
-as you move around in a buffer.
+which displays the current function name in the mode line or header
+line, updating it as you move around in a buffer.
 
 @findex which-function-mode
 @vindex which-func-modes
@@ -308,6 +453,12 @@ Imenu).  You can restrict it to a specific list of major modes by
 changing the value of the variable @code{which-func-modes} from
 @code{t} (which means to support all available major modes) to a list
 of major mode names.
+
+@vindex which-func-display
+  By default, Which Function mode displays the current function name
+using the mode line.  Customize @code{which-func-display} to
+@code{header}, @code{mode}, or @code{mode-and-header} to use the
+header line, mode line, or both, respectively.
 
 @node Program Indent
 @section Indentation for Programs
@@ -391,6 +542,9 @@ large chunks of code:
 @table @kbd
 @item C-M-q
 Reindent all the lines within one parenthetical grouping.
+@item M-q
+Fill a single paragraph in a defun, or reindent all the lines within
+that defun.
 @item C-u @key{TAB}
 Shift an entire parenthetical grouping rigidly sideways so that its
 first line is properly indented.
@@ -410,6 +564,21 @@ indentation of the line where the grouping starts).  The function that
 @code{indent-pp-sexp} in Lisp mode, @code{c-indent-exp} in C mode,
 etc.  To correct the overall indentation as well, type @kbd{@key{TAB}}
 first.
+
+@kindex M-q
+@findex prog-fill-reindent-defun
+@vindex beginning-of-defun-function
+@vindex end-of-defun-function
+@vindex fill-paragraph-function
+  To reindent the entire defun around point, type @kbd{M-q}
+(@code{prog-fill-reindent-defun}).  If point is in a comment or a
+string, this command fills and indents the comment or string instead.
+What exactly constitutes a comment, a string, or a defun depends on
+the major mode: the bounds of a defun are decided by the variables
+@code{beginning-of-defun-function} and @code{end-of-defun-function}
+(@pxref{List Motion,,, elisp, The Emacs Lisp Reference Manual}),
+and the filling mechanism is decided by @code{fill-paragraph-function}
+(@pxref{Filling,,, elisp, The Emacs Lisp Reference Manual}).
 
 @kindex C-u TAB
   If you like the relative indentation within a grouping but not the
@@ -465,6 +634,23 @@ the function name.  This is normally done for macro definitions, using
 the @code{declare} construct.  @xref{Defining Macros,,, elisp, The
 Emacs Lisp Reference Manual}.
 
+  In Emacs Lisp, lists are usually indented as if they are
+function-like forms:
+
+@lisp
+(setq foo '(bar zot
+                gazonk))
+@end lisp
+
+  However, if you add a space after the opening parenthesis, this tells
+Emacs that it's a data list instead of a piece of code, and Emacs will
+then indent it like this:
+
+@lisp
+(setq foo '( bar zot
+             gazonk))
+@end lisp
+
 @node C Indent
 @subsection Commands for C Indentation
 
@@ -474,20 +660,27 @@ Emacs Lisp Reference Manual}.
 @item C-c C-q
 @kindex C-c C-q @r{(C mode)}
 @findex c-indent-defun
+@findex c-ts-mode-indent-defun
 Reindent the current top-level function definition or aggregate type
-declaration (@code{c-indent-defun}).
+declaration (@code{c-indent-defun} in CC mode,
+@code{c-ts-mode-indent-defun} in @code{c-ts-mode} based on tree-sitter).
 
 @item C-M-q
 @kindex C-M-q @r{(C mode)}
 @findex c-indent-exp
-Reindent each line in the balanced expression that follows point
-(@code{c-indent-exp}).  A prefix argument inhibits warning messages
-about invalid syntax.
+@findex prog-indent-sexp
+Reindent each line in the balanced expression (@pxref{Expressions}),
+also known as ``sexp'', that follows point.  In CC mode, this invokes
+@code{c-indent-exp}; in tree-sitter based @code{c-ts-mode} this
+invokes a more general @code{prog-indent-sexp}.  A prefix argument
+inhibits warning messages about invalid syntax.
 
 @item @key{TAB}
-@findex c-indent-command
-Reindent the current line, and/or in some cases insert a tab character
-(@code{c-indent-command}).
+@findex c-indent-line-or-region
+Reindent the current line, active region, or block starting on this
+line (@code{c-indent-line-or-region}).  With prefix argument, rigidly
+reindent the balanced expression which starts on the current line, if
+the current line needs reindentation.
 
 @vindex c-tab-always-indent
 If @code{c-tab-always-indent} is @code{t}, this command always reindents
@@ -522,7 +715,8 @@ onto the indentation of the @dfn{anchor statement}.
 
 @table @kbd
 @item C-c . @var{style} @key{RET}
-Select a predefined style @var{style} (@code{c-set-style}).
+Select a predefined style @var{style} (@code{c-set-style} in CC mode,
+@code{c-ts-mode-set-style} in @code{c-ts-mode} based on tree-sitter).
 @end table
 
   A @dfn{style} is a named collection of customizations that can be
@@ -538,6 +732,7 @@ typing @kbd{C-M-q} at the start of a function definition.
 
 @kindex C-c . @r{(C mode)}
 @findex c-set-style
+@findex c-ts-mode-set-style
   To choose a style for the current buffer, use the command @w{@kbd{C-c
 .}}.  Specify a style name as an argument (case is not significant).
 This command affects the current buffer only, and it affects only
@@ -546,11 +741,11 @@ the code already in the buffer.  To reindent the whole buffer in the
 new style, you can type @kbd{C-x h C-M-\}.
 
 @vindex c-default-style
-  You can also set the variable @code{c-default-style} to specify the
-default style for various major modes.  Its value should be either the
-style's name (a string) or an alist, in which each element specifies
-one major mode and which indentation style to use for it.  For
-example,
+  When using CC mode, you can also set the variable
+@code{c-default-style} to specify the default style for various major
+modes.  Its value should be either the style's name (a string) or an
+alist, in which each element specifies one major mode and which
+indentation style to use for it.  For example,
 
 @example
 (setq c-default-style
@@ -566,6 +761,11 @@ actually the defaults.)  This variable takes effect when you select
 one of the C-like major modes; thus, if you specify a new default
 style for Java mode, you can make it take effect in an existing Java
 mode buffer by typing @kbd{M-x java-mode} there.
+
+@vindex c-ts-mode-indent-style
+  When using the tree-sitter based @code{c-ts-mode}, you can set the
+default indentation style by customizing the variable
+@code{c-ts-mode-indent-style}.
 
   The @code{gnu} style specifies the formatting recommended by the GNU
 Project for C; it is the default, so as to encourage use of our
@@ -762,11 +962,11 @@ argument specifies the number of levels to go down.
 
 @node Matching
 @subsection Matching Parentheses
-@cindex matching parentheses
+@cindex matching, parentheses and other paired delimiters
 @cindex parentheses, displaying matches
 
-  Emacs has a number of @dfn{parenthesis matching} features, which
-make it easy to see how and whether parentheses (or other delimiters)
+  Emacs has a number of @dfn{parenthesis matching} features, which make
+it easy to see how and whether parentheses (or other paired delimiters)
 match up.
 
   Whenever you type a self-inserting character that is a closing
@@ -805,88 +1005,168 @@ displayed.  The default is 102400.
 @cindex Show Paren mode
 @cindex highlighting matching parentheses
 @findex show-paren-mode
-  Show Paren mode, a global minor mode, provides a more powerful kind
+@findex show-paren-local-mode
+  Show Paren mode is a minor mode that provides a more powerful kind
 of automatic matching.  Whenever point is before an opening delimiter
 or after a closing delimiter, the delimiter, its matching delimiter,
 and optionally the text between them are highlighted.  To toggle Show
-Paren mode, type @kbd{M-x show-paren-mode}.  To customize it, type
-@kbd{M-x customize-group @key{RET} paren-showing}.  The customizable
-options which control the operation of this mode include:
+Paren mode globally, type @kbd{M-x show-paren-mode}.  To toggle it
+only in the current buffer, type @kbd{M-x show-paren-local-mode}.
+
+@vindex show-paren-predicate
+  By default, this mode is switched on in all buffers that are meant
+for editing, but is not enabled in buffers that show data.  This is
+controlled by the @code{show-paren-predicate} user option.
+
+  To customize the mode, type @w{@kbd{M-x customize-group @key{RET}
+paren-showing}}.  The customizable options which control the operation
+of this mode include:
 
 @itemize @bullet
 @item
 @vindex show-paren-highlight-openparen
 @code{show-paren-highlight-openparen} controls whether to highlight
-an open paren when point stands just before it, and hence its position
+an open paren when point is just before it, and hence its position
 is marked by the cursor anyway.  The default is non-@code{nil} (yes).
 
 @item
 @vindex show-paren-style
 @code{show-paren-style} controls whether just the two parens, or also
-the space between them get highlighted.  The valid options here are
+the text between them get highlighted.  The valid options here are
 @code{parenthesis} (show the matching paren), @code{expression}
 (highlight the entire expression enclosed by the parens), and
-@code{mixed} (highlight the matching paren if it is visible, the
-expression otherwise).
+@code{mixed} (highlight the matching paren if it is visible in the
+window, the expression otherwise).
 
 @item
 @vindex show-paren-when-point-inside-paren
 @code{show-paren-when-point-inside-paren}, when non-@code{nil}, causes
-highlighting also when point is on the inside of a parenthesis.
+highlighting also when point is inside of the parentheses.  The
+default is @code{nil}.
 
 @item
 @vindex show-paren-when-point-in-periphery
 @code{show-paren-when-point-in-periphery}, when non-@code{nil}, causes
-highlighting also when point is in whitespace at the beginning or end
-of a line, and there is a paren at, respectively, the first or last,
-or the last, non-whitespace position on the line.
+highlighting also when point is in whitespace at the beginning of a
+line and there is a paren at the first or last non-whitespace position
+on the line, or when point is at the end of a line and there is a
+paren at the last non-whitespace position on the line.
+
+@item
+@vindex show-paren-context-when-offscreen
+@code{show-paren-context-when-offscreen}, when non-@code{nil}, shows
+some context in the echo area when point is in a closing delimiter and
+the opening delimiter is offscreen.  The context is usually the line
+that contains the opening delimiter, except if the opening delimiter
+is on its own line, in which case the context includes the previous
+nonblank line.
+
+@item
+@vindex show-paren-not-in-comments-or-strings
+If the value of @code{show-paren-not-in-comments-or-strings} is
+@code{all}, delimiters inside comments and strings will not be
+highlighted.  Otherwise, if the value is set to @code{on-mismatch}, the
+mismatched delimiters inside comments will not be highlighted.  The
+default is @code{nil}, so delimiters inside comments and strings are
+always highlighted.
 @end itemize
 
 @cindex Electric Pair mode
 @cindex inserting matching parentheses
 @findex electric-pair-mode
-  Electric Pair mode, a global minor mode, provides a way to easily
-insert matching delimiters: parentheses, braces, brackets, etc.
-Whenever you insert an opening delimiter, the matching closing
-delimiter is automatically inserted as well, leaving point between the
-two.  Conversely, when you insert a closing delimiter over an existing
-one, no insertion takes places, and that position is simply skipped
-over.  If the region is active (@pxref{Mark}), insertion of a
-delimiter operates on the region: the characters in the region are
-enclosed in a pair of matching delimiters, leaving point after the
-delimiter you typed.
+  Electric Pair mode is a minor mode that provides a way to easily
+insert pairs of matching delimiters: parentheses, braces, brackets,
+quotes, etc.@: (what counts as matching delimiters depends on the major
+mode).  To toggle Electric Pair mode globally, type @w{@kbd{M-x
+electric-pair-mode}}.  To toggle it only in the current buffer, type
+@w{@kbd{M-x electric-pair-local-mode}}.
 
-These variables control additional features of Electric Pair mode:
+  When this mode is enabled, typing an opening delimiter inserts both
+that character and, immediately following it, the matching closing
+delimiter, leaving point between the two.  This makes it unnecessary to
+type a matching closing delimiter in most cases.  If you type one
+nonetheless, Emacs simply inserts that character, unless point is
+immediately before a closing delimiter of the same type; in that case,
+point moves to immediately after the closing delimiter and no additional
+closing delimiter is inserted.  Thus, typing the sequence <opening
+delimiter>, <matching closing delimiter> is a perhaps more convenient
+alternative to the sequence <opening delimiter>, @kbd{C-f}.
+
+  With an active region (@pxref{Mark}), Electric Pair mode operates
+differently: inserting either an opening or a closing delimiter encloses
+the characters in the region within the resulting pair of matching
+delimiters, leaving point after the delimiter you typed (this
+facilitates continuing to type either before the text following the
+opening delimiter or after the closing delimiter).
+
+  If you provide a prefix argument when inserting an opening
+delimiter---and if the region is active, also when inserting a closing
+delimiter---this results in the insertion of as many nested pairs of
+matching delimiters as the numeric value of that prefix argument.
+
+  There are several user options for modifying the behavior of Electric
+Pair mode:
 
 @itemize @bullet
 @item
 @vindex electric-pair-preserve-balance
-@code{electric-pair-preserve-balance}, when non-@code{nil}, makes the
-default pairing logic balance out the number of opening and closing
-delimiters.
+@code{electric-pair-preserve-balance}, when non-@code{nil} (the
+default), makes typing a delimiter preserve the balance between opening
+and closing delimiters.  Thus, if you type an opening delimiter and
+there is an unpaired matching closing delimiter later in the buffer,
+then only the opening delimiter gets inserted (and not a matching
+closing delimiter immediately following it); likewise, if there is an
+unpaired opening delimiter, then typing a matching closing delimiter
+later in the buffer inserts this character even when the following
+character is another matching closing delimiter.
+
+  When set to @code{nil}, typing an opening delimiter inserts only this
+character, but only when point is either immediately before or
+immediately after a matching opening delimiter, or immediately before a
+letter or digit; in all other positions inserting an opening delimiter
+automatically inserts a matching closing delimiter immediately following
+it, even if there is an unpaired matching closing delimiter later in the
+buffer.  And typing a closing delimiter immediately before another
+closing delimiter of the same type does not insert that character but
+moves point as described above, even when there is an unpaired matching
+opening delimiter earlier in the buffer.
+
+  If there is an active region, this variable has no effect.
 
 @item
 @vindex electric-pair-delete-adjacent-pairs
-@code{electric-pair-delete-adjacent-pairs}, when non-@code{nil}, makes
-backspacing between two adjacent delimiters also automatically delete
-the closing delimiter.
+@code{electric-pair-delete-adjacent-pairs}, when non-@code{nil} (the
+default), makes deleting an opening delimiter by typing the @key{DEL}
+key (which is normally the @key{BACKSPACE} key; @pxref{DEL Does Not
+Delete}) automatically also delete an immediately following matching
+closing delimiter (but not if there are any characters---including just
+whitespace---between the paired delimiters).  When set to @code{nil},
+typing @key{BACKSPACE} deletes only the opening delimiter.  (Typing
+@key{BACKSPACE} to delete a closing delimiter always deletes only this
+character.)
 
 @item
 @vindex electric-pair-open-newline-between-pairs
-@code{electric-pair-open-newline-between-pairs}, when non-@code{nil},
-makes inserting a newline between two adjacent pairs also
-automatically open an extra newline after point.
+When @code{electric-pair-open-newline-between-pairs} is non-@code{nil}
+(the default) and point is between an opening delimiter and an
+immediately following matching closing delimiter, then typing a newline
+automatically inserts an extra newline after point (possibly indenting
+the empty line point is on, depending on the major mode).  When set to
+@code{nil}, typing a newline inserts only one newline before point, as
+usual.
 
 @item
 @vindex electric-pair-skip-whitespace
-@code{electric-pair-skip-whitespace}, when non-@code{nil}, causes the minor
-mode to skip whitespace forward before deciding whether to skip over
-the closing delimiter.
+When @code{electric-pair-skip-whitespace} has its default non-@code{nil}
+value and point is separated from a closing delimiter only by
+whitespace, then typing a closing delimiter of the same type does not
+insert that character but instead moves point to immediately after the
+already present closing delimiter.  You can also set this option to
+additionally delete any whitespace that point moves over.  When set to
+@code{nil}, typing a closing delimiter simply inserts that character
+(even when this makes the following closing delimiter of the same type
+unbalanced).
 @end itemize
-
-To toggle Electric Pair mode, type @kbd{M-x electric-pair-mode}.  To
-toggle the mode in a single buffer, use @kbd{M-x
-electric-pair-local-mode}.
 
 @node Comments
 @section Manipulating Comments
@@ -942,7 +1222,7 @@ Set comment column (@code{comment-set-column}).
 @item @kbd{C-M-j}
 @itemx @kbd{M-j}
 Like @kbd{@key{RET}} followed by inserting and aligning a comment
-(@code{comment-indent-new-line}).  @xref{Multi-Line Comments}.
+(@code{default-indent-new-line}).  @xref{Multi-Line Comments}.
 @item @kbd{M-x comment-region}
 @itemx @kbd{C-c C-c} (in C-like modes)
 Add comment delimiters to all the lines in the region.
@@ -965,7 +1245,7 @@ delimiters to enclose the text in the region.
   If you supply a prefix argument to @kbd{M-;} when a region is
 active, that specifies the number of comment delimiters to add or
 delete.  A positive argument @var{n} adds @var{n} delimiters, while a
-negative argument @var{-n} removes @var{n} delimiters.
+negative argument @minus{}@var{n} removes @var{n} delimiters.
 
   If the region is not active, and there is no existing comment on the
 current line, @kbd{M-;} adds a new comment to the current line.  If
@@ -996,21 +1276,25 @@ lines.  When a region is active (@pxref{Mark}), @kbd{C-x C-;} either
 comments or uncomments the lines in the region.  If the region is not
 active, this command comments or uncomments the line point is on.
 With a positive prefix argument @var{n}, it operates on @var{n} lines
-starting with the current one; with a negative @var{n}, it affects
-@var{n} preceding lines.  After invoking this command with a negative
-argument, successive invocations with a positive argument will operate
-on preceding lines as if the argument were negated.
+starting with the current one; with a negative argument
+@minus{}@var{n}, it affects @var{n} preceding lines.  After invoking
+this command with a negative argument, successive invocations with a
+positive argument will operate on preceding lines as if the argument
+were negated.
 
 @findex comment-kill
 @kindex C-u M-;
-  @kbd{C-u M-;} (@code{comment-dwim} with a prefix argument) kills any
-comment on the current line, along with the whitespace before it.
-Since the comment is saved to the kill ring, you can reinsert it on
-another line by moving to the end of that line, doing @kbd{C-y}, and
-then @kbd{M-;} to realign the comment.  You can achieve the same
-effect as @kbd{C-u M-;} by typing @kbd{M-x comment-kill}
-(@code{comment-dwim} actually calls @code{comment-kill} as a
-subroutine when it is given a prefix argument).
+  @kbd{C-u M-;} (@code{comment-dwim} with a prefix argument) when the
+region is not active kills any comment on the current line, along with
+the whitespace before it.  Since the comment is saved to the kill
+ring, you can reinsert it on another line by moving to the end of that
+line, doing @kbd{C-y}, and then @kbd{M-;} to realign the comment.  You
+can achieve the same effect as @kbd{C-u M-;} by typing @kbd{M-x
+comment-kill} (@code{comment-dwim} actually calls @code{comment-kill}
+as a subroutine when it is given a prefix argument).  Invoking
+@code{comment-dwim} with a prefix numeric argument, as in @w{@kbd{C-u
+@var{n} M-;}}, when there's no active region, tells
+@code{comment-kill} to kill comments on @var{n} lines.
 
 @kindex C-c C-c @r{(C mode)}
 @findex comment-region
@@ -1036,10 +1320,10 @@ the brace rather than at @code{comment-column}.  For full details see
 @kindex C-M-j
 @kindex M-j
 @cindex blank lines in programs
-@findex comment-indent-new-line
+@findex default-indent-new-line
 @vindex comment-multi-line
   If you are typing a comment and wish to continue it to another line,
-type @kbd{M-j} or @kbd{C-M-j} (@code{comment-indent-new-line}).  This
+type @kbd{M-j} or @kbd{C-M-j} (@code{default-indent-new-line}).  This
 breaks the current line, and inserts the necessary comment delimiters
 and indentation to continue the comment.
 
@@ -1093,13 +1377,19 @@ match the last comment before point in the buffer, and then does a
 expression that is the value of the variable @code{comment-start-skip}.
 Make sure this regexp does not match the null string.  It may match more
 than the comment starting delimiter in the strictest sense of the word;
-for example, in C mode the value of the variable is
+for example, in C mode the value of the variable could be
 @c This stops M-q from breaking the line inside that @code.
-@code{@w{"\\(//+\\|/\\*+\\)\\s *"}}, which matches extra stars and
-spaces after the @samp{/*} itself, and accepts C++ style comments
-also.  (Note that @samp{\\} is needed in Lisp syntax to include a
-@samp{\} in the string, which is needed to deny the first star its
-special meaning in regexp syntax.  @xref{Regexp Backslash}.)
+@code{@w{"/\\*+[ \t]*\\|//+[ \t]*"}}, which matches extra stars and
+spaces after the @samp{/*} itself, and accepts C++ style (@samp{//})
+comments also.  (Note that @samp{\\} is needed in Lisp syntax to
+include a @samp{\} in the string, which is needed to deny the first
+star its special meaning in regexp syntax.  @xref{Regexp Backslash}.)
+
+@vindex comment-start-line-regexp
+  Modes that support both line and block comments should also set
+@code{comment-start-line-regexp} to a regexp that matches only line
+comment starters.  This lets Emacs distinguish between the two kinds of
+comments.
 
 @vindex comment-start
 @vindex comment-end
@@ -1146,7 +1436,7 @@ use in your program.
 @menu
 * Info Lookup::         Looking up library functions and commands in Info files.
 * Man Page::            Looking up man pages of library functions and commands.
-* Lisp Doc::            Looking up Emacs Lisp functions, etc.
+* Programming Language Doc:: Looking up program functions, variables, etc.
 @end menu
 
 @node Info Lookup
@@ -1216,6 +1506,19 @@ this, change the value of the variable @code{Man-switches} to
 @kbd{M-p} to switch between man pages in different sections.  The mode
 line shows how many manual pages are available.
 
+@vindex Man-prefer-synchronous-call
+  By default, @kbd{M-x man} calls the @code{man} program
+asynchronously.  You can force the invocation to be synchronous by
+customizing @code{Man-prefer-synchronous-call} to a non-@code{nil}
+value.
+
+@vindex Man-support-remote-systems
+  If the user option @code{Man-support-remote-systems} is
+non-@code{nil}, and @code{default-directory} indicates a remote system
+(@pxref{Remote Files}), the man page is taken from the remote system.
+Calling the @code{man} command with a prefix like @kbd{C-u M-x man}
+reverts the value of @code{Man-support-remote-systems} for that call.
+
 @findex woman
 @cindex manual pages, on MS-DOS/MS-Windows
   An alternative way of reading manual pages is the @kbd{M-x woman}
@@ -1247,26 +1550,132 @@ WoMan Manual}.
 the WoMan Info manual, which is distributed with Emacs.
 @end ifnotinfo
 
-@node Lisp Doc
-@subsection Emacs Lisp Documentation Lookup
+@node Programming Language Doc
+@subsection Programming Language Documentation Lookup
+@cindex documentation for program symbols
+@cindex program functions and variables, documentation lookup
 
   When editing Emacs Lisp code, you can use the commands @kbd{C-h f}
 (@code{describe-function}) and @kbd{C-h v} (@code{describe-variable})
 to view the built-in documentation for the Lisp functions and
 variables that you want to use.  @xref{Name Help}.
 
-@cindex Eldoc mode
+@cindex ElDoc mode
+@cindex at-point documentation for program symbols
 @findex eldoc-mode
 @findex global-eldoc-mode
-  Eldoc is a buffer-local minor mode that helps with looking up Lisp
-documentation.  When it is enabled, the echo area displays some useful
-information whenever there is a Lisp function or variable at point;
-for a function, it shows the argument list, and for a variable it
-shows the first line of the variable's documentation string.  To
-toggle Eldoc mode, type @kbd{M-x eldoc-mode}.  There's also a Global
-Eldoc mode, which is turned on by default, and affects buffers, such
-as @samp{*scratch*}, whose major mode is Emacs Lisp or Lisp
-Interaction (@w{@kbd{M-x global-eldoc-mode}} to turn it off globally).
+  ElDoc@footnote{
+The name ``ElDoc'' is a historical accident: this mode started by
+supporting Emacs Lisp buffers.
+} is a buffer-local minor mode that helps with looking up
+documentation of symbols (functions, methods, classes, variables,
+etc.) in your program.  When this mode is enabled, the echo area
+displays useful information whenever there is a documented symbol at
+point.  For example, in buffers under the Emacs Lisp mode, it shows
+the argument list of a function at point, and for a Lisp variable it
+shows the first line of the variable's documentation string.
+
+To toggle ElDoc mode, type @kbd{M-x eldoc-mode}.  There's also a
+Global ElDoc mode, which is turned on by default, and turns on the
+ElDoc mode in buffers whose major mode sets the variables described
+below.  Use @w{@kbd{M-x global-eldoc-mode}} to turn it off globally.
+
+@cindex eglot, using with ElDoc
+Various major modes configure the Global ElDoc mode to use their
+documentation functions.  Examples include Emacs Lisp mode, Python
+mode, and Cfengine mode.  In addition, Emacs features that provide
+support for several major modes configure ElDoc to use their
+facilities for retrieving the documentation.  Examples include Eglot
+(@pxref{Eglot Features,,, eglot, Eglot: The Emacs LSP Client}), which
+provides documentation based on information from language servers;
+Semantic's Idle Summary mode (@pxref{Idle Summary Mode,,, semantic,
+Semantic Manual}); and Flymake, which uses ElDoc to show diagnostics
+at point (@pxref{Finding diagnostics,,, flymake, GNU Flymake manual}).
+
+The ElDoc mode works by scheduling the display of the available
+documentation for the symbol at point after Emacs has been idle for
+some short time.  This avoids annoying flickering of documentation
+messages in the echo area or the mode line when you type quickly and
+without delay.
+
+@findex eldoc-print-current-symbol-info
+You can also trigger the display of documentation for a symbol at
+point by using the command @kbd{M-x eldoc-print-current-symbol-info}.
+
+  The following variables can be used to configure ElDoc mode:
+
+@vtable @code
+@item eldoc-idle-delay
+The value of this user option controls the amount of idle time before
+the at-point documentation is displayed.  It should be set to the
+number of seconds to wait; the value of zero means to display without
+any delay.  The default is 0.5 sec.
+
+@item eldoc-print-after-edit
+If this user option is non-@code{nil}, ElDoc will show documentation
+only after some editing command, like inserting or deleting some
+text.  This comes in handy if you want Emacs to display documentation
+only about symbols that you type, but not about symbols that are
+already in the buffer (so just reading the source code will not show
+documentation).  The default value is @code{nil}.  If you change the
+value, you need to toggle @code{eldoc-mode} off and on again.
+
+@item eldoc-echo-area-use-multiline-p
+This user option controls whether and how to truncate documentation
+text if it is longer than the echo-area can display as a single screen
+line.  If the value is a positive number, it specifies the number of
+screen lines that ElDoc is allowed to display in the echo area without
+truncating the documentation.  A positive integer specifies the
+absolute maximum number of screen lines to use; a floating-point
+number specifies the number of screen lines as a fraction of the
+frame's height.  The value of @code{t} means never truncate the
+documentation (the echo-area will be resized up to the height allowed
+by @code{max-mini-window-height}, @pxref{Minibuffer Edit}), whereas
+the value of @code{nil} means truncate if the documentation is longer
+than a single screen line.  Finally, the special value
+@code{truncate-sym-name-if-fit} (the default) means to truncate the
+part of the documentation that represents a symbol's name if doing
+that will allow the documentation to fit on a single screen line.
+
+@item eldoc-echo-area-display-truncation-message
+If non-@code{nil} (the default), and documentation shown in the echo
+area is truncated because it's too long, follow the documentation by
+instructions about how to view the complete documentation text.  If
+@code{nil}, just indicate with @samp{@dots{}} that the documentation
+was truncated.
+
+@findex eldoc-doc-buffer
+@item eldoc-echo-area-prefer-doc-buffer
+If the value of this user option is @code{t}, ElDoc will not show the
+documentation in the echo area if the ElDoc buffer with the
+documentation is already displayed in some window.  (You can use the
+command @kbd{M-x eldoc-doc-buffer} any time to show the ElDoc buffer.)
+If the value of this option is the symbol @code{maybe}, the
+documentation will not be displayed in the echo area if the ElDoc
+buffer is shown in some window, and the documentation text has to be
+truncated if displayed in the echo area.  Finally, the value of
+@code{nil} (the default) means always show the documentation in the
+echo area.
+
+@item eldoc-documentation-strategy
+This customizable variable's value is the function which is used to
+retrieve and display documentation for the symbol at point.  The
+documentation is produced by the functions in the hook
+@code{eldoc-documentation-functions}.  The default value of
+@code{eldoc-documentation-strategy} specifies that ElDoc should
+display the first documentation text produced by functions in the
+@code{eldoc-documentation-functions} hook, but you can customize
+@code{eldoc-documentation-strategy} to work in other ways, such as
+displaying all of the documentation texts concatenated together.
+
+@item eldoc-documentation-functions
+This abnormal hook's value is a list of functions that can produce
+documentation for the symbol at point as appropriate for the current
+buffer's major-mode.  These functions act as a collection of backends
+for ElDoc.  Major modes register their documentation lookup functions
+with ElDoc by adding their functions to the buffer-local value of this
+variable.
+@end vtable
 
 @node Hideshow
 @section Hideshow minor mode
@@ -1286,7 +1695,15 @@ mode and related modes, blocks are delimited by braces, while in Lisp
 mode they are delimited by parentheses.  Multi-line comments also
 count as blocks.
 
-  Hideshow mode provides the following commands:
+Additionally, Hideshow mode supports optional indentation-based
+hiding/showing.  By default this is disabled; to enable it, turn on the
+buffer-local minor mode @code{hs-indentation-mode}.  Enabling
+@code{hs-indentation-mode} does not require that @code{hs-minor-mode} is
+already enabled.
+
+@vindex hs-prefix-map
+
+  Hideshow mode provides the following commands (defined in @code{hs-prefix-map}):
 
 @findex hs-hide-all
 @findex hs-hide-block
@@ -1294,12 +1711,17 @@ count as blocks.
 @findex hs-show-block
 @findex hs-show-region
 @findex hs-hide-level
+@findex hs-toggle-hiding
+@findex hs-cycle
 @kindex C-c @@ C-h
 @kindex C-c @@ C-s
+@kindex C-c @@ C-c
 @kindex C-c @@ C-M-h
 @kindex C-c @@ C-M-s
 @kindex C-c @@ C-r
 @kindex C-c @@ C-l
+@kindex C-c @@ TAB
+@kindex C-c @@ <backtab>
 @kindex S-mouse-2
 @table @kbd
 @item C-c @@ C-h
@@ -1308,10 +1730,9 @@ Hide the current block (@code{hs-hide-block}).
 @item C-c @@ C-s
 Show the current block (@code{hs-show-block}).
 @item C-c @@ C-c
-@itemx C-x @@ C-e
+@itemx C-c @@ C-e
+@itemx S-mouse-2
 Either hide or show the current block (@code{hs-toggle-hiding}).
-@item S-mouse-2
-Toggle hiding for the block you click on (@code{hs-mouse-toggle-hiding}).
 @item C-c @@ C-M-h
 @itemx C-c @@ C-t
 Hide all top-level blocks (@code{hs-hide-all}).
@@ -1321,17 +1742,66 @@ Show all blocks in the buffer (@code{hs-show-all}).
 @item C-u @var{n} C-c @@ C-l
 Hide all blocks @var{n} levels below this block
 (@code{hs-hide-level}).
+@item C-c @@ TAB
+Cycle the visibility state of the current block (@code{hs-cycle}).
+@item C-c @@ <backtab>
+Either hide or show all the blocks in the current buffer. (@code{hs-toggle-all}).
 @end table
 
 @vindex hs-hide-comments-when-hiding-all
+@vindex hs-display-lines-hidden
+@vindex hs-show-indicators
+@vindex hs-indicator-type
+@vindex hs-indicator-maximum-buffer-size
 @vindex hs-isearch-open
-@vindex hs-special-modes-alist
+@vindex hs-hide-block-behavior
+@vindex hs-cycle-filter
+@vindex hs-indentation-respect-end-block
   These variables can be used to customize Hideshow mode:
 
 @table @code
 @item hs-hide-comments-when-hiding-all
-If non-@code{nil}, @kbd{C-c @@ C-M-h} (@code{hs-hide-all}) hides
-comments too.
+If non-@code{nil}, @code{hs-hide-all}, @code{hs-cycle} and
+@code{hs-hide-level} hide comments too.
+
+@item hs-hide-block-behavior
+This variable controls how @code{hs-hide-block}, @code{hs-cycle},
+@code{hs-hide-level}, and @code{hs-toggle-hiding} should hide a block.
+The possible values can be 'after-bol', hide the innermost block to
+which the current line belongs; or 'after-cursor', hide the block after
+cursor position.
+
+@item hs-display-lines-hidden
+If non-@code{nil}, display the number of hidden lines next to the
+ellipsis.
+
+@item hs-show-indicators
+This variable controls whether Hideshow mode should display indicators
+of hidden and shown blocks.  The indicators also allow toggling the
+hide/show state of each block.  If the value is non-@code{nil}, it enables
+the indicators.  The default is @code{nil}, which disables
+the indicators.
+
+@item hs-indicator-type
+This variable controls where to show the indicators, if they are
+enabled.  You can show them on the fringe (@pxref{Fringes}) or
+in the window's margin.  The default is to use the fringe if it's
+available, otherwise to use the margin.
+
+@item hs-indicator-maximum-buffer-size
+This variable limits the display of hideshow indicators to buffers that
+are not too large.  (Larger buffers might adversely affect redisplay
+performance.)  By default, buffers larger than 2MB have the indicators
+disabled; the value of @code{nil} will activate the indicators
+regardless of the buffer size.
+
+@item hs-cycle-filter
+This variable controls where on the line with hideable blocks typing the
+@kbd{@key{TAB}} key will cycle the visibility of the blocks.  Depending
+on its non-@code{nil} value, @key{TAB} can be active on different parts
+of such lines.  Anywhere else on the line @key{TAB} has its default key
+binding.  The value @code{nil} means @key{TAB} cannot cycle the
+visibility of the blocks anywhere on the heading line.
 
 @item hs-isearch-open
 This variable specifies the conditions under which incremental search
@@ -1340,6 +1810,11 @@ block.  Its value should be either @code{code} (unhide only code
 blocks), @code{comment} (unhide only comments), @code{t} (unhide both
 code blocks and comments), or @code{nil} (unhide neither code blocks
 nor comments).  The default value is @code{code}.
+
+@item hs-indentation-respect-end-block
+This variable controls whether the end of the block should be hidden
+together with the hidden region.  This only has effect if
+@code{hs-indentation-mode} is enabled.
 @end table
 
 @node Symbol Completion
@@ -1349,35 +1824,73 @@ nor comments).  The default value is @code{code}.
   Completion is normally done in the minibuffer (@pxref{Completion}),
 but you can also complete symbol names in ordinary Emacs buffers.
 
+@cindex tags-based completion
 @kindex M-TAB
 @kindex C-M-i
-  In programming language modes, type @kbd{C-M-i} or @kbd{M-@key{TAB}}
-to complete the partial symbol before point.  On graphical displays,
-the @kbd{M-@key{TAB}} key is usually reserved by the window manager
-for switching graphical windows, so you should type @kbd{C-M-i} or
-@kbd{@key{ESC} @key{TAB}} instead.
-
-@cindex tags-based completion
 @findex completion-at-point@r{, in programming language modes}
 @cindex Lisp symbol completion
 @cindex completion (Lisp symbols)
+@cindex code completion
   In most programming language modes, @kbd{C-M-i} (or
-@kbd{M-@key{TAB}}) invokes the command @code{completion-at-point},
-which generates its completion list in a flexible way.  If Semantic
-mode is enabled, it tries to use the Semantic parser data for
-completion (@pxref{Semantic}).  If Semantic mode is not enabled or
-fails at performing completion, it tries to complete using the
-selected tags table (@pxref{Tags Tables}).  If in Emacs Lisp mode, it
-performs completion using the function, variable, or property names
-defined in the current Emacs session.
+@kbd{M-@key{TAB}}@footnote{
+On graphical displays, the @kbd{M-@key{TAB}} key is usually reserved
+by the window manager for switching graphical windows, so you should
+type @kbd{C-M-i} or @kbd{@key{ESC} @key{TAB}} instead.
+}) invokes the command @code{completion-at-point}, which generates the
+list of possible completions for the symbol at point.  This command
+uses the available support facilities to come up with the completion
+candidates:
+
+@itemize @bullet
+@cindex eglot, using to complete symbol at point
+@item
+If Eglot is activated for the current buffer's project
+(@pxref{Projects}) and the current buffer's major mode, the command
+tries to use the corresponding language server for producing the list
+of completion candidates.  @xref{Eglot Features,,, eglot, Eglot: The
+Emacs LSP Client}.
+
+@item
+If Semantic mode is enabled (@pxref{Semantic}), the command tries to
+use the Semantic parser data for completion.
+
+@item
+If Semantic mode is not enabled or fails at performing completion, the
+command tries to complete using the selected tags table (@pxref{Tags
+Tables}); you need to visit the tags table with @w{@kbd{M-x
+visit-tags-table}} for that to work.
+
+@item
+In Emacs Lisp mode, the command performs completion using the
+function, variable, or property names defined in the current Emacs
+session.
+@end itemize
 
   In all other respects, in-buffer symbol completion behaves like
-minibuffer completion.  For instance, if Emacs cannot complete to a
-unique symbol, it displays a list of completion alternatives in
-another window.  @xref{Completion}.
+minibuffer completion.  For instance, if Emacs cannot complete to
+a unique symbol, it displays a list of completion alternatives in
+another window.  Then you can use the keys @kbd{M-@key{DOWN}} and
+@kbd{M-@key{UP}} to navigate through the completions displayed
+in the completions buffer without leaving the original buffer,
+and the key @kbd{M-@key{RET}} to insert the currently highlighted
+completion to the buffer.  @xref{Completion}.
 
   In Text mode and related modes, @kbd{M-@key{TAB}} completes words
 based on the spell-checker's dictionary.  @xref{Spelling}.
+
+@cindex completion preview
+@cindex preview completion
+@cindex suggestion preview
+@cindex Completion Preview mode
+@findex completion-preview-mode
+@findex global-completion-preview-mode
+  Completion Preview mode is a minor mode that shows completion
+suggestions as you type.  You can enable it for the current buffer with
+@kbd{M-x completion-preview-mode}, or globally with @w{@kbd{M-x
+global-completion-preview-mode}}.  When Completion Preview mode is on,
+Emacs automatically displays the suggested completion for text around
+point as an in-line preview right after point; type @key{TAB} to accept
+the suggestion.
 
 @node MixedCase Words
 @section MixedCase Words
@@ -1760,7 +2273,7 @@ sure the keymap is loaded before we try to change it.
 
 @example
 (defun my-bind-clb ()
-  (define-key c-mode-base-map "\C-m"
+  (keymap-set c-mode-base-map "RET"
               'c-context-line-break))
 (add-hook 'c-initialization-hook 'my-bind-clb)
 @end example

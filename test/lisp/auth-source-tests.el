@@ -1,6 +1,6 @@
 ;;; auth-source-tests.el --- Tests for auth-source.el  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2015-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2026 Free Software Foundation, Inc.
 
 ;; Author: Damien Cassou <damien@cassou.me>,
 ;;         Nicolas Petton <nicolas@petton.fr>
@@ -27,100 +27,154 @@
 ;;; Code:
 
 (require 'ert)
+(require 'ert-x)
 (require 'cl-lib)
 (require 'auth-source)
 (require 'secrets)
 
+;; (dolist
+;;     (elt
+;;      (append
+;;       (mapcar #'intern (all-completions "auth-" obarray #'functionp))
+;;       (mapcar #'intern (all-completions "password-" obarray #'functionp))))
+;;   (trace-function-background elt))
+
 (defun auth-source-ensure-ignored-backend (source)
-    (auth-source-validate-backend source '((:source . "")
-                                           (:type . ignore))))
+    (auth-source-validate-backend source '((source . "")
+                                           (type . ignore))))
 
 (defun auth-source-validate-backend (source validation-alist)
-  (let ((backend (auth-source-backend-parse source)))
+  (let* (auth-source-ignore-non-existing-file
+         (backend (auth-source-backend-parse source)))
     (should (auth-source-backend-p backend))
     (dolist (pair validation-alist)
       (should (equal (eieio-oref backend (car pair)) (cdr pair))))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain ()
   (auth-source-validate-backend '(:source (:macos-keychain-generic foobar))
-                                '((:source . "foobar")
-                                  (:type . macos-keychain-generic)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "foobar")
+                                  (type . macos-keychain-generic)
+                                  (search-function . auth-source-macos-keychain-search)
+                                  (create-function . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain-generic-string ()
   (auth-source-validate-backend "macos-keychain-generic:foobar"
-                                '((:source . "foobar")
-                                  (:type . macos-keychain-generic)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "foobar")
+                                  (type . macos-keychain-generic)
+                                  (search-function
+                                   . auth-source-macos-keychain-search)
+                                  (create-function
+                                   . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain-internet-string ()
   (auth-source-validate-backend "macos-keychain-internet:foobar"
-                                '((:source . "foobar")
-                                  (:type . macos-keychain-internet)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "foobar")
+                                  (type . macos-keychain-internet)
+                                  (search-function
+                                   . auth-source-macos-keychain-search)
+                                  (create-function
+                                   . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain-internet-symbol ()
   (auth-source-validate-backend 'macos-keychain-internet
-                                '((:source . "default")
-                                  (:type . macos-keychain-internet)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "default")
+                                  (type . macos-keychain-internet)
+                                  (search-function
+                                   . auth-source-macos-keychain-search)
+                                  (create-function
+                                   . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain-generic-symbol ()
   (auth-source-validate-backend 'macos-keychain-generic
-                                '((:source . "default")
-                                  (:type . macos-keychain-generic)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "default")
+                                  (type . macos-keychain-generic)
+                                  (search-function
+                                   . auth-source-macos-keychain-search)
+                                  (create-function
+                                   . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-macos-keychain-internet-default-string ()
   (auth-source-validate-backend 'macos-keychain-internet
-                                '((:source . "default")
-                                  (:type . macos-keychain-internet)
-                                  (:search-function . auth-source-macos-keychain-search)
-                                  (:create-function . auth-source-macos-keychain-create))))
+                                '((source . "default")
+                                  (type . macos-keychain-internet)
+                                  (search-function
+                                   . auth-source-macos-keychain-search)
+                                  (create-function
+                                   . auth-source-macos-keychain-create))))
 
 (ert-deftest auth-source-backend-parse-plstore ()
   (auth-source-validate-backend '(:source "foo.plist")
-                                '((:source . "foo.plist")
-                                  (:type . plstore)
-                                  (:search-function . auth-source-plstore-search)
-                                  (:create-function . auth-source-plstore-create))))
+                                '((source . "foo.plist")
+                                  (type . plstore)
+                                  (search-function . auth-source-plstore-search)
+                                  (create-function
+                                   . auth-source-plstore-create))))
+
+(ert-deftest auth-source-backend-parse-plstore-string ()
+  (auth-source-validate-backend "foo.plist"
+                                '((source . "foo.plist")
+                                  (type . plstore)
+                                  (search-function . auth-source-plstore-search)
+                                  (create-function
+                                   . auth-source-plstore-create))))
 
 (ert-deftest auth-source-backend-parse-netrc ()
   (auth-source-validate-backend '(:source "foo")
-                                '((:source . "foo")
-                                  (:type . netrc)
-                                  (:search-function . auth-source-netrc-search)
-                                  (:create-function . auth-source-netrc-create))))
+                                '((source . "foo")
+                                  (type . netrc)
+                                  (search-function . auth-source-netrc-search)
+                                  (create-function
+                                   . auth-source-netrc-create))))
 
 (ert-deftest auth-source-backend-parse-netrc-string ()
   (auth-source-validate-backend "foo"
-                                '((:source . "foo")
-                                  (:type . netrc)
-                                  (:search-function . auth-source-netrc-search)
-                                  (:create-function . auth-source-netrc-create))))
+                                '((source . "foo")
+                                  (type . netrc)
+                                  (search-function . auth-source-netrc-search)
+                                  (create-function
+                                   . auth-source-netrc-create))))
+
+(ert-deftest auth-source-backend-parse-json ()
+  (auth-source-validate-backend '(:source "foo.json")
+                                '((source . "foo.json")
+                                  (type . json)
+                                  (search-function . auth-source-json-search)
+                                  (create-function
+                                   ;; To be implemented:
+                                   ;; . auth-source-json-create))))
+                                   . ignore))))
+
+(ert-deftest auth-source-backend-parse-json-string ()
+  (auth-source-validate-backend "foo.json"
+                                '((source . "foo.json")
+                                  (type . json)
+                                  (search-function . auth-source-json-search)
+                                  (create-function
+                                   ;; To be implemented:
+                                   ;; . auth-source-json-create))))
+                                   . ignore))))
 
 (ert-deftest auth-source-backend-parse-secrets ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
   (let ((secrets-enabled t))
     (auth-source-validate-backend '(:source (:secrets "foo"))
-                                  '((:source . "foo")
-                                    (:type . secrets)
-                                    (:search-function . auth-source-secrets-search)
-                                    (:create-function . auth-source-secrets-create)))))
+                                  '((source . "foo")
+                                    (type . secrets)
+                                    (search-function
+                                     . auth-source-secrets-search)
+                                    (create-function
+                                     . auth-source-secrets-create)))))
 
 (ert-deftest auth-source-backend-parse-secrets-strings ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
   (let ((secrets-enabled t))
     (auth-source-validate-backend "secrets:foo"
-                                  '((:source . "foo")
-                                    (:type . secrets)
-                                    (:search-function . auth-source-secrets-search)
-                                    (:create-function . auth-source-secrets-create)))))
+                                  '((source . "foo")
+                                    (type . secrets)
+                                    (search-function
+                                     . auth-source-secrets-search)
+                                    (create-function
+                                     . auth-source-secrets-create)))))
 
 (ert-deftest auth-source-backend-parse-secrets-alias ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
@@ -128,10 +182,12 @@
     ;; Redefine `secrets-get-alias' to map 'foo to "foo"
     (cl-letf (((symbol-function 'secrets-get-alias) (lambda (_) "foo")))
       (auth-source-validate-backend '(:source (:secrets foo))
-                                    '((:source . "foo")
-                                      (:type . secrets)
-                                      (:search-function . auth-source-secrets-search)
-                                      (:create-function . auth-source-secrets-create))))))
+                                    '((source . "foo")
+                                      (type . secrets)
+                                      (search-function
+                                       . auth-source-secrets-search)
+                                      (create-function
+                                       . auth-source-secrets-create))))))
 
 (ert-deftest auth-source-backend-parse-secrets-symbol ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
@@ -139,10 +195,12 @@
     ;; Redefine `secrets-get-alias' to map 'default to "foo"
     (cl-letf (((symbol-function 'secrets-get-alias) (lambda (_) "foo")))
       (auth-source-validate-backend 'default
-                                    '((:source . "foo")
-                                      (:type . secrets)
-                                      (:search-function . auth-source-secrets-search)
-                                      (:create-function . auth-source-secrets-create))))))
+                                    '((source . "foo")
+                                      (type . secrets)
+                                      (search-function
+                                       . auth-source-secrets-search)
+                                      (create-function
+                                       . auth-source-secrets-create))))))
 
 (ert-deftest auth-source-backend-parse-secrets-no-alias ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
@@ -151,10 +209,12 @@
     ;; "Login" is used by default
     (cl-letf (((symbol-function 'secrets-get-alias) (lambda (_) nil)))
       (auth-source-validate-backend '(:source (:secrets foo))
-                                    '((:source . "Login")
-                                      (:type . secrets)
-                                      (:search-function . auth-source-secrets-search)
-                                      (:create-function . auth-source-secrets-create))))))
+                                    '((source . "Login")
+                                      (type . secrets)
+                                      (search-function
+                                       . auth-source-secrets-search)
+                                      (create-function
+                                       . auth-source-secrets-create))))))
 
 (ert-deftest auth-source-backend-parse-invalid-or-nil-source ()
   (provide 'secrets) ; simulates the presence of the `secrets' package
@@ -162,6 +222,20 @@
     (auth-source-ensure-ignored-backend nil)
     (auth-source-ensure-ignored-backend '(:source '(foo)))
     (auth-source-ensure-ignored-backend '(:source nil))))
+
+(ert-deftest auth-source-backend-parse-fallback ()
+  (let* (auth-sources
+         (backends (auth-source-backends))
+         (backend (car backends))
+         (validation-alist
+          '((source . "")
+            (type . read-passwd)
+            (search-function . auth-source-read-passwd-search)
+            (create-function . auth-source-read-passwd-create))))
+    (should (length= backends 1))
+    (should (auth-source-backend-p backend))
+    (dolist (pair validation-alist)
+      (should (equal (eieio-oref backend (car pair)) (cdr pair))))))
 
 (defun auth-source--test-netrc-parse-entry (entry host user port)
   "Parse a netrc entry from buffer."
@@ -247,7 +321,7 @@
     (should-not (auth-source-remembered-p '(:host t)))))
 
 (ert-deftest auth-source-test-searches ()
-  "Test auth-source searches with various parameters"
+  "Test auth-source searches with various parameters."
   :tags '(auth-source auth-source/netrc)
   (let* ((entries '("machine a1 port a2 user a3 password a4"
                     "machine b1 port b2 user b3 password b4"
@@ -277,34 +351,29 @@
                    "((:host \"a1\" :port \"a2\" :user \"a3\" :secret \"a4\") (:host \"b1\" :port \"b2\" :user \"b3\" :secret \"b4\") (:host \"c1\" :port \"c2\" :user \"c3\" :secret \"c4\"))"
                    :host t :max 4)
                   ("host b1, default max is 1"
-                  "((:host \"b1\" :port \"b2\" :user \"b3\" :secret \"b4\"))"
+                   "((:host \"b1\" :port \"b2\" :user \"b3\" :secret \"b4\"))"
                    :host "b1")
                   ("host b1, port b2, user b3, default max is 1"
-                  "((:host \"b1\" :port \"b2\" :user \"b3\" :secret \"b4\"))"
+                   "((:host \"b1\" :port \"b2\" :user \"b3\" :secret \"b4\"))"
                    :host "b1" :port "b2" :user "b3")
-                  ))
+                  )))
+    (ert-with-temp-file netrc-file
+      :suffix "auth-source-test" :text (mapconcat 'identity entries "\n")
+      (let ((auth-sources (list netrc-file))
+            (auth-source-do-cache nil)
+            found found-as-string)
 
-         (netrc-file (make-temp-file "auth-source-test" nil nil
-                                     (mapconcat 'identity entries "\n")))
-         (auth-sources (list netrc-file))
-         (auth-source-do-cache nil)
-         found found-as-string)
+        (dolist (test tests)
+          (cl-destructuring-bind (testname needed &rest parameters) test
+            (setq found (apply #'auth-source-search parameters))
+            (when (listp found)
+              (dolist (f found)
+                (setf f (plist-put f :secret (auth-info-password f)))))
 
-    (dolist (test tests)
-      (cl-destructuring-bind (testname needed &rest parameters) test
-        (setq found (apply #'auth-source-search parameters))
-        (when (listp found)
-          (dolist (f found)
-            (setf f (plist-put f :secret
-	                       (let ((secret (plist-get f :secret)))
-		                 (if (functionp secret)
-		                     (funcall secret)
-		                   secret))))))
-
-        (setq found-as-string (format "%s: %S" testname found))
-        ;; (message "With parameters %S found: [%s] needed: [%s]" parameters found-as-string needed)
-        (should (equal found-as-string (concat testname ": " needed)))))
-    (delete-file netrc-file)))
+            (setq found-as-string (format "%s: %S" testname found))
+            ;; (message "With parameters %S found: [%s] needed: [%s]"
+            ;;          parameters found-as-string needed)
+            (should (equal found-as-string (concat testname ": " needed)))))))))
 
 (ert-deftest auth-source-test-secrets-create-secret ()
   (skip-unless secrets-enabled)
@@ -312,37 +381,308 @@
   ;; Emacs process.  Therefore, we don't care to delete it.
   (let ((auth-sources '((:source (:secrets "session"))))
         (auth-source-save-behavior t)
-        (host (md5 (concat (prin1-to-string process-environment)
-			   (current-time-string))))
-        (passwd (md5 (concat (prin1-to-string process-environment)
-			     (current-time-string) (current-time-string))))
-        auth-info auth-passwd)
-    ;; Redefine `read-*' in order to avoid interactive input.
-    (cl-letf (((symbol-function 'read-passwd) (lambda (_) passwd))
-              ((symbol-function 'read-string)
-               (lambda (_prompt _initial _history default) default)))
-      (setq auth-info
-            (car (auth-source-search
-                  :max 1 :host host :require '(:user :secret) :create t))))
-    (should (functionp (plist-get auth-info :save-function)))
-    (funcall (plist-get auth-info :save-function))
+        host auth-info auth-passwd)
+    (dolist (passwd '("foo" "" nil))
+      (unwind-protect
+          ;; Redefine `read-*' in order to avoid interactive input.
+          (cl-letf (((symbol-function 'read-passwd) (lambda (_) passwd))
+                    ((symbol-function 'read-string)
+                     (lambda (_prompt &optional _initial _history default
+                                      _inherit-input-method)
+                       default)))
+            (setq host
+                  (md5 (concat (prin1-to-string process-environment) passwd))
+                  auth-info
+                  (car (auth-source-search
+                        :max 1 :host host :require '(:user :secret) :create t))
+	          auth-passwd (auth-info-password auth-info))
+            (should (string-equal (plist-get auth-info :user) (user-login-name)))
+            (should (string-equal (plist-get auth-info :host) host))
+            (should (equal auth-passwd passwd))
+            (when (functionp (plist-get auth-info :save-function))
+              (funcall (plist-get auth-info :save-function)))
 
-    ;; Check, that the item has been created indeed.
-    (auth-source-forget+ :host t)
-    (setq auth-info (car (auth-source-search :host host))
-	  auth-passwd (plist-get auth-info :secret)
-	  auth-passwd (if (functionp auth-passwd)
-			  (funcall auth-passwd)
-			auth-passwd))
-    (should (string-equal (plist-get auth-info :user) (user-login-name)))
-    (should (string-equal (plist-get auth-info :host) host))
-    (should (string-equal auth-passwd passwd))
+            ;; Check, that the item has been created indeed.
+            (auth-source-forget+ :host t)
+            (setq auth-info (car (auth-source-search :host host))
+	          auth-passwd (auth-info-password auth-info))
+            (if (zerop (length passwd))
+                (progn
+                  (should-not (plist-get auth-info :user))
+                  (should-not (plist-get auth-info :host))
+                  (should-not auth-passwd))
+              (should
+               (string-equal (plist-get auth-info :user) (user-login-name)))
+              (should (string-equal (plist-get auth-info :host) host))
+              (should (string-equal auth-passwd passwd))))
 
-    ;; Cleanup.
-    ;; Should use `auth-source-delete' when implemented for :secrets backend.
-    (secrets-delete-item
-     "session"
-     (format "%s@%s" (plist-get auth-info :user) (plist-get auth-info :host)))))
+        ;; Cleanup.
+        ;; Should use `auth-source-delete' when implemented for :secrets backend.
+        (secrets-delete-item
+         "session"
+         (format
+          "%s@%s" (plist-get auth-info :user) (plist-get auth-info :host)))))))
+
+(ert-deftest auth-source-test-netrc-create-secret ()
+  (ert-with-temp-file netrc-file
+    :suffix "auth-source-test"
+    :text "machine a1 port a2 user a3 password a4"
+    (let* ((non-existing-file (make-temp-name temporary-file-directory))
+           (auth-sources (list non-existing-file netrc-file))
+           (auth-source-save-behavior t)
+           (auth-source-ignore-non-existing-file t)
+           host auth-info auth-passwd)
+      (dolist (passwd `("foo" "bar baz" "bar'baz" "bar\"baz"
+                        "foo'bar\"baz" "" nil))
+        ;; Redefine `read-*' in order to avoid interactive input.
+        (cl-letf (((symbol-function 'read-passwd) (lambda (_) passwd))
+                  ((symbol-function 'read-string)
+                   (lambda (_prompt &optional _initial _history default
+                               _inherit-input-method)
+                     default)))
+          (setq host
+                (md5 (concat (prin1-to-string process-environment) passwd))
+                auth-info
+                (car (auth-source-search
+                      :max 1 :host host :require '(:user :secret) :create t))
+                auth-passwd (auth-info-password auth-info))
+          (should (string-equal (plist-get auth-info :user) (user-login-name)))
+          (should (string-equal (plist-get auth-info :host) host))
+          (should (equal auth-passwd passwd))
+          (when (functionp (plist-get auth-info :save-function))
+            (funcall (plist-get auth-info :save-function)))
+
+          ;; Check, that the item has been created indeed.
+          (auth-source-forget+ :host t)
+          (setq auth-source-netrc-cache nil)
+          (setq auth-info (car (auth-source-search :host host))
+                auth-passwd (auth-info-password auth-info))
+          (with-temp-buffer
+            (insert-file-contents netrc-file)
+            (if (or (zerop (length passwd))
+                    (and (string-match-p "\"" passwd)
+                         (string-match-p "'" passwd)))
+                (progn
+                  (should-not (plist-get auth-info :user))
+                  (should-not (plist-get auth-info :host))
+                  (should-not auth-passwd)
+                  (should-not (search-forward host nil 'noerror)))
+              (should
+               (string-equal (plist-get auth-info :user) (user-login-name)))
+              (should (string-equal (plist-get auth-info :host) host))
+              (should (string-equal auth-passwd passwd))
+              (should (search-forward host nil 'noerror)))))))))
+
+(ert-deftest auth-source-test-read-passwd-create-secret ()
+  (let (auth-sources auth-info auth-passwd host)
+    (auth-source-forget-all-cached)
+    (dolist (passwd '("foo" "" nil))
+      (unwind-protect
+          ;; Redefine `read-*' in order to avoid interactive input.
+          (cl-letf (((symbol-function 'read-passwd) (lambda (_) passwd))
+                    ((symbol-function 'read-string)
+                     (lambda (_prompt &optional _initial _history default
+                                      _inherit-input-method)
+                       default)))
+            (setq host
+                  (md5 (concat (prin1-to-string process-environment) passwd))
+                  auth-info
+                  (car (auth-source-search
+                        :max 1 :host host :require '(:user :secret) :create t))
+	          auth-passwd (auth-info-password auth-info))
+            (should (string-equal (plist-get auth-info :user) (user-login-name)))
+            (should (string-equal (plist-get auth-info :host) host))
+            (should (equal auth-passwd passwd))
+            (should-not (plist-get auth-info :save-function))
+
+            ;; Check, that the item hasn't been created persistently.
+            (auth-source-forget+ :host t)
+            (should-not (auth-source-search :host host)))
+
+        ;; Cleanup.
+        t))))
+
+(ert-deftest auth-source-delete ()
+  (ert-with-temp-file netrc-file
+    :suffix "auth-source-test" :text "\
+machine a1 port a2 user a3 password a4
+machine b1 port b2 user b3 password b4
+machine c1 port c2 user c3 password c4\n"
+    (let* ((auth-sources (list netrc-file))
+           (auth-source-do-cache nil)
+           (expected '((:host "a1" :port "a2" :user "a3" :secret "a4")))
+           (parameters '(:max 1 :host t))
+           (found (apply #'auth-source-delete parameters)))
+      (dolist (f found)
+        (setf f (plist-put f :secret (auth-info-password f))))
+      ;; Note: The netrc backend doesn't delete anything, so
+      ;; this is actually the same as `auth-source-search'.
+      (should (equal found expected)))))
+
+(ert-deftest auth-source-test-netrc-credentials ()
+  (let ((data (auth-source-netrc-parse-all (ert-resource-file "authinfo"))))
+    (should data)
+    (let ((imap (seq-find (lambda (elem)
+                            (equal (cdr (assoc "machine" elem))
+                                   "imap.example.org"))
+                          data)))
+      (should (equal (cdr (assoc "login" imap)) "jrh@example.org"))
+      (should (equal (cdr (assoc "password" imap)) "*foobar*")))
+    (let ((imap (seq-find (lambda (elem)
+                            (equal (cdr (assoc "machine" elem))
+                                   "ftp.example.org"))
+                          data)))
+      (should (equal (cdr (assoc "login" imap)) "jrh"))
+      (should (equal (cdr (assoc "password" imap)) "*baz*")))))
+
+(ert-deftest auth-source-test-netrc-credentials-2 ()
+  (let ((data (auth-source-netrc-parse-all
+               (ert-resource-file "netrc-folding"))))
+    (should
+     (equal data
+            '((("machine" . "XM") ("login" . "XL") ("password" . "XP"))
+              (("machine" . "YM") ("login" . "YL") ("password" . "YP")))))))
+
+(ert-deftest auth-source-test-macos-keychain-search ()
+  "Test if the constructed command line arglist is correct."
+  (let ((auth-sources '(macos-keychain-internet macos-keychain-generic)))
+    ;; Redefine `call-process' to check command line arguments.
+    (cl-letf (((symbol-function 'call-process)
+               (lambda (_program _infile _destination _display
+                                 &rest args)
+                 ;; Arguments must be all strings.
+                 (should (cl-every #'stringp args))
+                 ;; Argument number should be even.
+                 (should (evenp (length args)))
+                 (should
+                  (cond
+                   ((string= (car args) "find-internet-password")
+                    (let ((protocol-r (cl-member "-r" args :test #'string=))
+                          (protocol-P (cl-member "-P" args :test #'string=)))
+                      (cond (protocol-r
+                             (= 4 (length (cadr protocol-r))))
+                            (protocol-P
+                             (string-match-p
+                              "\\`[[:digit:]]+\\'" (cadr protocol-P)))
+                            (t))))
+                   ((string= (car args) "find-generic-password")
+                    t))))))
+      (auth-source-search
+       :user '("a" "b") :host '("example.org")
+       :port '("irc" "ftp" "https" 123)))))
+
+(defun auth-source-test--displayed-string (string)
+  "Apply `display' properties of STRING and return the displayed string."
+  (let ((i 0)
+        res)
+    (while i
+      (let ((display (get-text-property i 'display string))
+            (i0 i))
+        (setq i (next-single-property-change i 'display string))
+        (if display
+            (push display res)
+          (push (substring string i0 i) res))))
+    (apply #'concat (nreverse res))))
+
+(ert-deftest auth-source-test-read-passwd ()
+  "Check that a password read with `read-passwd' isn't visible by default."
+  (let* ((cursor-in-echo-area t)
+         (screenshot (intern "ert--screenshot"))
+         (keys `[,@"secret"
+                 ;; fake input event to capture the current minibuf string
+                 ,screenshot
+                 ;; leave outer prompt
+                 ,@(kbd "RET")])
+         (minibuffer-string nil)
+         (command-screenshot
+          (lambda ()
+            (interactive)
+            (setq minibuffer-string (buffer-string)))))
+    (unwind-protect
+        (progn
+          (define-key global-map `[,screenshot] command-screenshot)
+          (ert-simulate-keys keys
+            (should (equal (read-passwd "Test: ") "secret"))))
+      (define-key global-map `[,screenshot] command-screenshot t))
+    ;; check that the secret's there
+    (should (equal "Test: secret" minibuffer-string))
+    ;; now simulate what redisplay does to hide the password
+    (setq minibuffer-string
+          (auth-source-test--displayed-string minibuffer-string))
+    ;; check that the secret is not visible
+    (should (equal "Test: ******" minibuffer-string))))
+
+(ert-deftest auth-source-test-read-passwd-revealed ()
+  "Check that a password read with `read-passwd' can be made visible."
+  (let* ((cursor-in-echo-area t)
+         (screenshot (intern "ert--screenshot"))
+         (keys `[,@"secret"
+                 ;; TAB: reveals the password
+                 ,@(kbd "TAB")
+                 ;; fake input event to capture the current minibuf string
+                 ,screenshot
+                 ;; leave outer prompt
+                 ,@(kbd "RET")])
+         (minibuffer-string nil)
+         (command-screenshot
+          (lambda ()
+            (interactive)
+            (setq minibuffer-string (buffer-string)))))
+    (unwind-protect
+        (progn
+          (define-key global-map `[,screenshot] command-screenshot)
+          (ert-simulate-keys keys
+            (should (equal (read-passwd "Test: ") "secret"))))
+      (define-key global-map `[,screenshot] command-screenshot t))
+    ;; check that the secret's there
+    (should (equal "Test: secret" minibuffer-string))
+    ;; now simulate what redisplay does to hide the password
+    (setq minibuffer-string
+          (auth-source-test--displayed-string minibuffer-string))
+    ;; check that the secret is visible once more
+    (should (equal "Test: secret" minibuffer-string))))
+
+(ert-deftest auth-source-test-read-passwd-nested ()
+  "Check that nested `read-passwd' calls do not reveal the password."
+  (let* ((cursor-in-echo-area t)
+         (trigger-nested (intern "ert--trigger-nested"))
+         (screenshot (intern "ert--screenshot"))
+         (keys `[,@"secret"
+                 ;; fake input event to trigger a nested prompt
+                 ,trigger-nested
+                 ,@"SECRET"
+                 ;; leave nested prompt
+                 ,@(kbd "RET")
+                 ;; fake input event to capture the current minibuf string
+                 ,screenshot
+                 ;; leave outer prompt
+                 ,@(kbd "RET")])
+         (inner-password nil)
+         (command-trigger-nested
+          (lambda ()
+            (interactive)
+            (setq inner-password (read-passwd "inner prompt: "))))
+         (minibuffer-string nil)
+         (command-screenshot
+          (lambda ()
+            (interactive)
+            (setq minibuffer-string (buffer-string)))))
+    (unwind-protect
+        (progn
+          (define-key global-map `[,screenshot] command-screenshot)
+          (define-key global-map `[,trigger-nested] command-trigger-nested)
+          (ert-simulate-keys keys
+            (should (equal (read-passwd "Test: ") "secret"))))
+      (define-key global-map `[,screenshot] command-screenshot t)
+      (define-key global-map `[,trigger-nested] command-trigger-nested t))
+    (should (equal inner-password "SECRET"))
+    ;; check that the secret's there
+    (should (equal "Test: secret" minibuffer-string))
+    ;; now simulate what redisplay does to hide the password
+    (setq minibuffer-string
+          (auth-source-test--displayed-string minibuffer-string))
+    ;; check that the secret has been hidden
+    (should (equal "Test: ******" minibuffer-string))))
 
 (provide 'auth-source-tests)
 ;;; auth-source-tests.el ends here

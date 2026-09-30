@@ -1,6 +1,6 @@
-;;; Test GNU Emacs modules.
+;;; emacs-module-tests.el --- Test GNU Emacs modules.  -*- lexical-binding: t; -*-
 
-;; Copyright 2015-2018 Free Software Foundation, Inc.
+;; Copyright 2015-2026 Free Software Foundation, Inc.
 
 ;; This file is part of GNU Emacs.
 
@@ -17,9 +17,25 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 
+;;; Commentary:
+
+;; Unit tests for the dynamic module facility.  See Info node `(elisp)
+;; Writing Dynamic Modules'.  These tests make use of a small test
+;; module in the "emacs-module-resources" directory.
+
+;;; Code:
+;;; Prelude
+
 (require 'cl-lib)
 (require 'ert)
+(require 'ert-x)
 (require 'help-fns)
+(require 'subr-x)
+
+;; Catch information for bug#50902.
+(when (getenv "EMACS_EMBA_CI")
+  (start-process-shell-command
+   "*timeout*" nil (format "sleep 60; kill -ABRT %d" (emacs-pid))))
 
 (defconst mod-test-emacs
   (expand-file-name invocation-name invocation-directory)
@@ -27,7 +43,8 @@
 
 (eval-and-compile
   (defconst mod-test-file
-    (expand-file-name "../test/data/emacs-module/mod-test" invocation-directory)
+    (expand-file-name "../test/src/emacs-module-resources/mod-test"
+                      invocation-directory)
     "File name of the module test file."))
 
 (require 'mod-test mod-test-file)
@@ -40,9 +57,7 @@
 (cl-defmethod emacs-module-tests--generic ((_ user-ptr))
   'user-ptr)
 
-;;
-;; Basic tests.
-;;
+;;; Basic tests
 
 (ert-deftest mod-test-sum-test ()
   (should (= (mod-test-sum 1 2) 3))
@@ -52,8 +67,10 @@
     (should (eq 0
                 (string-match
                  (concat "#<module function "
-                         "\\(at \\(0x\\)?[0-9a-fA-F]+\\( from .*\\)?"
-                         "\\|Fmod_test_sum from .*\\)>")
+                         "\\(at \\(0x\\)?[[:xdigit:]]+ "
+                         "with data 0x1234\\( from .*\\)?"
+                         "\\|\\(Fmod_test_sum\\|_DYNAMIC\\) "
+                         "with data 0x1234 from .*\\)>")
                  (prin1-to-string (nth 1 descr)))))
     (should (= (nth 2 descr) 3)))
   (should-error (mod-test-sum "1" 2) :type 'wrong-type-argument)
@@ -68,10 +85,10 @@
                (1+ #x1fffffff)))
     (should (= (mod-test-sum -1 (1+ #x1fffffff))
                #x1fffffff)))
-  (should-error (mod-test-sum 1 most-positive-fixnum)
-                :type 'overflow-error)
-  (should-error (mod-test-sum -1 most-negative-fixnum)
-                :type 'overflow-error))
+  (should (= (mod-test-sum 1 most-positive-fixnum)
+             (1+ most-positive-fixnum)))
+  (should (= (mod-test-sum -1 most-negative-fixnum)
+             (1- most-negative-fixnum))))
 
 (ert-deftest mod-test-sum-docstring ()
   (should (string= (documentation 'mod-test-sum) "Return A + B\n\n(fn a b)")))
@@ -88,26 +105,25 @@ changes."
     (should (string-match-p
              (rx bos "#<module function "
                  (or "Fmod_test_sum"
+                     "_DYNAMIC"
                      (and "at 0x" (+ hex-digit)))
+                 " with data 0x1234"
                  (? " from " (* nonl) "mod-test" (* nonl) )
                  ">" eos)
              (prin1-to-string func)))))
 
-;;
-;; Non-local exists (throw, signal).
-;;
+;;; Non-local exists (throw, signal)
 
 (ert-deftest mod-test-non-local-exit-signal-test ()
   (should-error (mod-test-signal))
-  (let (debugger-args backtrace)
+  (let (handler-err backtrace)
     (should-error
-     (let ((debugger (lambda (&rest args)
-                       (setq debugger-args args
-                             backtrace (with-output-to-string (backtrace)))
-                       (cl-incf num-nonmacro-input-events)))
-           (debug-on-signal t))
+     (handler-bind
+         ((error (lambda (err)
+                   (setq handler-err err
+                         backtrace (with-output-to-string (backtrace))))))
        (mod-test-signal)))
-    (should (equal debugger-args '(error (error . 56))))
+    (should (equal handler-err '(error 56)))
     (should (string-match-p
              (rx bol "  mod-test-signal()" eol)
              backtrace))))
@@ -132,13 +148,22 @@ changes."
   (should (equal (mod-test-non-local-exit-funcall (lambda () (throw 'tag 32)))
                  '(throw tag 32))))
 
-;;
-;; String tests.
-;;
+(ert-deftest mod-test-non-local-exit-funcall-debug-on-error ()
+  (let* ((debugger-entered nil)
+         (debugger (lambda (&rest _) (setq debugger-entered t))))
+    (should (equal
+             (let ((debug-on-error t))
+               (mod-test-non-local-exit-funcall
+                (lambda () (error "test error"))))
+             '(signal error ("test error"))))
+    (should debugger-entered)))
+
+;;; String tests
 
 (defun multiply-string (s n)
+  "Return N copies of S concatenated together."
   (let ((res ""))
-    (dotimes (i n)
+    (dotimes (_ n)
       (setq res (concat res s)))
     res))
 
@@ -148,12 +173,16 @@ changes."
     (garbage-collect) ;; XXX: not enough to really test but it's something..
     (should (string= ref-str mod-str))))
 
+(ert-deftest mod-test-globref-free-test ()
+  (should (eq (mod-test-globref-free 1 'a "test" 'b) 'ok)))
+
+(ert-deftest mod-test-globref-reordered ()
+  (should (equal (mod-test-globref-reordered) '(t t t nil))))
+
 (ert-deftest mod-test-string-a-to-b-test ()
   (should (string= (mod-test-string-a-to-b "aaa") "bbb")))
 
-;;
-;; User-pointer tests.
-;;
+;;; User-pointer tests
 
 (ert-deftest mod-test-userptr-fun-test ()
   (let* ((n 42)
@@ -167,9 +196,7 @@ changes."
 
 ;; TODO: try to test finalizer
 
-;;
-;; Vector tests.
-;;
+;;; Vector tests
 
 (ert-deftest mod-test-vector-test ()
   (dolist (s '(2 10 100 1000))
@@ -195,20 +222,6 @@ changes."
   (should (equal (help-function-arglist #'mod-test-sum)
                  '(arg1 arg2))))
 
-(defmacro module--with-temp-directory (name &rest body)
-  "Bind NAME to the name of a temporary directory and evaluate BODY.
-NAME must be a symbol.  Delete the temporary directory after BODY
-exits normally or non-locally.  NAME will be bound to the
-directory name (not the directory file name) of the temporary
-directory."
-  (declare (indent 1))
-  (cl-check-type name symbol)
-  `(let ((,name (file-name-as-directory
-                 (make-temp-file "emacs-module-test" :directory))))
-     (unwind-protect
-         (progn ,@body)
-       (delete-directory ,name :recursive))))
-
 (defmacro module--test-assertion (pattern &rest body)
   "Test that PATTERN matches the assertion triggered by BODY.
 Run Emacs as a subprocess, load the test module `mod-test-file',
@@ -217,7 +230,7 @@ assertion message that matches PATTERN.  PATTERN is evaluated and
 must evaluate to a regular expression string."
   (declare (indent 1))
   ;; To contain any core dumps.
-  `(module--with-temp-directory tempdir
+  `(ert-with-temp-directory tempdir
      (with-temp-buffer
        (let* ((default-directory tempdir)
               (status (call-process mod-test-emacs nil t nil
@@ -245,7 +258,10 @@ must evaluate to a regular expression string."
 
 (ert-deftest module--test-assertions--load-non-live-object ()
   "Check that -module-assertions verify that non-live objects aren't accessed."
-  (skip-unless (file-executable-p mod-test-emacs))
+  :tags (if (getenv "EMACS_EMBA_CI") '(:unstable))
+  (skip-unless (or (file-executable-p mod-test-emacs)
+                   (and (eq system-type 'windows-nt)
+                        (file-executable-p (concat mod-test-emacs ".exe")))))
   ;; This doesn't yet cause undefined behavior.
   (should (eq (mod-test-invalid-store) 123))
   (module--test-assertion (rx "Emacs value not found in "
@@ -256,26 +272,68 @@ must evaluate to a regular expression string."
     (mod-test-invalid-store)
     (mod-test-invalid-load)))
 
+(ert-deftest module--test-assertions--load-non-live-object-with-global-copy ()
+  "Check that -module-assertions verify that non-live objects aren't accessed.
+This differs from `module--test-assertions--load-non-live-object'
+in that it stows away a global reference.  The module assertions
+should nevertheless detect the invalid load."
+  :tags (if (getenv "EMACS_EMBA_CI") '(:unstable))
+  (skip-unless (or (file-executable-p mod-test-emacs)
+                   (and (eq system-type 'windows-nt)
+                        (file-executable-p (concat mod-test-emacs ".exe")))))
+  ;; This doesn't yet cause undefined behavior.
+  (should (eq (mod-test-invalid-store-copy) 123))
+  (module--test-assertion (rx "Emacs value not found in "
+                              (+ digit) " values of "
+                              (+ digit) " environments\n")
+    ;; Storing and reloading a local value causes undefined behavior,
+    ;; which should be detected by the module assertions.
+    (mod-test-invalid-store-copy)
+    (mod-test-invalid-load)))
+
 (ert-deftest module--test-assertions--call-emacs-from-gc ()
   "Check that -module-assertions prevents calling Emacs functions
 during garbage collection."
-  (skip-unless (file-executable-p mod-test-emacs))
+  :tags (if (getenv "EMACS_EMBA_CI") '(:unstable))
+  (skip-unless (or (file-executable-p mod-test-emacs)
+                   (and (eq system-type 'windows-nt)
+                        (file-executable-p (concat mod-test-emacs ".exe")))))
   (module--test-assertion
       (rx "Module function called during garbage collection\n")
-    (mod-test-invalid-finalizer)))
+    (mod-test-invalid-finalizer)
+    (garbage-collect)))
+
+(ert-deftest module--test-assertions--globref-invalid-free ()
+  "Check that -module-assertions detects invalid freeing of a
+local reference."
+  :tags (if (getenv "EMACS_EMBA_CI") '(:unstable))
+  (skip-unless (or (file-executable-p mod-test-emacs)
+                   (and (eq system-type 'windows-nt)
+                        (file-executable-p (concat mod-test-emacs ".exe")))))
+  (module--test-assertion
+      (rx "Global value was not found in list of " (+ digit) " globals")
+    (mod-test-globref-invalid-free)
+    (garbage-collect)))
 
 (ert-deftest module/describe-function-1 ()
   "Check that Bug#30163 is fixed."
   (with-temp-buffer
-    (let ((standard-output (current-buffer)))
+    (let ((standard-output (current-buffer))
+          (text-quoting-style 'grave)
+          (fill-column 200))            ; prevent line breaks when filling
       (describe-function-1 #'mod-test-sum)
+      (goto-char (point-min))
+      (while (re-search-forward "`[^']*/src/emacs-module-resources/" nil t)
+        (replace-match "`src/emacs-module-resources/"))
       (should (equal
                (buffer-substring-no-properties 1 (point-max))
-               (format "a module function in `data/emacs-module/mod-test%s'.
+               (format "a module-function in `src/emacs-module-resources/mod-test%s'.
 
 (mod-test-sum a b)
 
-Return A + B"
+Return A + B
+
+"
                        module-file-suffix))))))
 
 (ert-deftest module/load-history ()
@@ -285,5 +343,374 @@ Return A + B"
     (should (equal (file-name-sans-extension file) mod-test-file))
     (should (member '(provide . mod-test) entries))
     (should (member '(defun . mod-test-sum) entries))))
+
+(ert-deftest mod-test-sleep-until ()
+  "Check that `mod-test-sleep-until' either returns normally or quits.
+Interactively, you can try hitting \\[keyboard-quit] to quit."
+  (skip-unless (fboundp 'mod-test-sleep-until))
+  (dolist (arg '(nil t))
+    ;; Guard against some caller setting `inhibit-quit'.
+    (with-local-quit
+      (condition-case nil
+          (should (eq (with-local-quit
+                        ;; Because `inhibit-quit' is nil here, the next
+                        ;; form either quits or returns `finished'.
+                        (mod-test-sleep-until
+                         ;; Interactively, run for 5 seconds to give the
+                         ;; user time to quit.  In batch mode, run only
+                         ;; briefly since the user can't quit.
+                         (time-add nil (if noninteractive 0.1 5))
+                         ;; should_quit or process_input
+                         arg))
+                      'finished))
+        (quit)))))
+
+(ert-deftest mod-test-add-nanosecond/valid ()
+  (dolist (input (list
+                  ;; Some realistic examples.
+                  (current-time) (time-to-seconds)
+                  (encode-time 12 34 5 6 7 2019 t)
+                  ;; Various legacy timestamp forms.
+                  '(123 456) '(123 456 789) '(123 456 789 6000)
+                  ;; Corner case: this will result in a nanosecond
+                  ;; value of 1000000000 after addition.  The module
+                  ;; code should handle this correctly.
+                  '(123 65535 999999 999000)
+                  ;; Seconds since the epoch.
+                  123 123.45
+                  ;; New (TICKS . HZ) format.
+                  '(123456789 . 1000000000)))
+    (ert-info ((format "input: %s" input))
+      (let ((result (mod-test-add-nanosecond input))
+	    (desired-result
+	     (let ((hz 1000000000))
+	       (time-add (time-convert input hz) (cons 1 hz)))))
+        (should (consp result))
+        (should (integerp (car result)))
+        (should (integerp (cdr result)))
+        (should (plusp (cdr result)))
+        (should (time-equal-p result desired-result))))))
+
+(ert-deftest mod-test-add-nanosecond/nil ()
+  (should (<= (float-time (mod-test-add-nanosecond nil))
+              (+ (float-time) 1e-9))))
+
+(ert-deftest mod-test-add-nanosecond/invalid ()
+  (dolist (input '(1.0e+INF 1.0e-INF 0.0e+NaN (123) (123.45 6 7) "foo" [1 2]))
+    (ert-info ((format "input: %s" input))
+      (should-error (mod-test-add-nanosecond input)))))
+
+(ert-deftest mod-test-nanoseconds ()
+  "Test truncation when converting to `struct timespec'."
+  (skip-unless (fboundp 'mod-test-nanoseconds))
+  (dolist (test-case '((0 . 0)
+                       (-1 . -1000000000)
+                       ((1 . 1000000000) . 1)
+                       ((-1 . 1000000000) . -1)
+                       ((1 . 1000000000000) . 0)
+                       ((-1 . 1000000000000) . -1)
+                       ((999 . 1000000000000) . 0)
+                       ((-999 . 1000000000000) . -1)
+                       ((1000 . 1000000000000) . 1)
+                       ((-1000 . 1000000000000) . -1)
+                       ((0 0 0 1) . 0)
+                       ((0 0 0 -1) . -1)))
+    (let ((input (car test-case))
+          (expected (cdr test-case)))
+      (ert-info ((format "input: %S, expected result: %d" input expected))
+        (should (= (mod-test-nanoseconds input) expected))))))
+
+(ert-deftest mod-test-double ()
+  (skip-unless (fboundp 'mod-test-double))
+  (dolist (input (list 0 1 2 -1 42 12345678901234567890
+                       most-positive-fixnum (1+ most-positive-fixnum)
+                       most-negative-fixnum (1- most-negative-fixnum)))
+    (ert-info ((format "input: %d" input))
+      (should (= (mod-test-double input) (* 2 input))))))
+
+(ert-deftest module-darwin-secondary-suffix ()
+  "Check that on Darwin, both .so and .dylib suffixes work.
+See Bug#36226."
+  (skip-unless (eq system-type 'darwin))
+  (should (member ".dylib" load-suffixes))
+  (should (member ".so" load-suffixes))
+  ;; Preserve the old `load-history'.  This is needed for some of the
+  ;; other unit tests that indirectly rely on `load-history'.
+  (let ((load-history load-history)
+        (dylib (concat mod-test-file ".dylib"))
+        (so (concat mod-test-file ".so")))
+    (should (file-regular-p dylib))
+    (should-not (file-exists-p so))
+    (add-name-to-file dylib so)
+    (unwind-protect
+        (load so nil nil :nosuffix :must-suffix)
+      (delete-file so))))
+
+(ert-deftest module/function-finalizer ()
+  "Test that module function finalizers are properly called."
+  ;; We create and leak a couple of module functions with attached
+  ;; finalizer.  Creating only one function risks spilling it to the
+  ;; stack, where it wouldn't be garbage-collected.  However, with one
+  ;; hundred functions, there should be at least one that's
+  ;; unreachable.
+  (dotimes (_ 100)
+    (mod-test-make-function-with-finalizer))
+  (cl-destructuring-bind (valid-before invalid-before)
+      (mod-test-function-finalizer-calls)
+    (should (zerop invalid-before))
+    (garbage-collect)
+    (cl-destructuring-bind (valid-after invalid-after)
+        (mod-test-function-finalizer-calls)
+      (should (zerop invalid-after))
+      ;; We don't require exactly 100 invocations of the finalizer,
+      ;; but at least one.
+      (should (> valid-after valid-before)))))
+
+(ert-deftest module/async-pipe ()
+  "Check that writing data from another thread works."
+  (skip-when (eq system-type 'windows-nt)) ; FIXME!
+  (with-temp-buffer
+    (let ((process (make-pipe-process :name "module/async-pipe"
+                                      :buffer (current-buffer)
+                                      :coding 'utf-8-unix
+                                      :noquery t)))
+      (unwind-protect
+          (progn
+            (mod-test-async-pipe process)
+            (should (accept-process-output process 1))
+            ;; The string below must be identical to what
+            ;; mod-test.c:write_to_pipe produces.
+            (should (equal (buffer-string) "data from thread")))
+        (delete-process process)))))
+
+(ert-deftest module/interactive/return-t ()
+  (should (functionp (symbol-function #'mod-test-return-t)))
+  (should (module-function-p (symbol-function #'mod-test-return-t)))
+  (should-not (commandp #'mod-test-return-t))
+  (should-not (commandp (symbol-function #'mod-test-return-t)))
+  (should-not (interactive-form #'mod-test-return-t))
+  (should-not (interactive-form (symbol-function #'mod-test-return-t)))
+  (should-error (call-interactively #'mod-test-return-t)
+                :type 'wrong-type-argument))
+
+(ert-deftest module/interactive/return-t-int ()
+  (should (functionp (symbol-function #'mod-test-return-t-int)))
+  (should (module-function-p (symbol-function #'mod-test-return-t-int)))
+  (should (commandp #'mod-test-return-t-int))
+  (should (commandp (symbol-function #'mod-test-return-t-int)))
+  (should (equal (interactive-form #'mod-test-return-t-int) '(interactive)))
+  (should (equal (interactive-form (symbol-function #'mod-test-return-t-int))
+                 '(interactive)))
+  (should (eq (mod-test-return-t-int) t))
+  (should (eq (call-interactively #'mod-test-return-t-int) t)))
+
+(ert-deftest module/interactive/identity ()
+  (should (functionp (symbol-function #'mod-test-identity)))
+  (should (module-function-p (symbol-function #'mod-test-identity)))
+  (should (commandp #'mod-test-identity))
+  (should (commandp (symbol-function #'mod-test-identity)))
+  (should (equal (interactive-form #'mod-test-identity) '(interactive "i")))
+  (should (equal (interactive-form (symbol-function #'mod-test-identity))
+                 '(interactive "i")))
+  (should (eq (mod-test-identity 123) 123))
+  (should-not (call-interactively #'mod-test-identity)))
+
+(ert-deftest module/unibyte ()
+  (let ((result (mod-test-return-unibyte)))
+    (should (stringp result))
+    (should (not (multibyte-string-p (mod-test-return-unibyte))))
+    (should (equal result "foo\x00zot"))))
+
+(cl-defstruct (emacs-module-tests--variable
+               (:constructor nil)
+               (:constructor emacs-module-tests--make-variable
+                             (name
+                              &aux
+                              (mutex (make-mutex name))
+                              (condvar (make-condition-variable mutex name))))
+               (:copier nil))
+  "A variable that's protected by a mutex."
+  value
+  (mutex nil :read-only t :type mutex)
+  (condvar nil :read-only t :type condition-variable))
+
+(defun emacs-module-tests--wait-for-variable (variable desired)
+  (with-mutex (emacs-module-tests--variable-mutex variable)
+    (while (not (eq (emacs-module-tests--variable-value variable) desired))
+      (condition-wait (emacs-module-tests--variable-condvar variable)))))
+
+(defun emacs-module-tests--change-variable (variable new)
+  (with-mutex (emacs-module-tests--variable-mutex variable)
+    (setf (emacs-module-tests--variable-value variable) new)
+    (condition-notify (emacs-module-tests--variable-condvar variable) :all)))
+
+(ert-deftest emacs-module-tests/interleaved-threads ()
+  (let* ((state-1 (emacs-module-tests--make-variable "1"))
+         (state-2 (emacs-module-tests--make-variable "2"))
+         (thread-1
+          (make-thread
+           (lambda ()
+             (emacs-module-tests--change-variable state-1 'before-module)
+             (mod-test-funcall
+              (lambda ()
+                (emacs-module-tests--change-variable state-1 'in-module)
+                (emacs-module-tests--wait-for-variable state-2 'in-module)))
+             (emacs-module-tests--change-variable state-1 'after-module))
+           "thread 1"))
+         (thread-2
+          (make-thread
+           (lambda ()
+             (emacs-module-tests--change-variable state-2 'before-module)
+             (emacs-module-tests--wait-for-variable state-1 'in-module)
+             (mod-test-funcall
+              (lambda ()
+                (emacs-module-tests--change-variable state-2 'in-module)
+                (emacs-module-tests--wait-for-variable state-1 'after-module)))
+             (emacs-module-tests--change-variable state-2 'after-module))
+           "thread 2")))
+    (thread-join thread-1)
+    (thread-join thread-2)))
+
+(ert-deftest mod-test-make-string/empty ()
+  (dolist (multibyte '(nil t))
+    (ert-info ((format "Multibyte: %s" multibyte))
+      (let ((got (mod-test-make-string 0 multibyte)))
+        (should (stringp got))
+        (should (string-empty-p got))
+        (should (eq (multibyte-string-p got) multibyte))))))
+
+(ert-deftest mod-test-make-string/nonempty ()
+  (dolist (multibyte '(nil t))
+    (ert-info ((format "Multibyte: %s" multibyte))
+      (let ((first (mod-test-make-string 1 multibyte))
+            (second (mod-test-make-string 1 multibyte)))
+        (should (stringp first))
+        (should (eql (length first) 1))
+        (should (eq (multibyte-string-p first) multibyte))
+        (should (string-equal first second))
+        (should-not (eq first second))))))
+
+;;; Canvas tests
+
+(defun emacs-module-tests--gen-canvas-file (file width height pixel)
+  "Fill FILE with WIDTH x HEIGHT canvas of PIXEL."
+  (let ((coding-system-for-write 'no-conversion))
+    (with-temp-file file
+      (set-buffer-multibyte nil)
+      (dotimes (_ (* width height))
+        (insert (logand pixel #xff)
+                (logand (ash pixel -8) #xff)
+                (logand (ash pixel -16) #xff)
+                (logand (ash pixel -24) #xff))))))
+
+(ert-deftest mod-test-canvas/valid ()
+  (skip-unless (image-type-available-p 'canvas))
+  (let* ((width 128) (height 215)
+         (canvas `(image :type canvas :id test-canvas
+                         :data-width ,width :data-height ,height))
+         (hash-before (mod-test-canvas-read canvas width height)))
+    (should (integerp hash-before))
+    (should (mod-test-canvas-write canvas width height))
+    (let ((hash-after (mod-test-canvas-read canvas width height)))
+      (should (integerp hash-after))
+      (should (not (eql hash-before hash-after))))))
+
+(ert-deftest mod-test-canvas/invalid ()
+  (skip-unless (image-type-available-p 'canvas))
+  (should-error (mod-test-canvas-read nil nil nil))
+  (should-error (mod-test-canvas-write nil nil nil))
+  (should (mod-test-canvas-invalid nil))
+  (should (mod-test-canvas-invalid '(image :type xbm :data "")))
+  (should-error (mod-test-canvas-read '(image :type canvas) 256 527))
+  (should-error (mod-test-canvas-write '(image :type canvas) 256 527)))
+
+(ert-deftest mod-test-canvas/vector ()
+  (skip-unless (image-type-available-p 'canvas))
+  (let* ((width 327) (height 98)
+         (canvas `(image :type canvas :id test-canvas
+                         :data-width ,width :data-height ,height
+                         :data ,(make-vector (* width height) #xFFFF0000)))
+         (hash-before (mod-test-canvas-read canvas width height)))
+    (should (integerp hash-before))
+    (should (mod-test-canvas-write canvas width height))
+    (should (not (eql (mod-test-canvas-read canvas width height) hash-before))))
+  ;; Mismatched sizes: passing wrong width/height should error.
+  (let* ((width 327) (height 98)
+        (canvas `(image :type canvas :id test-canvas
+                        :data-width ,width :data-height ,height
+                        :data ,(make-vector (* width height) #xFFFF0000))))
+    (should-error (mod-test-canvas-read canvas 501 72))
+    (should-error (mod-test-canvas-write canvas 187 210))))
+
+(ert-deftest mod-test-canvas/vector-reload ()
+  (skip-unless (image-type-available-p 'canvas))
+  (let* ((width 198) (height 720)
+         (test-vector (make-vector (* width height) #xFFFF0000))
+         (canvas `(image :type canvas :id test-canvas
+                         :data-width ,width :data-height ,height
+                         :data ,test-vector))
+         (hash-initial (mod-test-canvas-read canvas width height)))
+    (should (integerp hash-initial))
+    (dotimes (i 50)
+      (aset test-vector i #xFFFFFFFF))
+    (canvas-refresh canvas t)
+    (let ((hash-mutated (mod-test-canvas-read canvas width height)))
+      (should (integerp hash-mutated))
+      (should (not (eql hash-initial hash-mutated))))))
+
+(ert-deftest mod-test-canvas/unibyte ()
+  (skip-unless (image-type-available-p 'canvas))
+  (let* ((width 458) (height 278)
+         (pixel (unibyte-string #xFF #x80 #x40 #x80))
+         (string-data (apply #'concat (make-list (* width height) pixel)))
+         (canvas `(image :type canvas :id test-canvas
+                         :data-width ,width :data-height ,height
+                         :data ,string-data))
+         (hash-before (mod-test-canvas-read canvas width height)))
+    (should (integerp hash-before))
+    (should (mod-test-canvas-write canvas width height))
+    (should (not (eql (mod-test-canvas-read canvas width height) hash-before))))
+  ;; Mismatched sizes: passing wrong width/height should error.
+  (let* ((width 458) (height 278)
+         (pixel (unibyte-string #xFF #x80 #x40 #x80))
+         (string-data (apply #'concat (make-list (* width height) pixel)))
+         (canvas `(image :type canvas :id test-canvas
+                         :data-width ,width :data-height ,height
+                         :data ,string-data)))
+    (should-error (mod-test-canvas-read canvas 76 38))
+    (should-error (mod-test-canvas-write canvas 378 453))))
+
+(ert-deftest mod-test-canvas/file ()
+  (skip-unless (image-type-available-p 'canvas))
+  (ert-with-temp-file file
+    (let ((width 128) (height 98))
+      ;; Generate the canvas data file.
+      (emacs-module-tests--gen-canvas-file file width height #x80800000)
+      (let* ((canvas (create-image file 'canvas nil
+                                   :data-width width :data-height height))
+             (hash-before (mod-test-canvas-read canvas width height)))
+        (should (integerp hash-before))
+        (should (mod-test-canvas-write canvas width height))
+        (should-not (eql (mod-test-canvas-read canvas width height)
+                         hash-before)))
+      ;; Mismatched sizes: passing wrong width/height should error.
+      (let ((canvas (create-image file 'canvas nil
+                                  :data-width width :data-height height)))
+        (should-error (mod-test-canvas-read canvas 28 76))
+        (should-error (mod-test-canvas-write canvas 398 712))))))
+
+(ert-deftest mod-test-canvas/gc-stress ()
+  "Allocate canvases in batches with GC between batches.
+Verifies that canvas pixel buffers are freed correctly and do not
+cause use-after-free crashes or GC assertion failures."
+  (skip-unless (image-type-available-p 'canvas))
+  (dotimes (_ 10)
+    (dotimes (x 20)
+      (let* ((canvas `(image :type canvas :id test-canvas
+                             :data-width ,(+ x 10)
+                             :data-height ,(+ x 20)))
+             (hash (mod-test-canvas-read canvas (+ x 10) (+ x 20))))
+        (should (integerp hash))))
+    (garbage-collect)))
 
 ;;; emacs-module-tests.el ends here

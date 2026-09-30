@@ -1,6 +1,6 @@
 ;;; url.el --- Uniform Resource Locator retrieval tool  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1996-1999, 2001, 2004-2018 Free Software Foundation,
+;; Copyright (C) 1996-1999, 2001, 2004-2026 Free Software Foundation,
 ;; Inc.
 
 ;; Author: Bill Perry <wmperry@gnu.org>
@@ -24,7 +24,7 @@
 
 ;;; Commentary:
 
-;; Registered URI schemes: http://www.iana.org/assignments/uri-schemes
+;; Registered URI schemes: https://www.iana.org/assignments/uri-schemes
 
 ;;; Code:
 
@@ -100,7 +100,8 @@ Emacs."
 					((= x ?*) ".*")
 					((= x ??) ".")
 					(t (char-to-string x))))
-				     noproxy "") "\\)"))
+				     noproxy)
+				    "\\)"))
 		      url-proxy-services))))
 
     (url-setup-privacy-info)
@@ -136,9 +137,16 @@ STATUS is a plist representing what happened during the request,
 with most recent events first, or an empty list if no events have
 occurred.  Each pair is one of:
 
-\(:redirect REDIRECTED-TO) - the request was redirected to this URL
-\(:error (ERROR-SYMBOL . DATA)) - an error occurred.  The error can be
-signaled with (signal ERROR-SYMBOL DATA).
+\(:redirect REDIRECTED-TO) - the request was redirected to this URL.
+
+\(:error (error type . DATA)) - an error occurred.  TYPE is a
+symbol that says something about where the error occurred, and
+DATA is a list (possibly nil) that describes the error further.
+
+\(:peer GNUTLS-INFO) - GnuTLS information for the retrieval request.
+This will be present only if GnuTLS was used to make an HTTPS request,
+in which case GNUTLS-INFO is the list returned by `gnutls-peer-status'
+describing the state of TLS connection with the peer.
 
 Return the buffer URL will load into, or nil if the process has
 already completed (i.e. URL was a mailto URL or similar; in this case
@@ -154,16 +162,16 @@ If INHIBIT-COOKIES, cookies will neither be stored nor sent to
 the server.
 If URL is a multibyte string, it will be encoded as utf-8 and
 URL-encoded before it's used."
-;;; XXX: There is code in Emacs that does dynamic binding
-;;; of the following variables around url-retrieve:
-;;; url-standalone-mode, url-gateway-unplugged, w3-honor-stylesheets,
-;;; url-confirmation-func, url-cookie-multiple-line,
-;;; url-cookie-{{,secure-}storage,confirmation}
-;;; url-standalone-mode and url-gateway-unplugged should work as
-;;; usual.  url-confirmation-func is only used in nnwarchive.el and
-;;; webmail.el; the latter should be updated.  Is
-;;; url-cookie-multiple-line needed anymore?  The other url-cookie-*
-;;; are (for now) only used in synchronous retrievals.
+  ;; XXX: There is code in Emacs that does dynamic binding
+  ;; of the following variables around url-retrieve:
+  ;; url-standalone-mode, url-gateway-unplugged,
+  ;; url-confirmation-func, url-cookie-multiple-line,
+  ;; url-cookie-{{,secure-}storage,confirmation}
+  ;; url-standalone-mode and url-gateway-unplugged should work as
+  ;; usual.  url-confirmation-func is only used in nnwarchive.el and
+  ;; webmail.el; the latter should be updated.  Is
+  ;; url-cookie-multiple-line needed anymore?  The other url-cookie-*
+  ;; are (for now) only used in synchronous retrievals.
   (url-retrieve-internal url callback (cons nil cbargs) silent
 			 inhibit-cookies))
 
@@ -206,9 +214,10 @@ URL-encoded before it's used."
 			     (url-find-proxy-for-url url (url-host url))))
 	(buffer nil)
 	(asynch (url-scheme-get-property (url-type url) 'asynchronous-p)))
-    (if url-using-proxy
-	(setq asynch t
-	      loader 'url-proxy))
+    (when url-using-proxy
+      (setf asynch t
+	    loader #'url-proxy
+            (url-asynchronous url) t))
     (if asynch
 	(let ((url-current-object url))
 	  (setq buffer (funcall loader url callback cbargs)))
@@ -224,7 +233,7 @@ URL-encoded before it's used."
 (defun url-retrieve-synchronously (url &optional silent inhibit-cookies timeout)
   "Retrieve URL synchronously.
 Return the buffer containing the data, or nil if there are no data
-associated with it (the case for dired, info, or mailto URLs that need
+associated with it (the case for Dired, info, or mailto URLs that need
 no further processing).  URL is either a string or a parsed URL.
 
 If SILENT is non-nil, don't do any messaging while retrieving.
@@ -232,75 +241,58 @@ If INHIBIT-COOKIES is non-nil, refuse to store cookies.  If
 TIMEOUT is passed, it should be a number that says (in seconds)
 how long to wait for a response before giving up."
   (url-do-setup)
-
-  (let ((retrieval-done nil)
-	(start-time (current-time))
-        (url-asynchronous nil)
-        (asynch-buffer nil))
-    (setq asynch-buffer
-	  (url-retrieve url (lambda (&rest ignored)
-			      (url-debug 'retrieval "Synchronous fetching done (%S)" (current-buffer))
-			      (setq retrieval-done t
-				    asynch-buffer (current-buffer)))
-			nil silent inhibit-cookies))
-    (if (null asynch-buffer)
-        ;; We do not need to do anything, it was a mailto or something
-        ;; similar that takes processing completely outside of the URL
-        ;; package.
-        nil
-      (let ((proc (get-buffer-process asynch-buffer)))
-	;; If the access method was synchronous, `retrieval-done' should
-	;; hopefully already be set to t.  If it is nil, and `proc' is also
-	;; nil, it implies that the async process is not running in
-	;; asynch-buffer.  This happens e.g. for FTP files.  In such a case
-	;; url-file.el should probably set something like a `url-process'
-	;; buffer-local variable so we can find the exact process that we
-	;; should be waiting for.  In the mean time, we'll just wait for any
-	;; process output.
-	(while (and (not retrieval-done)
-                    (or (not timeout)
-                        (< (float-time (time-subtract nil start-time))
-                           timeout)))
-	  (url-debug 'retrieval
-		     "Spinning in url-retrieve-synchronously: %S (%S)"
-		     retrieval-done asynch-buffer)
-          (if (buffer-local-value 'url-redirect-buffer asynch-buffer)
-              (setq proc (get-buffer-process
-                          (setq asynch-buffer
-                                (buffer-local-value 'url-redirect-buffer
-                                                    asynch-buffer))))
-            (if (and proc (memq (process-status proc)
-                                '(closed exit signal failed))
-                     ;; Make sure another process hasn't been started.
-                     (eq proc (or (get-buffer-process asynch-buffer) proc)))
-                ;; FIXME: It's not clear whether url-retrieve's callback is
-                ;; guaranteed to be called or not.  It seems that url-http
-                ;; decides sometimes consciously not to call it, so it's not
-                ;; clear that it's a bug, but even then we need to decide how
-                ;; url-http can then warn us that the download has completed.
-                ;; In the mean time, we use this here workaround.
-		;; XXX: The callback must always be called.  Any
-		;; exception is a bug that should be fixed, not worked
-		;; around.
-		(progn ;; Call delete-process so we run any sentinel now.
-		  (delete-process proc)
-		  (setq retrieval-done t)))
-            ;; We used to use `sit-for' here, but in some cases it wouldn't
-            ;; work because apparently pending keyboard input would always
-            ;; interrupt it before it got a chance to handle process input.
-            ;; `sleep-for' was tried but it lead to other forms of
-            ;; hanging.  --Stef
-            (unless (or (with-local-quit
-			  (accept-process-output proc 1))
-			(null proc))
-              ;; accept-process-output returned nil, maybe because the process
-              ;; exited (and may have been replaced with another).  If we got
-	      ;; a quit, just stop.
-	      (when quit-flag
-		(delete-process proc))
-              (setq proc (and (not quit-flag)
-			      (get-buffer-process asynch-buffer)))))))
-      asynch-buffer)))
+  (let* (;; Ensure we can stop during connection setup (bug#71295).
+         (url-asynchronous (not (null timeout)))
+         data-buffer
+         (callback (lambda (&rest _args)
+                     (setq data-buffer (current-buffer))
+                     (url-debug 'retrieval
+                                "Synchronous fetching done (%S)"
+                                data-buffer)))
+         (start-time (current-time))
+         (proc-buffer (url-retrieve url callback nil silent
+                                    inhibit-cookies)))
+    (if (not proc-buffer)
+        (url-debug 'retrieval "Synchronous fetching unnecessary %s" url)
+      (unwind-protect
+          (catch 'done
+            (while (not data-buffer)
+              (when (and timeout (time-less-p timeout
+                                              (time-since start-time)))
+                (url-debug 'retrieval "Timed out %s (after %ss)" url
+                           (float-time (time-since start-time)))
+                (throw 'done 'timeout))
+	      (url-debug 'retrieval
+		         "Spinning in url-retrieve-synchronously: nil (%S)"
+		         proc-buffer)
+              (when-let* ((redirect-buffer
+                           (buffer-local-value 'url-redirect-buffer
+                                               proc-buffer)))
+                (unless (eq redirect-buffer proc-buffer)
+                  (url-debug
+                   'retrieval "Redirect in url-retrieve-synchronously: %S -> %S"
+		   proc-buffer redirect-buffer)
+                  (let (kill-buffer-query-functions)
+                    (kill-buffer proc-buffer))
+                  ;; Accommodate hack in commit 55d1d8b.
+                  (setq proc-buffer redirect-buffer)))
+              (when-let* ((proc (get-buffer-process proc-buffer)))
+                (when (memq (process-status proc)
+                            '(closed exit signal failed))
+                  ;; Process sentinel vagaries occasionally cause
+                  ;; url-retrieve to fail calling callback.
+                  (unless data-buffer
+                    (url-debug 'retrieval "Dead process %s" url)
+		    (throw 'done 'exception))))
+              ;; Querying over consumer internet in the US takes 100
+              ;; ms, so split the difference.
+              (accept-process-output nil 0.05)))
+        ;; Kill the process buffer on redirects.
+        (when (and data-buffer
+                   (not (eq data-buffer proc-buffer)))
+          (let (kill-buffer-query-functions)
+            (kill-buffer proc-buffer)))))
+    data-buffer))
 
 ;; url-mm-callback called from url-mm, which requires mm-decode.
 (declare-function mm-dissect-buffer "mm-decode"
@@ -308,7 +300,7 @@ how long to wait for a response before giving up."
 (declare-function mm-display-part "mm-decode"
 		  (handle &optional no-default force))
 
-(defun url-mm-callback (&rest ignored)
+(defun url-mm-callback (&rest _ignored)
   (let ((handle (mm-dissect-buffer t)))
     (url-mark-buffer-as-dead (current-buffer))
     (with-current-buffer
@@ -353,19 +345,7 @@ how long to wait for a response before giving up."
       (if (buffer-live-p buff)
 	  (kill-buffer buff)))))
 
-(cond
- ((fboundp 'display-warning)
-  (defalias 'url-warn 'display-warning))
- ((fboundp 'warn)
-  (defun url-warn (class message &optional level)
-    (warn "(%s/%s) %s" class (or level 'warning) message)))
- (t
-  (defun url-warn (class message &optional level)
-    (with-current-buffer (get-buffer-create "*URL-WARNINGS*")
-      (goto-char (point-max))
-      (save-excursion
-	(insert (format "(%s/%s) %s\n" class (or level 'warning) message)))
-      (display-buffer (current-buffer))))))
+(define-obsolete-function-alias 'url-warn #'display-warning "28.1")
 
 (provide 'url)
 

@@ -1,6 +1,6 @@
-;;; cc-menus.el --- imenu support for CC Mode
+;;; cc-menus.el --- imenu support for CC Mode -*- lexical-binding: t -*-
 
-;; Copyright (C) 1985, 1987, 1992-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1985, 1987, 1992-2026 Free Software Foundation, Inc.
 
 ;; Authors:    1998- Martin Stjernholm
 ;;             1992-1999 Barry A. Warsaw
@@ -45,6 +45,7 @@
 (cc-bytecomp-defvar imenu-case-fold-search)
 (cc-bytecomp-defvar imenu-generic-expression)
 (cc-bytecomp-defvar imenu-create-index-function)
+(cc-bytecomp-defun c-literal-limits)
 
 
 ;; imenu integration
@@ -84,13 +85,13 @@ A sample value might look like: `\\(_P\\|_PROTO\\)'.")
     ;; work by backtracking from the end of the definition.
     (nil
      ,(concat
-       "^\\<.*"
-       "[^" c-alnum "_:<>~]"                  ; match any non-identifier char
-                                              ; (note: this can be `\n')
+       "^\\_<.*"
+       "[^" c-alnum "_:<>~]"		      ; match any non-identifier char
+					      ; (note: this can be `\n')
        "\\("
 	  "\\([" c-alnum "_:<>~]*::\\)?"      ; match an operator
-          "operator\\>[ \t]*"
-          "\\(()\\|[^(]*\\)"                  ; special case for `()' operator
+	  "operator\\_>[ \t]*"
+	  "\\(()\\|[^(]*\\)"		      ; special case for `()' operator
        "\\)"
 
        "[ \t]*([^)]*)[ \t]*[^ \t;]"           ; followed by ws, arg list,
@@ -115,7 +116,7 @@ A sample value might look like: `\\(_P\\|_PROTO\\)'.")
     ;; General function name regexp
     (nil
      ,(concat
-       "^\\<"                                 ; line MUST start with word char
+       "^\\_<"                                ; line MUST start with symbol char
        ;; \n added to prevent overflow in regexp matcher.
        ;; https://lists.gnu.org/r/emacs-pretest-bug/2007-02/msg00021.html
        "[^()\n]*"                             ; no parentheses before
@@ -135,7 +136,7 @@ A sample value might look like: `\\(_P\\|_PROTO\\)'.")
     ,@(if cc-imenu-c-prototype-macro-regexp
             `((nil
                  ,(concat
-                   "^\\<.*"                   ; line MUST start with word char
+                   "^\\_<.*"                  ; line MUST start with symbol char
 		   "[^" c-alnum "_]"          ; match any non-identifier char
 		   "\\([" c-alpha "_][" c-alnum "_]*\\)" ; match function name
                    "[ \t]*"                   ; whitespace before macro name
@@ -171,7 +172,7 @@ A sample value might look like: `\\(_P\\|_PROTO\\)'.")
    "[ \t\n\r]*"))
 
 (defun cc-imenu-java-build-type-args-regex (depth)
-  "Builds regexp for type arguments list with DEPTH allowed
+  "Build regexp for type arguments list with DEPTH allowed
 nested angle brackets constructs."
   (if (> depth 0)
       (concat "<"
@@ -303,29 +304,28 @@ nested angle brackets constructs."
    ;; Pick a token by (match-string 1)
    (car (cdr (nth 1 cc-imenu-c++-generic-expression))) ; -> index += 2
    (prog2 (setq cc-imenu-objc-generic-expression-noreturn-index 1) "")
-   "\\|"
-   ;; > General function name regexp
-   ;; Pick a token by  (match-string 3)
-   (car (cdr (nth 2 cc-imenu-c++-generic-expression))) ; -> index += 6
-   (prog2 (setq cc-imenu-objc-generic-expression-general-func-index 3) "")
    ;; > Special case for definitions using phony prototype macros like:
    ;; > `int main _PROTO( (int argc,char *argv[]) )'.
-   ;; Pick a token by  (match-string 8)
+   ;; Pick a token by  (match-string 3)
    (if cc-imenu-c-prototype-macro-regexp
        (concat
 	"\\|"
 	(car (cdr (nth 3 cc-imenu-c++-generic-expression))) ; -> index += 1
-	(prog2 (setq cc-imenu-objc-generic-expression-objc-base-index 10) "")
+	(progn (setq cc-imenu-objc-generic-expression-objc-base-index 4)
+	       (setq cc-imenu-objc-generic-expression-general-func-index 5)
+	       "")
 	)
-     (prog2 (setq cc-imenu-objc-generic-expression-objc-base-index 9) "")
+     (progn (setq cc-imenu-objc-generic-expression-objc-base-index 3)
+	    (setq cc-imenu-objc-generic-expression-general-func-index 4)
+	    "")
      "")				; -> index += 0
-   (prog2 (setq cc-imenu-objc-generic-expression-proto-index 9) "")
+   (prog2 (setq cc-imenu-objc-generic-expression-proto-index 3) "")
    ;;
    ;; For Objective-C
-   ;; Pick a token by (match-string 8 or 9)
+   ;; Pick a token by (match-string 3 or 4)
    ;;
    "\\|\\("
-   "^[-+][:" c-alnum "()*_<>\n\t ]*[;{]"        ; Methods
+   "^[-+][:" c-alnum "()*_,<>\n\t ]*[;{]"        ; Methods
    "\\|"
    "^@interface[\t ]+[" c-alnum "_]+[\t ]*:"
    "\\|"
@@ -338,7 +338,11 @@ nested angle brackets constructs."
    "\\|"
    "^@implementation[\t ]+[" c-alnum "_]+"
    "\\|"
-   "^@protocol[\t ]+[" c-alnum "_]+" "\\)")
+   "^@protocol[\t ]+[" c-alnum "_]+" "\\)"
+   "\\|"
+   ;; > General function name regexp
+   ;; Pick a token by  (match-string 4)
+   (car (cdr (nth 2 cc-imenu-c++-generic-expression)))) ; -> index += 6
   "Imenu generic expression for ObjC mode.  See `imenu-generic-expression'.")
 
 
@@ -437,69 +441,77 @@ Example:
     (goto-char (point-max))
     ;;
     (while (re-search-backward cc-imenu-objc-generic-expression nil t)
-      (setq langnum (if (match-beginning OBJC)
-			OBJC
-		      (cond
-		       ((match-beginning Cproto) Cproto)
-		       ((match-beginning Cgeneralfunc) Cgeneralfunc)
-		       ((match-beginning Cnoreturn) Cnoreturn))))
-      (setq str (funcall func (match-beginning langnum) (match-end langnum)))
-      ;;
-      (cond
-       ;;
-       ;; C
-       ;;
-       ((not (eq langnum OBJC))
-	(setq clist (cons (cons str (match-beginning langnum)) clist)))
-       ;;
-       ;; ObjC
-       ;;
-       ;; An instance Method
-       ((eq (aref str 0) ?-)
-	(setq str (concat "-" (cc-imenu-objc-method-to-selector str)))
-	(setq methodlist (cons (cons str
-			      (match-beginning langnum))
-			methodlist)))
-       ;; A factory Method
-       ((eq (aref str 0) ?+)
-	(setq str (concat "+" (cc-imenu-objc-method-to-selector str)))
-	(setq methodlist (cons (cons str
-			      (match-beginning langnum))
-			methodlist)))
-       ;; Interface or implementation or protocol
-       ((eq (aref str 0) ?@)
-	(setq classcount (1+ classcount))
+      (when (not (c-literal-limits))
+	(setq langnum (if (match-beginning OBJC)
+			  OBJC
+			(cond
+			 ((match-beginning Cproto) Cproto)
+			 ((match-beginning Cgeneralfunc) Cgeneralfunc)
+			 ((match-beginning Cnoreturn) Cnoreturn))))
+	(setq str (funcall func (match-beginning langnum) (match-end langnum)))
+	;;
 	(cond
-	 ((and (> (length str) implen)
-	       (string= (substring  str 0 implen) "@implementation"))
-	  (setq str (substring str implen)
-		str2 "@implementation"))
-	 ((string= (substring  str 0 intflen) "@interface")
-	  (setq str (substring str intflen)
-		str2 "@interface"))
-	 ((string= (substring  str 0 prtlen) "@protocol")
-	  (setq str (substring str prtlen)
-		str2 "@protocol")))
-	(setq str (cc-imenu-objc-remove-white-space str))
-	(setq methodlist (cons (cons str2
-				     (match-beginning langnum))
-			       methodlist))
-	(setq toplist (cons (cons str methodlist) toplist)
-	      methodlist nil))))
-
+	 ;;
+	 ;; C
+	 ;;
+	 ((not (eq langnum OBJC))
+	  ;; Don't be fooled by @end // Classname.
+	  (when (not (eq (aref (match-string-no-properties 0) 0) ?@))
+	    (setq clist (cons (cons str (match-beginning langnum)) clist))))
+	 ;;
+	 ;; ObjC
+	 ;;
+	 ;; An instance Method
+	 ((eq (aref str 0) ?-)
+	  (setq str (concat "-" (cc-imenu-objc-method-to-selector str)))
+	  (setq methodlist (cons (cons str
+				       (match-beginning langnum))
+				 methodlist)))
+	 ;; A factory Method
+	 ((eq (aref str 0) ?+)
+	  (setq str (concat "+" (cc-imenu-objc-method-to-selector str)))
+	  (setq methodlist (cons (cons str
+				       (match-beginning langnum))
+				 methodlist)))
+	 ;; Interface or implementation or protocol
+	 ((eq (aref str 0) ?@)
+	  (setq classcount (1+ classcount))
+	  (cond
+	   ((and (> (length str) implen)
+		 (string= (substring  str 0 implen) "@implementation"))
+	    (setq str (substring str implen)
+		  str2 "@implementation"))
+	   ((string= (substring  str 0 intflen) "@interface")
+	    (setq str (substring str intflen)
+		  str2 "@interface"))
+	   ((string= (substring  str 0 prtlen) "@protocol")
+	    (setq str (substring str prtlen)
+		  str2 "@protocol"))
+	   (t (setq str2 nil)))
+	  (when str2
+	    (setq str (cc-imenu-objc-remove-white-space str))
+	    (setq methodlist (cons (cons str2
+					 (match-beginning langnum))
+				   methodlist))
+	    (setq toplist
+		  (cons (cons str methodlist) toplist)
+		  methodlist nil))))))
     ;; In this buffer, there is only one or zero @{interface|implementation|protocol}.
     (if (< classcount 2)
 	(let ((classname (car (car toplist)))
 	      (p (cdr (car (cdr (car toplist)))))
 	      last)
-	  (setq toplist (cons (cons classname p) (cdr (cdr (car toplist)))))
+	  (when classname
+	    (setq toplist (cons (cons classname p) (cdr (cdr (car toplist))))))
 	  ;; Add C lang token
 	  (if clist
-	      (progn
-		(setq last toplist)
-		(while (cdr last)
-		  (setq last (cdr last)))
-		(setcdr last clist))))
+	      (if toplist
+		  (progn
+		    (setq last toplist)
+		    (while (cdr last)
+		      (setq last (cdr last)))
+		    (setcdr last clist))
+		(setq toplist clist))))
       ;; Add C lang tokens as a sub menu
       (if clist
 	  (setq toplist (cons (cons "C" clist) toplist))))

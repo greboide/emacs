@@ -1,22 +1,24 @@
 ;;; flymake-cc.el --- Flymake support for GNU tools for C/C++     -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2018  Free Software Foundation, Inc.
+;; Copyright (C) 2018-2026 Free Software Foundation, Inc.
 
 ;; Author: João Távora <joaotavora@gmail.com>
 ;; Keywords: languages, c
 
-;; This program is free software; you can redistribute it and/or modify
+;; This file is part of GNU Emacs.
+
+;; GNU Emacs is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 
-;; This program is distributed in the hope that it will be useful,
+;; GNU Emacs is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 ;; GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -26,18 +28,20 @@
 
 (require 'cl-lib)
 
-(defcustom flymake-cc-command 'flymake-cc-use-special-make-target
+(defcustom flymake-cc-command #'flymake-cc-use-special-make-target
   "Command used by the `flymake-cc' backend.
-A list of strings, or a symbol naming a function that produces one
-such list when called with no arguments in the buffer where the
-variable `flymake-mode' is active.
+The value should be a list of strings, or a function that produces
+such a list when called with no arguments in the buffer where `flymake-mode'
+is active.  The list of strings should be suitable for the `:command'
+keyword of `make-process'.
 
 The command should invoke a GNU-style compiler that checks the
 syntax of a (Obj)C(++) program passed to it via its standard
 input and prints the result on its standard output."
   :type '(choice
-          (symbol :tag "Function")
-          ((repeat :) string))
+          (function :tag "Function to produce compilation command")
+          (repeat :tag "Compilation command and its options" string))
+  :version "27.1"
   :group 'flymake-cc)
 
 (defun flymake-cc--make-diagnostics (source)
@@ -47,7 +51,7 @@ SOURCE."
   ;; TODO: if you can understand it, use `compilation-mode's regexps
   ;; or even some of its machinery here.
   ;;
-  ;;    (set (make-local-variable 'compilation-locs)
+  ;;    (setq-local compilation-locs
   ;;         (make-hash-table :test 'equal :weakness 'value))
   ;;    (compilation-parse-errors (point-min) (point-max)
   ;;                              'gnu 'gcc-include)
@@ -58,29 +62,45 @@ SOURCE."
   (cl-loop
    while
    (search-forward-regexp
-    "^\\(In file included from \\)?<stdin>:\\([0-9]+\\):\\([0-9]+\\):\n?\\(.*\\): \\(.*\\)$"
+    "^\\(In file included from \\)?\\([^ :]+\\):\\([0-9]+\\)\\(?::\\([0-9]+\\)\\)?:\n?\\(.*\\): \\(.*\\)$"
     nil t)
-   for msg = (match-string 5)
-   for (beg . end) = (flymake-diag-region
-                      source
-                      (string-to-number (match-string 2))
-                      (string-to-number (match-string 3)))
+   for msg = (match-string 6)
+   for locus = (match-string 2)
+   for line = (string-to-number (match-string 3))
+   for col = (ignore-errors (string-to-number (match-string 4)))
+   for source-buffer = (and (string= locus "<stdin>") source)
    for type = (if (match-string 1)
                   :error
-                (assoc-default
-                 (match-string 4)
-                 '(("error" . :error)
-                   ("note" . :note)
-                   ("warning" . :warning))
-                 #'string-match))
-   collect (flymake-make-diagnostic source beg end type msg)))
+                (save-match-data
+                  (assoc-default
+                   (match-string 5)
+                   '(("error" . :error)
+                     ("note" . :note)
+                     ("warning" . :warning))
+                   #'string-match
+                   :error)))
+   for diag =
+   (cond (source-buffer
+          (pcase-let ((`(,beg . ,end)
+                       (flymake-diag-region source-buffer line col)))
+            (flymake-make-diagnostic source-buffer beg end type msg)))
+         (t (flymake-make-diagnostic locus (cons line col) nil type msg)))
+   collect diag
+   ;; If "In file included from..." matched, then move to end of that
+   ;; line.  This helps us collect the diagnostic at its .h locus,
+   ;; too.
+   when (match-end 1) do (goto-char (match-end 2))))
 
 (defun flymake-cc-use-special-make-target ()
   "Command for checking a file via a CHK_SOURCES Make target."
   (unless (executable-find "make") (error "Make not found"))
-  `("make" "check-syntax" "CHK_SOURCES=-x c -"))
+  `("make"
+    "check-syntax"
+    ,(format "CHK_SOURCES=-x %s -c -"
+             (cond ((derived-mode-p 'c++-mode) "c++")
+                   (t "c")))))
 
-(defvar-local flymake-cc--proc nil "Internal variable for `flymake-gcc'")
+(defvar-local flymake-cc--proc nil "Internal variable for `flymake-cc'.")
 
 ;; forward declare this to shoosh compiler (instead of requiring
 ;; flymake-proc)
@@ -95,7 +115,7 @@ process that is passed the current buffer's contents via stdin.
 REPORT-FN is Flymake's callback."
   ;; HACK: XXX: Assuming this backend function is run before it in
   ;; `flymake-diagnostic-functions', very hackingly convince the other
-  ;; backend `flymake-proc-legacy-backend', which is on by default, to
+  ;; backend `flymake-proc-legacy-flymake', which is on by default, to
   ;; disable itself.
   ;;
   (setq-local flymake-proc-allowed-file-name-masks nil)
@@ -109,14 +129,14 @@ REPORT-FN is Flymake's callback."
        (make-process
         :name "gcc-flymake"
         :buffer (generate-new-buffer "*gcc-flymake*")
-        :command (if (symbolp flymake-cc-command)
+        :command (if (functionp flymake-cc-command)
                      (funcall flymake-cc-command)
                    flymake-cc-command)
         :noquery t :connection-type 'pipe
         :sentinel
         (lambda (p _ev)
-          (when (eq 'exit (process-status p))
-            (unwind-protect
+          (unwind-protect
+              (when (eq 'exit (process-status p))
                 (when (with-current-buffer source (eq p flymake-cc--proc))
                   (with-current-buffer (process-buffer p)
                     (goto-char (point-min))
@@ -130,7 +150,8 @@ REPORT-FN is Flymake's callback."
                                  :panic :explanation
                                  (buffer-substring
                                   (point-min) (progn (goto-char (point-min))
-                                                     (line-end-position))))))))
+                                                     (line-end-position)))))))))
+            (unless (process-live-p p)
               ;; (display-buffer (process-buffer p)) ; uncomment to debug
               (kill-buffer (process-buffer p)))))))
       (process-send-region flymake-cc--proc (point-min) (point-max))

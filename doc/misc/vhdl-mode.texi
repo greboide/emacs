@@ -2,6 +2,7 @@
 
 @setfilename ../../info/vhdl-mode.info
 @settitle VHDL Mode, an Emacs mode for editing VHDL code
+@documentlanguage en
 @include docstyle.texi
 
 @c Adapted from the VHDL Mode texinfo manual version 2 by Rodney J. Whitby.
@@ -10,7 +11,7 @@
 @copying
 This file documents VHDL Mode, an Emacs mode for editing VHDL code.
 
-Copyright @copyright{} 1995--2008, 2010, 2012, 2015--2018 Free Software
+Copyright @copyright{} 1995--2008, 2010, 2012, 2015--2026 Free Software
 Foundation, Inc.
 
 @quotation
@@ -79,7 +80,7 @@ modify this GNU manual.''
 @chapter  Introduction
 @cindex   Introduction
 
-Welcome to VHDL Mode. This is a GNU Emacs mode for editing files
+Welcome to VHDL Mode.  This is a GNU Emacs mode for editing files
 containing VHDL code.
 
 This manual will describe the following:
@@ -99,18 +100,18 @@ How to customize the indentation engine.
 @findex vhdl-version
 The major version number was incremented to 3 with the addition of
 many new features for editing VHDL code to the new indentation engine,
-which was introduced in major version 2. To find the minor revision
+which was introduced in major version 2.  To find the minor revision
 number of this release, use @kbd{M-x vhdl-version @key{RET}}.
 
 A special word of thanks goes to Rod Whitby, who wrote the
 VHDL Mode indentation engine, and to Barry Warsaw, who wrote
 the CC Mode indentation engine that formed the basis
-thereof. Their manuals were also the basis for this manual.
+thereof.  Their manuals were also the basis for this manual.
 
-This manual is not very up-to-date. It basically contains the
+This manual is not very up-to-date.  It basically contains the
 indentation machine documentation by Rod Whitby with only minor
-adaptions. A short documentation of the entire VHDL Mode is available
-within the mode itself by typing @kbd{C-c C-h}. Also, all commands and
+adaptions.  A short documentation of the entire VHDL Mode is available
+within the mode itself by typing @kbd{C-c C-h}.  Also, all commands and
 customization of most variables are available through the menu, which
 makes everything highly self-explaining.
 
@@ -126,14 +127,14 @@ To get started, simply visit a @file{.vhd} file in Emacs; or type
 @cindex   New Indentation Engine
 
 VHDL Mode has a new indentation engine, providing a simplified, yet
-flexible and general mechanism for customizing indentation. It breaks
-indentation calculation into two steps. First for the line of code being
+flexible and general mechanism for customizing indentation.  It breaks
+indentation calculation into two steps.  First for the line of code being
 indented, VHDL Mode analyzes what kind of language construct it's
 looking at, then it applies user defined offsets to the current line
 based on this analysis.
 
 This section will briefly cover how indentation is calculated in
-VHDL Mode. It is important to understand the indentation model
+VHDL Mode.  It is important to understand the indentation model
 being used so that you will know how to customize VHDL Mode for
 your personal coding style.
 
@@ -169,7 +170,7 @@ Conceptually, a line of VHDL code is always indented relative to the
 indentation of some line higher up in the buffer.  This is represented
 by the relative buffer position in the syntactic component.
 
-It might help to see an example. Suppose we had the following code as
+It might help to see an example.  Suppose we had the following code as
 the only thing in a VHDL Mode buffer @footnote{The line numbers
 in this and future examples don't actually appear in the buffer.}:
 @example
@@ -243,7 +244,7 @@ components.  Also notice that the first component,
 @vindex vhdl-offsets-alist
 @vindex offsets-alist @r{(vhdl-)}
 Indentation for the current line is calculated using the syntactic
-component list derived in step 1 above (see @ref{Syntactic
+component list derived in step 1 above (@pxref{Syntactic
 Analysis}).  Each component contributes to the final total indentation
 of the line in two ways.
 
@@ -652,7 +653,7 @@ one of the syntactic symbol offsets will need to be tweaked slightly, or
 perhaps @code{vhdl-basic-offset} will need to be changed.  However, some
 styles require a more advanced ability for customization, and one of the
 real strengths of VHDL Mode is that the syntactic analysis model
-provides a very flexible framework for customizing indentation. This
+provides a very flexible framework for customizing indentation.  This
 allows you to perform special indentation calculations for situations
 not handled by the mode directly.
 
@@ -668,7 +669,7 @@ not handled by the mode directly.
 @cindex custom indentation functions
 One of the most common ways to customize VHDL Mode is by writing
 @dfn{custom indentation functions} and associating them with specific
-syntactic symbols (see @ref{Syntactic Symbols}).  VHDL Mode itself
+syntactic symbols (@pxref{Syntactic Symbols}).  VHDL Mode itself
 uses custom indentation functions to provide more sophisticated
 indentation, for example when lining up selected signal assignments:
 @example
@@ -732,9 +733,9 @@ operator on the first line of the statement.  Here is the lisp code
 @end example
 @noindent
 Custom indent functions take a single argument, which is a syntactic
-component cons cell (see @ref{Syntactic Analysis}).  The
+component cons cell (@pxref{Syntactic Analysis}).  The
 function returns an integer offset value that will be added to the
-running total indentation for the lne.  Note that what actually gets
+running total indentation for the line.  Note that what actually gets
 returned is the difference between the column that the signal assignment
 operator is on, and the column of the buffer relative position passed in
 the function's argument.  Remember that VHDL Mode automatically
@@ -833,13 +834,13 @@ symbol currently recognized}
 @strong{Q.} @emph{How do I re-indent the whole file?}
 
 @strong{A.} Visit the file and hit @kbd{C-x h} to mark the whole
-buffer. Then hit @kbd{@key{ESC} C-\} to re-indent the entire region
-which you've just marked. Or just enter @kbd{M-x vhdl-indent-buffer}.
+buffer.  Then hit @kbd{@key{ESC} C-\} to re-indent the entire region
+which you've just marked.  Or just enter @kbd{M-x vhdl-indent-buffer}.
 @sp 2
 
 @strong{Q.} @emph{How do I re-indent the entire function?}
 
-@strong{A.} Hit @kbd{@key{ESC} C-h} to mark the entire function. Then
+@strong{A.} Hit @kbd{@key{ESC} C-h} to mark the entire function.  Then
 hit @kbd{@key{ESC} C-\} to re-indent the entire region which you've just
 marked.
 @sp 2
@@ -892,7 +893,7 @@ list.  Send email to the maintainer @email{reto@@gnu.org} to join
 either of these lists.
 
 The official Emacs VHDL Mode Home Page can be found at
-@uref{http://www.iis.ee.ethz.ch/~zimmi/emacs/vhdl-mode.html}.
+@uref{https://www.iis.ee.ethz.ch/~zimmi/emacs/vhdl-mode.html}.
 
 @node  Sample Init File
 @chapter  Sample Init File
@@ -928,7 +929,7 @@ If you want to customize indentation, here you go:
   (setq tab-width 8
         ;; this will make sure spaces are used instead of tabs
         indent-tabs-mode nil)
-  ;; keybindings for VHDL are put in vhdl-mode-map
+  ;; key bindings for VHDL are put in vhdl-mode-map
   (define-key vhdl-mode-map "\C-m" 'newline-and-indent)
   )
 

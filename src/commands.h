@@ -1,5 +1,5 @@
 /* Definitions needed by most editing commands.
-   Copyright (C) 1985, 1994, 2001-2018 Free Software Foundation, Inc.
+   Copyright (C) 1985, 1994, 2001-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -22,23 +22,6 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "lisp.h"
 
 #define Ctl(c) ((c)&037)
-
-/* Define the names of keymaps, just so people can refer to them in
-   calls to initial_define_key.  These should *not* be used after
-   initialization; use-global-map doesn't affect these; it sets
-   current_global_map instead.  */
-extern Lisp_Object global_map;
-extern Lisp_Object meta_map;
-extern Lisp_Object control_x_map;
-
-/* If not Qnil, this is a switch-frame event which we decided to put
-   off until the end of a key sequence.  This should be read as the
-   next command input, after any Vunread_command_events.
-
-   read_key_sequence uses this to delay switch-frame events until the
-   end of the key sequence; Fread_char uses it to put off switch-frame
-   events until a non-ASCII event is acceptable as input.  */
-extern Lisp_Object unread_switch_frame;
 
 /* Nonzero if input is coming from the keyboard.  */
 

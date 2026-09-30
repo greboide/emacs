@@ -1,5 +1,5 @@
 @c This is part of the Emacs manual.
-@c Copyright (C) 1985-1987, 1993-1995, 1997, 2000-2018 Free Software
+@c Copyright (C) 1985--1987, 1993--1995, 1997, 2000--2026 Free Software
 @c Foundation, Inc.
 @c See file emacs.texi for copying conditions.
 @node Microsoft Windows
@@ -206,40 +206,40 @@ format, that effectively converts the file to Unix EOL style, like the
 @code{dos2unix} program.
 
 @cindex untranslated file system
-@findex add-untranslated-filesystem
+@findex w32-add-untranslated-filesystem
   When you use NFS, Samba, or some other similar method to access file
 systems that reside on computers using GNU or Unix systems, Emacs
 should not perform end-of-line translation on any files in these file
 systems---not even when you create a new file.  To request this,
 designate these file systems as @dfn{untranslated} file systems by
-calling the function @code{add-untranslated-filesystem}.  It takes one
-argument: the file system name, including a drive letter and
+calling the function @code{w32-add-untranslated-filesystem}.  It takes
+one argument: the file system name, including a drive letter and
 optionally a directory.  For example,
 
 @example
-(add-untranslated-filesystem "Z:")
+(w32-add-untranslated-filesystem "Z:")
 @end example
 
 @noindent
 designates drive Z as an untranslated file system, and
 
 @example
-(add-untranslated-filesystem "Z:\\foo")
+(w32-add-untranslated-filesystem "Z:\\foo")
 @end example
 
 @noindent
 designates directory @file{\foo} on drive Z as an untranslated file
 system.
 
-  Most often you would use @code{add-untranslated-filesystem} in your
+  Most often you would use @code{w32-add-untranslated-filesystem} in your
 @file{.emacs} or @file{init.el} init file, or in @file{site-start.el}
 so that all the users at your site get the benefit of it.
 
-@findex remove-untranslated-filesystem
-  To countermand the effect of @code{add-untranslated-filesystem}, use
-the function @code{remove-untranslated-filesystem}.  This function takes
-one argument, which should be a string just like the one that was used
-previously with @code{add-untranslated-filesystem}.
+@findex w32-remove-untranslated-filesystem
+  To countermand the effect of @code{w32-add-untranslated-filesystem},
+use the function @code{w32-remove-untranslated-filesystem}.  This
+function takes one argument, which should be a string just like the
+one that was used previously with @code{w32-add-untranslated-filesystem}.
 
   Designating a file system as untranslated does not affect character
 set conversion, only end-of-line conversion.  Essentially, it directs
@@ -389,15 +389,16 @@ non-@code{nil} value.
 
 @vindex ls-lisp-verbosity
   The variable @code{ls-lisp-verbosity} controls the file attributes
-that @file{ls-lisp.el} displays.  The value should be a list that
-contains one or more of the symbols @code{links}, @code{uid}, and
-@code{gid}.  @code{links} means display the count of different file
-names that are associated with (a.k.a.@: @dfn{links to}) the file's
-data; this is only useful on NTFS volumes.  @code{uid} means display
-the numerical identifier of the user who owns the file.  @code{gid}
-means display the numerical identifier of the file owner's group.  The
-default value is @code{(links uid gid)} i.e., all the 3 optional
-attributes are displayed.
+that @file{ls-lisp.el} displays.  The value should be either
+@code{nil} or a list that contains one or more of the symbols
+@code{links}, @code{uid}, and @code{gid}.  @code{links} means display
+the count of different file names that are associated with (a.k.a.@:
+@dfn{links to}) the file's data; this is only useful on NTFS volumes.
+@code{uid} means display the numerical identifier of the user who owns
+the file.  @code{gid} means display the numerical identifier of the
+file owner's group.  The default value is @code{(links uid gid)} i.e.,
+all the 3 optional attributes are displayed.  The value @code{nil}
+means not to display any of these attributes.
 
 @vindex ls-lisp-emulation
   The variable @code{ls-lisp-emulation} controls the flavor of the
@@ -411,10 +412,10 @@ this option can be one of the following symbols:
 @itemx nil
 Emulate @sc{gnu} systems; this is the default.  This sets
 @code{ls-lisp-ignore-case} and @code{ls-lisp-dirs-first} to
-@code{nil}, and @code{ls-lisp-verbosity} to @code{(links uid gid)}.
+@code{nil}, and @code{ls-lisp-verbosity} to @code{(links uid gid modes)}.
 @item UNIX
 Emulate Unix systems.  Like @code{GNU}, but sets
-@code{ls-lisp-verbosity} to @code{(links uid)}.
+@code{ls-lisp-verbosity} to @code{(links uid modes)}.
 @item MacOS
 Emulate macOS@.  Sets @code{ls-lisp-ignore-case} to @code{t}, and
 @code{ls-lisp-dirs-first} and @code{ls-lisp-verbosity} to @code{nil}.
@@ -542,16 +543,12 @@ keyboard input in Emacs.
 conventional uses in MS-Windows programs conflict with traditional
 Emacs key bindings.  (These Emacs key bindings were established years
 before Microsoft was founded.)  Examples of conflicts include
-@kbd{C-c}, @kbd{C-x}, @kbd{C-z}, @kbd{C-a}, and @kbd{W-@key{SPC}}.
+@kbd{C-c}, @kbd{C-x}, @kbd{C-z}, and @kbd{C-a}.
 You can redefine some of them with meanings more like the MS-Windows
 meanings by enabling CUA Mode (@pxref{CUA Bindings}).  Another
 optional feature which will make Emacs behave like other Windows
 applications is Delete Selection mode (@pxref{Using Region}).
 
-@iftex
-@inforef{Windows Keyboard, , emacs}, for information about additional
-Windows-specific variables in this category.
-@end iftex
 @ifnottex
 @vindex w32-alt-is-meta
 @cindex @code{Alt} key (MS-Windows)
@@ -711,6 +708,21 @@ is @code{t}, which means these keys produce @code{AltGr}; setting it
 to @code{nil} causes @key{AltGr} or the equivalent key combination to
 be interpreted as the combination of @key{Ctrl} and @key{Meta}
 modifiers.
+
+@cindex IME, MS-Windows
+@findex w32-set-ime-open-status
+  Some versions of MS-Windows, typically East Asian localized Windows,
+enable the Input Method Manager (@acronym{IMM}) that allows
+applications to communicate with the Input Method Editor
+(@acronym{IME}), the native Windows input method service.  Emacs uses
+the @acronym{IME} when available to allow users to input East Asian
+non-@acronym{ASCII} characters, similarly to Emacs's built-in input
+methods (@pxref{Input Methods}).  However, in some situations the
+@acronym{IME} can get in the way if it interprets simple
+@acronym{ASCII} keys you input as part of a key sequence that
+designates a non-@acronym{ASCII} character.  The @acronym{IME} can be
+temporarily turned off and then on again by using the
+@code{w32-set-ime-open-status} function.
 @end ifnottex
 
 @node Windows Mouse
@@ -808,6 +820,13 @@ communications with subprocesses to programs that exhibit unusual
 behavior with respect to buffering pipe I/O.
 
 @ifnottex
+@vindex w32-pipe-read-delay
+  If you need to invoke MS-DOS programs as Emacs subprocesses, you may
+see low rate of reading data from such programs.  Setting the variable
+@code{w32-pipe-read-delay} to a non-zero value may improve throughput
+in these cases; we suggest the value of 50 for such situations.  The
+default is zero.
+
 @findex w32-shell-execute
   The function @code{w32-shell-execute} can be useful for writing
 customized commands that run MS-Windows applications registered to
@@ -967,9 +986,9 @@ printer, put this in your @file{.emacs} file:
 @section Specifying Fonts on MS-Windows
 @cindex font specification (MS Windows)
 
-  Starting with Emacs 23, fonts are specified by their name, size
-and optional properties.  The format for specifying fonts comes from the
-fontconfig library used in modern Free desktops:
+  Fonts are specified by their name, size and optional properties.
+The format for specifying fonts comes from the fontconfig library used
+in modern Free desktops:
 
 @example
   [Family[-PointSize]][:Option1=Value1[:Option2=Value2[...]]]
@@ -978,25 +997,47 @@ fontconfig library used in modern Free desktops:
   The old XLFD based format is also supported for backwards compatibility.
 
 @cindex font backend selection (MS-Windows)
-  Emacs 23 and later supports a number of font backends.  Currently,
-the @code{gdi} and @code{uniscribe} backends are supported on Windows.
-The @code{gdi} font backend is available on all versions of Windows,
-and supports all fonts that are natively supported by Windows.  The
-@code{uniscribe} font backend is available on Windows 2000 and later,
-and supports TrueType and OpenType fonts.  Some languages requiring
-complex layout can only be properly supported by the Uniscribe
-backend.  By default, both backends are enabled if supported, with
-@code{uniscribe} taking priority over @code{gdi}.  To override that
-and use the GDI backend even if Uniscribe is available, invoke Emacs
-with the @kbd{-xrm Emacs.fontBackend:gdi} command-line argument, or
-add a @code{Emacs.fontBackend} resource with the value @code{gdi} in
-the Registry under either the
+  Emacs on MS-Windows supports a number of font backends.  Currently,
+the @code{gdi}, @code{uniscribe}, and @code{harfbuzz} backends are
+available.  The @code{gdi} font backend is available on all versions
+of Windows, and supports all fonts that are natively supported by
+Windows.  The @code{uniscribe} font backend is available on Windows
+2000 and later, and supports TrueType and OpenType fonts.  The
+@code{harfbuzz} font backend is available if Emacs was built with
+HarfBuzz support, and if the HarfBuzz DLL is installed on your system;
+like @code{uniscribe}, this backend supports only TrueType and
+OpenType fonts.  Some languages requiring complex layout can only be
+properly supported by the Uniscribe or HarfBuzz backends.  By default,
+two backends are enabled for each frame: @code{gdi} and either
+@code{harfbuzz} or @code{uniscribe}, depending on which one is
+available (if both are available, only @code{harfbuzz} is enabled by
+default).  The @code{harfbuzz} and @code{uniscribe} backends take
+priority over @code{gdi} when Emacs looks for a suitable font.  To
+override that and use the GDI backend even if Uniscribe is available,
+invoke Emacs with the @kbd{-xrm Emacs.fontBackend:gdi} command-line
+argument, or add a @code{Emacs.fontBackend} resource with the value
+@code{gdi} in the Registry under either the
 @samp{HKEY_CURRENT_USER\SOFTWARE\GNU\Emacs} or the
 @samp{HKEY_LOCAL_MACHINE\SOFTWARE\GNU\Emacs} key (@pxref{Resources}).
+Similarly, to use the Uniscribe backend even if HarfBuzz is available,
+use @kbd{-xrm Emacs.fontBackend:uniscribe} on the command line that
+invokes Emacs.  You can also request all the 3 backends via the
+@code{font-backend} frame parameter, but be warned that in that case
+font searches for characters for which no fonts are available on the
+system will take longer.
+
+Alternatively, you could specify a font backend for a frame via the
+@code{font-backend} frame parameter, using
+@code{modify-frame-parameters} (@pxref{Parameter Access,,, elisp, The
+Emacs Lisp Reference Manual}).  You can also request specific font
+backend(s) for all your frames via @code{default-frame-alist} and
+@code{initial-frame-alist} (@pxref{Frame Parameters}).  Note that the
+value of the @code{font-backend} parameter should be a list of
+symbols, as in @code{(uniscribe)} or @w{@code{(harfbuzz uniscribe gdi)}}.
 
 @cindex font properties (MS Windows)
 @noindent
-Optional properties common to all font backends on MS-Windows are:
+Optional font properties supported on MS-Windows are:
 
 @table @code
 
@@ -1049,39 +1090,69 @@ Not used on Windows, but for informational purposes and to
 prevent problems with code that expects it to be set, is set internally to
 @code{raster} for bitmapped fonts, @code{outline} for scalable fonts,
 or @code{unknown} if the type cannot be determined as one of those.
-@end table
-
-@cindex font properties (MS Windows gdi backend)
-Options specific to @code{GDI} fonts:
-
-@table @code
 
 @cindex font scripts (MS Windows)
 @cindex font Unicode subranges (MS Windows)
 @item script
 Specifies a Unicode subrange the font should support.
 
-The following scripts are recognized on Windows: @code{latin}, @code{greek},
-@code{coptic}, @code{cyrillic}, @code{armenian}, @code{hebrew}, @code{arabic},
-@code{syriac}, @code{nko}, @code{thaana}, @code{devanagari}, @code{bengali},
-@code{gurmukhi}, @code{gujarati}, @code{oriya}, @code{tamil}, @code{telugu},
-@code{kannada}, @code{malayam}, @code{sinhala}, @code{thai}, @code{lao},
-@code{tibetan}, @code{myanmar}, @code{georgian}, @code{hangul},
-@code{ethiopic}, @code{cherokee}, @code{canadian-aboriginal}, @code{ogham},
-@code{runic}, @code{khmer}, @code{mongolian}, @code{symbol}, @code{braille},
-@code{han}, @code{ideographic-description}, @code{cjk-misc}, @code{kana},
-@code{bopomofo}, @code{kanbun}, @code{yi}, @code{byzantine-musical-symbol},
-@code{musical-symbol}, and @code{mathematical}.
+All the scripts known to Emacs (which generally means all the scripts
+defined by the latest Unicode Standard) are recognized on MS-Windows.
+However, @code{GDI} fonts support only a subset of the known scripts:
+@code{greek}, @code{hangul}, @code{kana}, @code{kanbun},
+@code{bopomofo}, @code{tibetan}, @code{yi}, @code{mongolian},
+@code{hebrew}, @code{arabic}, and @code{thai}.
 
 @cindex font antialiasing (MS Windows)
+@cindex Cleartype
 @item antialias
 Specifies the antialiasing method.  The value @code{none} means no
 antialiasing, @code{standard} means use standard antialiasing,
-@code{subpixel} means use subpixel antialiasing (known as Cleartype on
-Windows), and @code{natural} means use subpixel antialiasing with
-adjusted spacing between letters.  If unspecified, the font will use
-the system default antialiasing.
+@code{subpixel} means use subpixel antialiasing (known as
+@dfn{Cleartype} on Windows), and @code{natural} means use subpixel
+antialiasing with adjusted spacing between letters.  If unspecified,
+the font will use the system default antialiasing.
 @end table
+
+@cindex font lookup, MS-Windows
+@findex w32-find-non-USB-fonts
+The method used by Emacs on MS-Windows to look for fonts suitable for
+displaying a given non-@sc{ascii} character might fail for some rare
+scripts, specifically those added by Unicode relatively recently, even
+if you have fonts installed on your system that support those scripts.
+That is because these scripts have no Unicode Subrange Bits (USBs)
+defined for them in the information used by Emacs on MS-Windows to
+look for fonts.  You can use the @code{w32-find-non-USB-fonts}
+function to overcome these problems.  It needs to be run once at the
+beginning of the Emacs session, and again if you install new fonts.
+You can add the following line to your init file to have this function
+run every time you start Emacs:
+
+@lisp
+(w32-find-non-USB-fonts)
+@end lisp
+
+@noindent
+@vindex w32-non-USB-fonts
+Alternatively, you can run this function manually via @kbd{M-:}
+(@pxref{Lisp Eval}) at any time.  On a system that has many fonts
+installed, running @code{w32-find-non-USB-fonts} might take a couple
+of seconds; if you consider that to be too long to be run during
+startup, and if you install new fonts only rarely, run this function
+once via @kbd{M-:}, and then assign the value it returns, if
+non-@code{nil}, to the variable @code{w32-non-USB-fonts} in your init
+file.  (If the function returns @code{nil}, you have no fonts
+installed that can display characters from the scripts which need this
+facility.)
+
+@vindex w32-use-w32-font-dialog
+@vindex w32-fixed-font-alist
+The variable @code{w32-use-w32-font-dialog} controls the way fonts can
+be selected via @kbd{S-mouse-1} (@code{mouse-appearance-menu}).  If
+the value is @code{t}, the default, Emacs uses the standard Windows
+font selection dialog.  If the value is @code{nil}, Emacs instead pops
+a menu of a fixed set of fonts.  The fonts to appear in the menu are
+determined by @code{w32-fixed-font-alist}.
 
 @node Windows Misc
 @section Miscellaneous Windows-specific features
@@ -1101,11 +1172,6 @@ the default when such software is detected when running Emacs.
 When this variable is non-@code{nil}, other variables affecting the
 cursor display have no effect.
 
-@iftex
-@inforef{Windows Misc, , emacs}, for information about additional
-Windows-specific variables in this category.
-@end iftex
-
 @ifnottex
 @vindex w32-grab-focus-on-raise
 @cindex frame focus policy, MS-Windows
@@ -1114,6 +1180,52 @@ non-@code{nil} value causes a frame to grab focus when it is raised.
 The default is @code{t}, which fits well with the Windows default
 click-to-focus policy.
 @end ifnottex
+
+  On Windows 10 (version 1809 and higher) and Windows 11, Emacs title
+bars and scroll bars by default follow the system's Light or Dark
+mode, similar to other programs such as Explorer and Command Prompt.
+To change the color mode, select @code{Personalization} from
+@w{@code{Windows Settings}}, then @w{@code{Colors->Choose your color}}
+(or @w{@code{Choose your default app mode}} or @w{@code{Choose your
+mode}}); then restart Emacs.  On Windows 11, you can select separate
+default modes for Windows and for applications.
+
+@vindex w32-follow-system-dark-mode
+  If you don't want Emacs to follow the system's Dark mode setting,
+customize the variable @code{w32-follow-system-dark-mode} to a
+@code{nil} value; then Emacs will use the default Light mode
+regardless of system-wide settings.  Changing the value of this
+variable affects only the Emacs frames created after the change, so
+you should set its value in your init file (@pxref{Init File}), either
+directly or via @kbd{M-x customize-variable}, which lets you save the
+customized value, see @ref{Saving Customizations}.
+
+@findex w32-use-virtual-terminal
+@cindex Windows Terminal, Windows Console, MS-Windows
+  The implementation of display functionality for Windows Console
+differs from the implementation for other terminal emulators,
+because historically, Windows required use of an idiosyncractic API.
+That API limited Windows Console display of Emacs to 16 basic colors.
+With the introduction of Windows Terminal, Microsoft implemented
+support for ANSI control sequences, modelled on the VT100 and Xterm,
+as well as 24-bit RBG color display.
+
+  The functions @code{w32-use-virtual-terminal} and
+@code{w32-use-virtual-terminal-p} can be used to set and inspect
+(respectively) an internal variable which determines whether this newer
+mechanism is used for display, or the older one.  The internal variable is
+automatically set based on your terminal's capabilities on startup.
+By default, 24-bit RGB color will be used, but other (8, 16, 256) color
+spaces may be used, by passing the @code{--color} command line argument,
+or setting the value of the @code{tty-color-mode} frame parameter.
+
+   @code{(w32-use-virtual-terminal-p)} evaluates to @code{t} if and only if
+the internal variable has a non-zero numerical value, and otherwise to
+@code{nil}.  If it evaluates to @code{t}, ANSI escape sequences are used
+for color, otherwise, the older mechanism is used.  The internal variable
+can be set by evaluating @code{(w32-use-virtual-terminal x)}, where @code{x} is
+@code{t} or @code{nil}: if @code{x} is @code{t} and the feature is supported by
+your terminal, it will be enabled.  Otherwise, the feature will be disabled.
 
 @ifnottex
 @include msdos-xtra.texi

@@ -1,6 +1,6 @@
 ;;; macros.el --- non-primitive commands for keyboard macros -*- lexical-binding:t -*-
 
-;; Copyright (C) 1985-1987, 1992, 1994-1995, 2001-2018 Free Software
+;; Copyright (C) 1985-1987, 1992, 1994-1995, 2001-2026 Free Software
 ;; Foundation, Inc.
 
 ;; Maintainer: emacs-devel@gnu.org
@@ -26,7 +26,7 @@
 
 ;; Extension commands for keyboard macros.  These permit you to assign
 ;; a name to the last-defined keyboard macro, expand and insert the
-;; lisp corresponding to a macro, query the user from within a macro,
+;; Lisp corresponding to a macro, query the user from within a macro,
 ;; or apply a macro to each line in the reason.
 
 ;;; Code:
@@ -36,10 +36,21 @@
 ;;;###autoload
 (defalias 'name-last-kbd-macro #'kmacro-name-last-macro)
 
+(defun macros--insert-vector-macro (definition)
+  "Print DEFINITION, a vector, into the current buffer."
+  (insert ?\[
+          (mapconcat (lambda (event)
+                       (or (prin1-char event)
+                           (prin1-to-string event)))
+                     definition
+                     " ")
+          ?\]))
+
 ;;;###autoload
 (defun insert-kbd-macro (macroname &optional keys)
   "Insert in buffer the definition of kbd macro MACRONAME, as Lisp code.
-MACRONAME should be a symbol.
+MACRONAME should be a symbol; if none is given, the function inserts
+the definition of `last-kdb-macro'.
 Optional second arg KEYS means also record the keys it is on
 \(this is the prefix argument, when calling interactively).
 
@@ -56,95 +67,44 @@ use this command, and then save the file."
                                               #'kmacro-keyboard-macro-p
 					      t))
 		     current-prefix-arg))
-  (let (definition)
-    (if (string= (symbol-name macroname) "")
-	(progn
-	  (setq macroname 'last-kbd-macro definition last-kbd-macro)
-	  (insert "(setq "))
-      (setq definition (symbol-function macroname))
-      (insert "(fset '"))
-    (prin1 macroname (current-buffer))
-    (insert "\n   ")
-    (if (stringp definition)
-	(let ((beg (point)) end)
-	  (prin1 definition (current-buffer))
-	  (setq end (point-marker))
-	  (goto-char beg)
-	  (while (< (point) end)
-	    (let ((char (following-char)))
-	      (cond ((= char 0)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\C-@"))
-		    ((< char 27)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\C-" (+ 96 char)))
-		    ((= char ?\C-\\)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\C-\\\\"))
-		    ((< char 32)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\C-" (+ 64 char)))
-		    ((< char 127)
-		     (forward-char 1))
-		    ((= char 127)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\C-?"))
-		    ((= char 128)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\C-@"))
-		    ((= char (aref "\M-\C-\\" 0))
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\C-\\\\"))
-		    ((< char 155)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\C-" (- char 32)))
-		    ((< char 160)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\C-" (- char 64)))
-		    ((= char (aref "\M-\\" 0))
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\\\"))
-		    ((< char 255)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-" (- char 128)))
-		    ((= char 255)
-		     (delete-region (point) (1+ (point)))
-		     (insert "\\M-\\C-?"))))))
-      (if (vectorp definition)
-	  (let ((len (length definition)) (i 0) char)
-	    (while (< i len)
-	      (insert (if (zerop i) ?\[ ?\s))
-	      (setq char (aref definition i)
-		    i (1+ i))
-	      (if (not (numberp char))
-                  (prin1 char (current-buffer))
-                (princ (prin1-char char) (current-buffer))))
-	    (insert ?\]))
-        ;; FIXME: For kmacros, we shouldn't write the (lambda ...)
-        ;; gunk but instead we should write something more abstract like
-        ;; (kmacro-create [<keys>] 0 "%d").
-	(prin1 definition (current-buffer))))
-    (insert ")\n")
-    (if keys
-        (let ((keys (or (where-is-internal (symbol-function macroname)
-                                           '(keymap))
+  (if (string= (symbol-name macroname) "")
+      (pp `(setq last-kbd-macro
+                 (key-parse ,(key-description last-kbd-macro)))
+          (current-buffer))
+    (let ((definition (symbol-function macroname)))
+      (when (or (stringp definition) (vectorp definition))
+        (setq definition (kmacro (kmacro--to-vector definition))))
+      ;; Prefer `defalias' over `fset' since it additionally keeps
+      ;; track of the file where the users added it, and it interacts
+      ;; better with `advice-add' (and hence things like ELP).
+      (let ((counter (kmacro--counter definition))
+            (format  (kmacro--format  definition)))
+        (pp `(defalias ',macroname
+               (kmacro ,(key-description (kmacro--keys definition))
+                       ;; FIXME: Do we really want to store the counter?
+                       . ,(unless (and (equal counter 0) (equal format "%d"))
+                            `(,counter ,format))))
+            (current-buffer)))
+      (when keys
+        (let ((keys (or (where-is-internal definition '(keymap))
                         (where-is-internal macroname '(keymap)))))
-	  (while keys
-	    (insert "(global-set-key ")
-	    (prin1 (car keys) (current-buffer))
-	    (insert " '")
-	    (prin1 macroname (current-buffer))
-	    (insert ")\n")
-	    (setq keys (cdr keys)))))))
+	  (dolist (key keys)
+	    (pp `(keymap-global-set ,(key-description key) #',macroname)
+	        (current-buffer))))))))
 
 ;;;###autoload
 (defun kbd-macro-query (flag)
   "Query user during kbd macro execution.
-  With prefix argument, enters recursive edit, reading keyboard
-commands even within a kbd macro.  You can give different commands
-each time the macro executes.
-  Without prefix argument, asks whether to continue running the macro.
+
+With prefix argument FLAG, enter recursive edit, reading
+keyboard commands even within a kbd macro.  You can give
+different commands each time the macro executes.
+
+Without prefix argument, ask whether to continue running the
+macro.
+
 Your options are: \\<query-replace-map>
+
 \\[act]	Finish this iteration normally and continue with the next.
 \\[skip]	Skip the rest of this iteration, and start the next.
 \\[exit]	Stop the macro entirely right now.
@@ -220,7 +180,7 @@ For example, in Usenet articles, sections of text quoted from another
 author are indented, or have each line start with `>'.  To quote a
 section of text, define a keyboard macro which inserts `>', put point
 and mark at opposite ends of the quoted section, and use
-`\\[apply-macro-to-region-lines]' to mark the entire section.
+\\[apply-macro-to-region-lines] to mark the entire section.
 
 Suppose you wanted to build a keyword table in C where each entry
 looked like this:
@@ -242,7 +202,7 @@ and write a macro to massage a word into a table entry:
     \\C-x )
 
 and then select the region of un-tablified names and use
-`\\[apply-macro-to-region-lines]' to build the table from the names."
+\\[apply-macro-to-region-lines] to build the table from the names."
   (interactive "r")
   (or macro
       (progn

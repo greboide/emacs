@@ -1,6 +1,6 @@
 ;;; map-ynp.el --- general-purpose boolean question-asker  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1991-1995, 2000-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1991-1995, 2000-2026 Free Software Foundation, Inc.
 
 ;; Author: Roland McGrath <roland@gnu.org>
 ;; Maintainer: emacs-devel@gnu.org
@@ -35,51 +35,77 @@
 ;;; Code:
 
 (declare-function x-popup-dialog "menu.c" (position contents &optional header))
+(declare-function set-text-conversion-style "textconv.c")
+(autoload 'cl--map-keymap-recursively "cl-extra")
+
+(defvar overriding-text-conversion-style)
 
 (defun map-y-or-n-p (prompter actor list &optional help action-alist
 			      no-cursor-in-echo-area)
-  "Ask a series of boolean questions.
-Takes args PROMPTER ACTOR LIST, and optional args HELP and ACTION-ALIST.
+  "Ask a boolean question per PROMPTER for each object in LIST, then call ACTOR.
 
 LIST is a list of objects, or a function of no arguments to return the next
-object or nil.
+object; when it returns nil, the list of objects is considered exhausted.
 
-If PROMPTER is a string, the prompt is \(format PROMPTER OBJECT).  If not
-a string, PROMPTER is a function of one arg (an object from LIST), which
-returns a string to be used as the prompt for that object.  If the return
-value is not a string, it may be nil to ignore the object or non-nil to act
-on the object without asking the user.
+If PROMPTER is a string, it should be a format string to be used to format
+the question as \(format PROMPTER OBJECT).
+If PROMPTER is not a string, it should be a function of one argument, an
+object from LIST, which returns a string to be used as the question for
+that object.  If the function's return value is not a string, it may be
+nil to ignore the object, or non-nil to act on the object with ACTOR
+without asking the user.
 
-ACTOR is a function of one arg (an object from LIST),
-which gets called with each object that the user answers `yes' for.
+ACTOR is a function of one argument, an object from LIST,
+which gets called with each object for which the user answers `yes'
+to the question presented by PROMPTER.
 
-If HELP is given, it is a list (OBJECT OBJECTS ACTION),
-where OBJECT is a string giving the singular noun for an elt of LIST;
-OBJECTS is the plural noun for elts of LIST, and ACTION is a transitive
-verb describing ACTOR.  The default is \(\"object\" \"objects\" \"act on\").
+The user's answers to the questions may be one of the following:
 
-At the prompts, the user may enter y, Y, or SPC to act on that object;
-n, N, or DEL to skip that object; ! to act on all following objects;
-ESC or q to exit (skip all following objects); . (period) to act on the
-current object and then exit; or \\[help-command] to get help.
+ - y, Y, or SPC to act on that object;
+ - n, N, or DEL to skip that object;
+ - ! to act on all following objects;
+ - ESC or q to exit (skip all following objects);
+ - . (period) to act on the current object and then exit; or
+ - \\[help-command] to get help.
 
-If ACTION-ALIST is given, it is an alist (KEY FUNCTION HELP) of extra keys
-that will be accepted.  KEY is a character; FUNCTION is a function of one
-arg (an object from LIST); HELP is a string.  When the user hits KEY,
-FUNCTION is called.  If it returns non-nil, the object is considered
-\"acted upon\", and the next object from LIST is processed.  If it returns
-nil, the prompt is repeated for the same object.
+HELP provides information for displaying help when the user
+types \\[help-command].  If HELP is given, it should be a list of
+the form (OBJECT OBJECTS ACTION), where OBJECT is a string giving
+the singular noun describing an element of LIST; OBJECTS is the
+plural noun describing several elements of LIST, and ACTION is a
+transitive verb describing action by ACTOR on one or more elements
+of LIST.  If HELP is omitted or nil, it defaults
+to \(\"object\" \"objects\" \"act on\").
 
-Final optional argument NO-CURSOR-IN-ECHO-AREA non-nil says not to set
-`cursor-in-echo-area' while prompting.
+If ACTION-ALIST is given, it is an alist specifying additional keys
+that will be accepted as an answer to the questions.  Each element
+of the alist has the form (KEY FUNCTION HELP), where KEY is a character;
+FUNCTION is a function of one argument (an object from LIST); and HELP
+is a string.  When the user presses KEY, FUNCTION is called; if it
+returns non-nil, the object is considered to have been \"acted upon\",
+and `map-y-or-n-p' proceeds to the next object from LIST.  If
+FUNCTION returns nil, the prompt is re-issued for the same object: this
+comes in handy if FUNCTION produces some display that will allow the
+user to make an intelligent decision whether the object in question
+should be acted upon.  If the user types \\[help-command], the string
+given by HELP is used to describe the effect of KEY.
+
+Optional argument NO-CURSOR-IN-ECHO-AREA, if non-nil, means not to set
+`cursor-in-echo-area' while prompting with the questions.
 
 This function uses `query-replace-map' to define the standard responses,
-but not all of the responses which `query-replace' understands
-are meaningful here.
+but only some of the responses which `query-replace' understands
+are meaningful here, as described above.
 
-Returns the number of actions taken."
+By default, this function uses the minibuffer to read the key
+non-modally (see `read-from-minibuffer').  However, if
+`y-or-n-p-use-read-key' is non-nil, the modal `read-key-sequence-vector'
+function is used instead.
+
+The function's value is the number of actions taken."
   (let* ((actions 0)
-	 user-keys mouse-event map prompt char elt def
+         (msg (current-message))
+	 user-keys mouse-event map prompt chars elt def
 	 ;; Non-nil means we should use mouse menus to ask.
 	 use-menus
 	 delayed-switch-frame
@@ -115,8 +141,10 @@ Returns the number of actions taken."
 		mouse-event last-nonmenu-event))
       (setq user-keys (if action-alist
 			  (concat (mapconcat (lambda (elt)
-                                               (key-description
-                                                (vector (car elt))))
+                                               (substitute-command-keys
+                                                (format "\\`%s'"
+                                                        (key-description
+                                                         (vector (car elt))))))
 					     action-alist ", ")
 				  " ")
 			"")
@@ -139,30 +167,113 @@ Returns the number of actions taken."
 	    (cond ((stringp prompt)
 		   ;; Prompt the user about this object.
 		   (setq quit-flag nil)
-		   (if use-menus
-		       (setq def (or (x-popup-dialog (or mouse-event use-menus)
-						     (cons prompt map))
-				     'quit))
-		     ;; Prompt in the echo area.
-		     (let ((cursor-in-echo-area (not no-cursor-in-echo-area)))
-		       (message (apply 'propertize "%s(y, n, !, ., q, %sor %s) "
-				       minibuffer-prompt-properties)
-				prompt user-keys
-				(key-description (vector help-char)))
+		   (cond
+		    (use-menus
+		     (setq def (or (x-popup-dialog (or mouse-event use-menus)
+						   (cons prompt map))
+				   'quit)))
+		    (y-or-n-p-use-read-key
+		     ;; Prompt in the echo area using `read-key-sequence-vector'.
+		     (let ((cursor-in-echo-area (not no-cursor-in-echo-area))
+                           (full-prompt
+                            (substitute-command-keys
+                             (format
+                              (apply #'propertize
+                                     "%s(\\`y', \\`n', \\`!', \\`.', \\`q', %sor \\`%s') "
+                                     minibuffer-prompt-properties)
+                              prompt user-keys
+                              (help-key)))))
 		       (if minibuffer-auto-raise
 			   (raise-frame (window-frame (minibuffer-window))))
-		       (while (progn
-				(setq char (read-event))
-				;; If we get -1, from end of keyboard
-				;; macro, try again.
-                                (equal char -1)))
+                       (unwind-protect
+                           ;; We want to inhibit text conversion here,
+                           ;; because it gets in the way when system
+                           ;; input methods are installed.  See
+                           ;; https://lists.gnu.org/archive/html/emacs-devel/2024-05/msg00441.html
+                           ;; for the details.
+                           (let ((overriding-text-conversion-style nil))
+                             (when (fboundp 'set-text-conversion-style)
+                               (set-text-conversion-style text-conversion-style))
+                             ;; Do NOT use read-event here.  That
+                             ;; function does not consult
+                             ;; input-decode-map (bug#75886).
+                             ;; Despite the name 'y-or-n-p-use-read-key',
+                             ;; this uses 'read-key-sequence-vector'
+                             ;; instead of 'read-key' for several reasons.
+                             ;; 'read-key' returns a single key while on TTY
+                             ;; we need also to read escape sequences.
+                             ;; Additionally we need to bind 'ESC ESC ESC'
+                             ;; to allow using 'keyboard-escape-quit'.
+                             ;; This also creates the 'ESC' keymap required to
+                             ;; support escape sequences on TTY such as 'ESC ~'.
+                             (let ((overriding-terminal-local-map nil)
+                                   (overriding-local-map read-key-empty-map)
+                                   (echo-keystrokes 0)
+                                   (old-global-map (current-global-map)))
+                               (unwind-protect
+                                   (progn
+                                     (use-global-map
+                                      (let ((map (make-sparse-keymap)))
+                                        (define-key map [?\e ?\e ?\e] #'keyboard-escape-quit)
+                                        map))
+                                     (setq chars (read-key-sequence-vector full-prompt)))
+                                 (use-global-map old-global-map)))
+                             (when (member chars '([?\C-g] [?\C-\[ ?\C-\[ ?\C-\[]))
+                               (signal 'quit nil)))
+                         (when (fboundp 'set-text-conversion-style)
+                           (set-text-conversion-style text-conversion-style)))
 		       ;; Show the answer to the question.
-		       (message "%s(y, n, !, ., q, %sor %s) %s"
-				prompt user-keys
-				(key-description (vector help-char))
-				(single-key-description char)))
-		     (setq def (lookup-key map (vector char))))
-		   (cond ((eq def 'exit)
+                       (message "%s" (substitute-command-keys
+                                      (format
+                                       "%s(\\`y', \\`n', \\`!', \\`.', \\`q', %sor \\`%s') %s"
+                                       prompt user-keys
+                                       (help-key)
+                                       (if (equal chars [-1])
+                                           "[end-of-keyboard-macro]"
+                                         (key-description chars))))))
+		     (setq def (and chars (lookup-key map chars))))
+                    (t
+                     ;; Read from the minibuffer.
+                     (let* ((full-prompt
+                             (substitute-command-keys
+                              (format
+                               (apply #'propertize
+                                      "%s(\\`y', \\`n', \\`!', \\`.', \\`q', %sor \\`%s') "
+                                      minibuffer-prompt-properties)
+                               prompt user-keys (help-key))))
+                            (remap (make-sparse-keymap))
+                            (cmd-char
+                             (lambda ()
+                               (interactive)
+                               (setq chars (this-command-keys-vector))
+                               (exit-minibuffer)))
+                            (cmd-help
+                             (lambda ()
+                               (interactive)
+                               (message "%s" (substitute-command-keys
+                                              (format
+                                               "Type \\`%s' for help"
+                                               (help-key))))))
+                            (this-command this-command)
+                            (real-this-command real-this-command)
+                            (enable-recursive-minibuffers t)
+                            (overriding-text-conversion-style nil))
+                       (set-keymap-parent remap minibuffer-local-map)
+                       (define-key remap [remap self-insert-command] cmd-help)
+                       (cl--map-keymap-recursively
+                        (lambda (key _cmd)
+                          (define-key remap key cmd-char))
+                        map)
+                       (if minibuffer-auto-raise
+                           (raise-frame (window-frame (minibuffer-window))))
+                       (when (fboundp 'set-text-conversion-style)
+                         (set-text-conversion-style text-conversion-style))
+                       (read-from-minibuffer
+                        full-prompt nil remap nil
+                        (or y-or-n-p-history-variable t))
+                       (message "%s%s" full-prompt (key-description chars)))
+                     (setq def (and chars (lookup-key map chars)))))
+                   (cond ((eq def 'exit)
 			  (setq next (lambda () nil)))
 			 ((eq def 'act)
 			  ;; Act on the object.
@@ -198,12 +309,12 @@ Returns the number of actions taken."
                                    (action  (or (nth 2 help) "act on")))
 			       (concat
                                 (format-message
-                                 "\
-Type SPC or `y' to %s the current %s;
-DEL or `n' to skip the current %s;
-RET or `q' to skip the current and all remaining %s;
-C-g to quit (cancel the whole command);
-! to %s all remaining %s;\n"
+                                 (substitute-command-keys "\
+Type \\`SPC' or \\`y' to %s the current %s;
+\\`DEL' or \\`n' to skip the current %s;
+\\`RET' or \\`q' to skip the current and all remaining %s;
+\\`C-g' to quit (cancel the whole command);
+\\`!' to %s all remaining %s;\n")
                                  action object object objects action objects)
                                 (mapconcat (lambda (elt)
                                              (format "%s to %s;\n"
@@ -228,15 +339,23 @@ C-g to quit (cancel the whole command);
 			      (setq actions (1+ actions))
 			    ;; Regurgitated; try again.
 			    (funcall try-again)))
-			 ((and (consp char)
-			       (eq (car char) 'switch-frame))
+			 ((eq chars '[switch-frame])
 			  ;; switch-frame event.  Put it off until we're done.
-			  (setq delayed-switch-frame char)
+			  (setq delayed-switch-frame chars)
 			  (funcall try-again))
+			 ((and noninteractive (member chars '(nil [])))
+                          ;; Special case for kmacro in batch mode (bug#67836).
+                          ;; When 'y-or-n-p-use-read-key' is non-nil,
+                          ;; 'read-key-sequence-vector' returns [].
+                          ;; When 'y-or-n-p-use-read-key' is nil,
+                          ;; 'chars' is nil.
+			  (error "Can't use in a kmacro in batch mode"))
 			 (t
 			  ;; Random char.
-			  (message "Type %s for help."
-				   (key-description (vector help-char)))
+                          (message "%s" (substitute-command-keys
+                                         (format
+                                          "Type \\`%s' for help"
+                                          (help-key))))
 			  (beep)
 			  (sit-for 1)
 			  (funcall try-again))))
@@ -246,9 +365,12 @@ C-g to quit (cancel the whole command);
       (if delayed-switch-frame
 	  (setq unread-command-events
 		(cons delayed-switch-frame unread-command-events))))
-    ;; Clear the last prompt from the minibuffer.
+    ;; Clear the last prompt from the minibuffer, and restore the
+    ;; previous echo-area message, if any.
     (let ((message-log-max nil))
-      (message ""))
+      (if msg
+          (message "%s" msg)
+        (message "")))
     ;; Return the number of actions that were taken.
     actions))
 
@@ -257,10 +379,22 @@ C-g to quit (cancel the whole command);
 ;; either long or short answers.
 
 ;; For backward compatibility check if short y/n answers are preferred.
-(defcustom read-answer-short (eq (symbol-function 'yes-or-no-p) 'y-or-n-p)
-  "If non-nil, accept short answers to the question."
-  :type 'boolean
-  :version "27.1"
+(defcustom read-answer-short 'auto
+  "If non-nil, the `read-answer' function accepts single-character answers.
+If t, accept short (single key-press) answers to the question.
+If nil, require long answers.  If `auto', accept short answers if
+`use-short-answers' is non-nil, or the function cell of `yes-or-no-p'
+is set to `y-or-n-p'.
+
+Note that this variable does not affect calls to the more
+commonly-used `yes-or-no-p' function; it only affects calls to
+the `read-answer' function.  To control whether `yes-or-no-p'
+requires a long or a short answer, see the `use-short-answers'
+variable."
+  :type '(choice (const :tag "Accept short answers" t)
+                 (const :tag "Require long answer" nil)
+                 (const :tag "Guess preference" auto))
+  :version "26.2"
   :group 'minibuffer)
 
 (defconst read-answer-map--memoize (make-hash-table :weakness 'key :test 'equal))
@@ -268,6 +402,7 @@ C-g to quit (cancel the whole command);
 (defun read-answer (question answers)
   "Read an answer either as a complete word or its character abbreviation.
 Ask user a question and accept an answer from the list of possible answers.
+Return the long answer even when accepting short ones.
 
 QUESTION should end in a space; this function adds a list of answers to it.
 
@@ -278,6 +413,10 @@ where
   SHORT-ANSWER is an abbreviated one-character answer,
   HELP-MESSAGE is a string describing the meaning of the answer.
 
+SHORT-ANSWER is not necessarily a single character answer.  It can be
+also a function key like F1, a character event such as C-M-h, or
+a control character like C-h.
+
 Example:
   \\='((\"yes\"  ?y \"perform the action\")
     (\"no\"   ?n \"skip to the next\")
@@ -287,11 +426,11 @@ Example:
 
 When `read-answer-short' is non-nil, accept short answers.
 
-Return a long answer even in case of accepting short ones.
-
 When `use-dialog-box' is t, pop up a dialog window to get user input."
-  (custom-reevaluate-setting 'read-answer-short)
-  (let* ((short read-answer-short)
+  (let* ((short (if (eq read-answer-short 'auto)
+                    (or use-short-answers
+                        (eq (symbol-function 'yes-or-no-p) 'y-or-n-p))
+                  read-answer-short))
          (answers-with-help
           (if (assoc "help" answers)
               answers
@@ -302,14 +441,18 @@ When `use-dialog-box' is t, pop up a dialog window to get user input."
           (format "%s(%s) " question
                   (mapconcat (lambda (a)
                                (if short
-                                   (format "%c" (nth 1 a))
+                                   (if (characterp (nth 1 a))
+                                       (format "%c" (nth 1 a))
+                                     (key-description (nth 1 a)))
                                  (nth 0 a)))
                              answers-with-help ", ")))
          (message
           (format "Please answer %s."
                   (mapconcat (lambda (a)
                                (format "`%s'" (if short
-                                                  (string (nth 1 a))
+                                                  (if (characterp (nth 1 a))
+                                                      (string (nth 1 a))
+                                                    (key-description (nth 1 a)))
                                                 (nth 0 a))))
                              answers-with-help " or ")))
          (short-answer-map
@@ -319,7 +462,9 @@ When `use-dialog-box' is t, pop up a dialog window to get user input."
                          (let ((map (make-sparse-keymap)))
                            (set-keymap-parent map minibuffer-local-map)
                            (dolist (a answers-with-help)
-                             (define-key map (vector (nth 1 a))
+                             (define-key map (if (characterp (nth 1 a))
+                                                 (vector (nth 1 a))
+                                               (nth 1 a))
                                (lambda ()
                                  (interactive)
                                  (delete-minibuffer-contents)
@@ -331,7 +476,7 @@ When `use-dialog-box' is t, pop up a dialog window to get user input."
                                (delete-minibuffer-contents)
                                (beep)
                                (message message)
-                               (sleep-for 2)))
+                               (sit-for 2)))
                            map)
                          read-answer-map--memoize))))
          answer)
@@ -351,7 +496,7 @@ When `use-dialog-box' is t, pop up a dialog window to get user input."
                                       (short
                                        (read-from-minibuffer
                                         prompt nil short-answer-map nil
-                                        'yes-or-no-p-history))
+                                        'read-char-history))
                                       (t
                                        (read-from-minibuffer
                                         prompt nil nil nil
@@ -364,14 +509,17 @@ When `use-dialog-box' is t, pop up a dialog window to get user input."
                       (mapconcat
                        (lambda (a)
                          (format "`%s'%s to %s"
-                                 (if short (string (nth 1 a)) (nth 0 a))
+                                 (if short (if (characterp (nth 1 a))
+                                               (string (nth 1 a))
+                                             (key-description (nth 1 a)))
+                                   (nth 0 a))
                                  (if short (format " (%s)" (nth 0 a)) "")
                                  (nth 2 a)))
                        answers-with-help ",\n")
                       ".\n")))
         (beep)
         (message message)
-        (sleep-for 2)))
+        (sit-for 2)))
     answer))
 
 ;;; map-ynp.el ends here

@@ -1,26 +1,29 @@
-;;; secrets-tests.el --- Tests of Secret Service API
+;;; secrets-tests.el --- Tests of Secret Service API -*- lexical-binding: t -*-
 
-;; Copyright (C) 2018 Free Software Foundation, Inc.
+;; Copyright (C) 2018-2026 Free Software Foundation, Inc.
 
 ;; Author: Michael Albinus <michael.albinus@gmx.de>
 
-;; This program is free software: you can redistribute it and/or
+;; This file is part of GNU Emacs.
+;;
+;; GNU Emacs is free software: you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
 ;; published by the Free Software Foundation, either version 3 of the
 ;; License, or (at your option) any later version.
 ;;
-;; This program is distributed in the hope that it will be useful, but
+;; GNU Emacs is distributed in the hope that it will be useful, but
 ;; WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 ;; General Public License for more details.
 ;;
 ;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see `https://www.gnu.org/licenses/'.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Code:
 
 (require 'ert)
 (require 'secrets)
+(require 'seq)
 (require 'notifications)
 
 ;; We do not want chatty messages.
@@ -54,8 +57,11 @@
 
 (defun secrets--test-delete-all-session-items ()
   "Delete all items of collection \"session\" bound to this Emacs."
-  (dolist (item (secrets-list-items "session"))
-    (secrets-delete-item "session" item)))
+  ;; If the "session" collection does not exist, a `dbus-error' is
+  ;; fired, which we ignore.
+  (dbus-ignore-errors
+    (dolist (item (secrets-list-items "session"))
+      (secrets-delete-item "session" item))))
 
 (ert-deftest secrets-test01-sessions ()
   "Test opening / closing a secrets session."
@@ -90,10 +96,7 @@
   (unwind-protect
       (progn
 	(should (secrets-open-session))
-
-	;; There must be at least the collections "Login" and "session".
-	(should (member "Login" (secrets-list-collections)))
-	(should (member "session" (secrets-list-collections)))
+	(skip-unless (member "session" (secrets-list-collections)))
 
 	;; Create a random collection.  This asks for a password
 	;; outside our control, so we make it in the interactive case
@@ -153,11 +156,13 @@
   (unwind-protect
       (let (item-path)
 	(should (secrets-open-session))
+	(skip-unless (member "session" (secrets-list-collections)))
+
+        ;; Cleanup.  There could be items in the "session" collection.
+        (secrets--test-delete-all-session-items)
 
 	;; There shall be no items in the "session" collection.
 	(should-not (secrets-list-items "session"))
-	;; There shall be items in the "Login" collection.
-	(should (secrets-list-items "Login"))
 
 	;; Create a new item.
 	(should (setq item-path (secrets-create-item "session" "foo" "secret")))
@@ -168,6 +173,10 @@
 	(should (secrets-create-item "session" "foo" "geheim"))
 	(should (equal (secrets-list-items "session") '("foo" "foo")))
 
+	;; Create another item with a non-latin password.  (Bug#70301)
+	(should (secrets-create-item "session" "parola" "парола"))
+        (should (string-equal (secrets-get-secret "session" "parola") "парола"))
+
 	;; Create an item with attributes.
 	(should
          (setq item-path
@@ -177,10 +186,9 @@
         (dolist (item `("bar" ,item-path))
 	  (should
 	   (string-equal (secrets-get-attribute "session" item :method) "sudo"))
-	  ;; The attributes are collected in reverse order.
-	  ;; :xdg:schema is added silently.
+          ;; The attribute :xdg:schema is added silently.
 	  (should
-	   (equal
+           (seq-set-equal-p
 	    (secrets-get-attributes "session" item)
 	    '((:xdg:schema . "org.freedesktop.Secret.Generic")
               (:host . "remote-host") (:user . "joe") (:method . "sudo")))))
@@ -214,6 +222,10 @@
   (unwind-protect
       (progn
 	(should (secrets-open-session))
+	(skip-unless (member "session" (secrets-list-collections)))
+
+        ;; Cleanup.  There could be items in the "session" collection.
+        (secrets--test-delete-all-session-items)
 
 	;; There shall be no items in the "session" collection.
 	(should-not (secrets-list-items "session"))
@@ -241,14 +253,14 @@
          (secrets-search-items "session" :xdg:schema "org.gnu.Emacs.foo"))
 	(should
 	 (equal
-	  (sort (secrets-search-items "session" :user "joe") 'string-lessp)
+          (sort (secrets-search-items "session" :user "joe") #'string-lessp)
 	  '("baz" "foo")))
 	(should
 	 (equal
 	  (secrets-search-items "session":method "sudo" :user "joe") '("foo")))
 	(should
 	 (equal
-	  (sort (secrets-search-items "session") 'string-lessp)
+          (sort (secrets-search-items "session") #'string-lessp)
 	  '("bar" "baz" "foo"))))
 
     ;; Exit.
@@ -260,7 +272,7 @@
   "Run all tests for \\[secrets]."
   (interactive "p")
   (funcall
-   (if interactive 'ert-run-tests-interactively 'ert-run-tests-batch)
+   (if interactive #'ert-run-tests-interactively #'ert-run-tests-batch)
    "^secrets"))
 
 (provide 'secrets-tests)

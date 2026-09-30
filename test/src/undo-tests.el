@@ -1,21 +1,23 @@
-;;; undo-tests.el --- Tests of primitive-undo
+;;; undo-tests.el --- Tests of primitive-undo -*- lexical-binding: t -*-
 
-;; Copyright (C) 2012-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2012-2026 Free Software Foundation, Inc.
 
 ;; Author: Aaron S. Hawley <aaron.s.hawley@gmail.com>
 
-;; This program is free software: you can redistribute it and/or
+;; This file is part of GNU Emacs.
+;;
+;; GNU Emacs is free software: you can redistribute it and/or
 ;; modify it under the terms of the GNU General Public License as
 ;; published by the Free Software Foundation, either version 3 of the
 ;; License, or (at your option) any later version.
 ;;
-;; This program is distributed in the hope that it will be useful, but
+;; GNU Emacs is distributed in the hope that it will be useful, but
 ;; WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 ;; General Public License for more details.
 ;;
 ;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see `https://www.gnu.org/licenses/'.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -44,6 +46,8 @@
 ;;; Code:
 
 (require 'ert)
+(require 'ert-x)
+(require 'facemenu)
 
 (ert-deftest undo-test0 ()
   "Test basics of \\[undo]."
@@ -54,7 +58,7 @@
       (error
        (unless (string= "No further undo information"
                         (cadr err))
-         (error err))))
+         (signal err))))
     (undo-boundary)
     (insert "This")
     (undo-boundary)
@@ -72,7 +76,7 @@
     (undo-boundary)
     (put-text-property (point-min) (point-max) 'face 'bold)
     (undo-boundary)
-    (remove-text-properties (point-min) (point-max) '(face default))
+    (remove-list-of-text-properties (point-min) (point-max) '(face))
     (undo-boundary)
     (set-buffer-multibyte (not enable-multibyte-characters))
     (undo-boundary)
@@ -85,6 +89,7 @@
 
 (ert-deftest undo-test1 ()
   "Test undo of \\[undo] command (redo)."
+  (require 'facemenu)
   (with-temp-buffer
     (buffer-enable-undo)
     (undo-boundary)
@@ -145,7 +150,7 @@
   (with-temp-buffer
     (buffer-enable-undo)
     (dotimes (i 1048576)
-      (if (zerop (% i 2))
+      (if (evenp i)
           (insert "Evenses")
         (insert "Oddses")))
     (undo-boundary)
@@ -214,17 +219,14 @@
 
 (ert-deftest undo-test-file-modified ()
   "Test undoing marks buffer visiting file unmodified."
-  (let ((tempfile (make-temp-file "undo-test")))
-    (unwind-protect
-        (progn
-          (with-current-buffer (find-file-noselect tempfile)
-            (insert "1")
-            (undo-boundary)
-            (set-buffer-modified-p nil)
-            (insert "2")
-            (undo)
-            (should-not (buffer-modified-p))))
-      (delete-file tempfile))))
+  (ert-with-temp-file tempfile
+    (with-current-buffer (find-file-noselect tempfile)
+      (insert "1")
+      (undo-boundary)
+      (set-buffer-modified-p nil)
+      (insert "2")
+      (undo)
+      (should-not (buffer-modified-p)))))
 
 (ert-deftest undo-test-region-not-most-recent ()
   "Test undo in region of an edit not the most recent."
@@ -255,7 +257,7 @@
     (insert "12345")
     (search-backward "4")
     (undo-boundary)
-    (delete-forward-char 1)
+    (funcall-interactively 'delete-forward-char 1)
     (search-backward "1")
     (undo-boundary)
     (insert "xxxx")
@@ -299,7 +301,7 @@ undo-make-selective-list."
     (insert "ddd")
     (search-backward "ad")
     (undo-boundary)
-    (delete-forward-char 2)
+    (funcall-interactively 'delete-forward-char 2)
     (undo-boundary)
     ;; Select "dd"
     (push-mark (point) t t)
@@ -348,7 +350,7 @@ undo-make-selective-list."
     (let ((m (make-marker)))
       (set-marker m 2 (current-buffer))
       (goto-char (point-min))
-      (delete-forward-char 3)
+      (funcall-interactively 'delete-forward-char 3)
       (undo-boundary)
       (should (= (point-min) (marker-position m)))
       (undo)
@@ -369,7 +371,7 @@ undo-make-selective-list."
       (push-mark (point) t t)
       (setq mark-active t)
       (goto-char (point-min))
-      (delete-forward-char 1) ;; delete region covering "ab"
+      (funcall-interactively 'delete-forward-char 1) ; delete region covering "ab"
       (undo-boundary)
       (should (= (point-min) (marker-position m)))
       ;; Resurrect "ab". m's insertion type means the reinsertion
@@ -389,7 +391,7 @@ Demonstrates bug 16818."
     (let ((m (make-marker)))
       (set-marker m 2 (current-buffer)) ; m at b
       (goto-char (point-min))
-      (delete-forward-char 3) ; m at d
+      (funcall-interactively 'delete-forward-char 3) ; m at d
       (undo-boundary)
       (set-marker m 4) ; m at g
       (undo)
@@ -422,7 +424,7 @@ Demonstrates bug 16818."
     (push-mark (point) t t)
     (setq mark-active t)
     (goto-char (- (point) 3))
-    (delete-forward-char 1)
+    (funcall-interactively 'delete-forward-char 1)
     (undo-boundary)
 
     (insert "bbb")
@@ -436,6 +438,100 @@ Demonstrates bug 16818."
     (undo-boundary)
 
     (should (string= (buffer-string) "aaaFirst line\nSecond line\nbbb"))))
+
+(ert-deftest undo-test-combine-change-calls-1 ()
+  "Test how `combine-change-calls' updates `buffer-undo-list'.
+Case 1: a file-visiting buffer with `buffer-undo-list' non-nil
+and `buffer-modified-p' non-nil when `combine-change-calls' is
+called."
+  (ert-with-temp-file tempfile
+    (with-current-buffer (find-file tempfile)
+      (insert "A")
+      (undo-boundary)
+      (insert "B")
+      (undo-boundary)
+      (insert "C")
+      (undo-boundary)
+      (insert " ")
+      (undo-boundary)
+      (insert "D")
+      (undo-boundary)
+      (insert "E")
+      (undo-boundary)
+      (insert "F")
+      (should (= (length buffer-undo-list) 14))
+      (goto-char (point-min))
+      (combine-change-calls (point-min) (point-max)
+        (re-search-forward "ABC ")
+        (replace-match "Z "))
+      (should (= (length buffer-undo-list) 15)))))
+
+(ert-deftest undo-test-combine-change-calls-2 ()
+  "Test how `combine-change-calls' updates `buffer-undo-list'.
+Case 2: a file-visiting buffer with `buffer-undo-list' non-nil
+and `buffer-modified-p' nil when `combine-change-calls' is
+called."
+  (ert-with-temp-file tempfile
+    (with-current-buffer (find-file tempfile)
+      (insert "A")
+      (undo-boundary)
+      (insert "B")
+      (undo-boundary)
+      (insert "C")
+      (undo-boundary)
+      (insert " ")
+      (undo-boundary)
+      (insert "D")
+      (undo-boundary)
+      (insert "E")
+      (undo-boundary)
+      (insert "F")
+      (should (= (length buffer-undo-list) 14))
+      (save-buffer)
+      (goto-char (point-min))
+      (combine-change-calls (point-min) (point-max)
+        (re-search-forward "ABC ")
+        (replace-match "Z "))
+      (should (= (length buffer-undo-list) 15)))))
+
+(ert-deftest undo-test-combine-change-calls-3 ()
+  "Test how `combine-change-calls' updates `buffer-undo-list'.
+Case 3: a file-visiting buffer with `buffer-undo-list' nil and
+`buffer-modified-p' nil when `combine-change-calls' is called."
+  (ert-with-temp-file tempfile
+    (with-current-buffer (find-file tempfile)
+      (insert "ABC DEF")
+      (save-buffer)
+      (kill-buffer))
+    (with-current-buffer (find-file tempfile)
+      (should (= (length buffer-undo-list) 0))
+      (goto-char (point-min))
+      (combine-change-calls (point-min) (point-max)
+        (re-search-forward "ABC ")
+        (replace-match "Z "))
+      (should (= (length buffer-undo-list) 1)))))
+
+(ert-deftest undo-test-combine-change-calls-4 ()
+  "Test `combine-change-calls' in combination with undo-in-region."
+  (with-temp-buffer
+    (buffer-enable-undo)
+    (dolist (s '("A" "B" "C" "D"))
+      (insert s)
+      (undo-boundary))
+    (combine-change-calls (point-min) (point-max)
+      (goto-char (point-min))
+      (while (re-search-forward "[BD]" nil t)
+        (delete-char -1)
+        (insert "xy")))
+    (goto-char (point-min))
+    (insert "<")
+    (goto-char (point-max))
+    (insert ">")
+    (undo-boundary)
+    (should (equal (buffer-string) "<AxyCxy>"))
+    (undo-tests--mark-region 2 8)
+    (undo)
+    (should (equal (buffer-string) "<ABCD>"))))
 
 (defun undo-test-all (&optional interactive)
   "Run all tests for \\[undo]."
@@ -452,19 +548,102 @@ Demonstrates bug 25599."
     (insert ";; aaaaaaaaa
 ;; bbbbbbbb")
     (let ((overlay-modified
-           (lambda (ov after-p _beg _end &optional length)
+           (lambda (ov after-p _beg _end &optional _length)
              (unless after-p
                (when (overlay-buffer ov)
                  (delete-overlay ov))))))
       (save-excursion
         (goto-char (point-min))
-        (let ((ov (make-overlay (line-beginning-position 2)
-                                (line-end-position 2))))
+        (let ((ov (make-overlay (pos-bol 2) (pos-eol 2))))
           (overlay-put ov 'insert-in-front-hooks
                        (list overlay-modified)))))
-    (kill-region (point-min) (line-beginning-position 2))
+    (kill-region (point-min) (pos-bol 2))
     (undo-boundary)
     (undo)))
+
+(defun undo-tests--mark-region (beg end)
+  (transient-mark-mode 1)
+  (goto-char beg)
+  (push-mark (point) t t)
+  (setq mark-active t)
+  (goto-char end))
+
+(defun undo-tests--selective-apply (fun)
+  (with-temp-buffer
+    (buffer-enable-undo)
+    (insert "1234567")
+    (undo-boundary)
+    (goto-char 4)
+    (let ((m1 (point-marker))
+          (m2 (point-marker))
+          (l buffer-undo-list))
+      (goto-char 1)
+      (insert "X")
+      (set-marker-insertion-type m2 t)
+      (delete-region 4 7)
+      (goto-char 4)
+      (insert "ABC")
+      (funcall fun l m1 m2)
+      (should (= m1 4))
+      (should (= m2 7))
+
+      (goto-char 3)
+      (insert "abcdef")
+      (should (equal (buffer-string) "X1abcdef2ABC67"))
+      (should (= m1 10))
+      (should (= m2 13))
+      (delete-region 3 4)
+      (should (equal (buffer-string) "X1bcdef2ABC67"))
+      (should (= m1 9))
+      (should (= m2 12))
+
+      (undo-boundary)
+      (undo-tests--mark-region 9 12)
+      (undo)
+
+      (should (equal (buffer-string) "X1bcdef234567"))
+      (should (= (point) 9))
+      (should (= m1 10))
+      (should (= m2 10)))))
+
+(ert-deftest undo-tests-selective-apply-1 ()
+  "Test selective undo without 'apply entries."
+  (undo-tests--selective-apply #'ignore))
+
+(defun undo-tests--undo-delete (beg _end text)
+  (goto-char beg)
+  (insert text)
+  (goto-char beg))
+
+(defun undo-tests--undo-insert (beg end)
+  (delete-region beg end))
+
+(defun undo-tests--adjust-markers (beg end &rest args)
+  (while args
+    (let* ((pair (pop args))
+           (m (car pair))
+           (offset (cdr pair))
+           (insertion-type (< offset 0))
+           (pos (if insertion-type end beg)))
+      (cond ((and (eq (marker-buffer m) (current-buffer))
+                  (eq (marker-insertion-type m) insertion-type)
+                  (= pos m))
+             (set-marker m (+ pos offset)))
+            (t
+             (message "ignoring adjustment: %s %s %s"
+                      beg end pair))))))
+
+(ert-deftest undo-tests-selective-apply-2 ()
+  "Test 'apply entries that emulate delete and insert entries."
+  (undo-tests--selective-apply
+   (lambda (l m1 m2)
+     (setq buffer-undo-list
+           `((apply -3 (4 . 7) undo-tests--undo-insert)
+             (apply 3 (4 . 4) undo-tests--undo-delete "345")
+             (apply 0 (4 . 7) undo-tests--adjust-markers
+                    (,m2 . -2) (,m1 . 1))
+             (apply -1 (1 . 1) undo-tests--undo-insert)
+             . ,l)))))
 
 (provide 'undo-tests)
 ;;; undo-tests.el ends here

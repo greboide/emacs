@@ -1,6 +1,6 @@
 ;;; log-view.el --- Major mode for browsing revision log histories -*- lexical-binding: t -*-
 
-;; Copyright (C) 1999-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1999-2026 Free Software Foundation, Inc.
 
 ;; Author: Stefan Monnier <monnier@iro.umontreal.ca>
 ;; Keywords: tools, vc
@@ -50,7 +50,7 @@
 ;; ------------------------------------------------------------------------
 ;; r4622 | ckuethe | 2007-12-23 18:18:01 -0500 (Sun, 23 Dec 2007) | 2 lines
 ;;
-;; uBlox AEK-4T in binary mode. Added to unstable because it breaks gpsfake
+;; uBlox AEK-4T in binary mode.  Added to unstable because it breaks gpsfake
 ;;
 ;; ------------------------------------------------------------------------
 ;; r4621 | ckuethe | 2007-12-23 16:48:11 -0500 (Sun, 23 Dec 2007) | 3 lines
@@ -110,8 +110,15 @@
 ;;; Code:
 
 (require 'pcvs-util)
+(require 'easy-mmode)
+(require 'log-edit)
 (autoload 'vc-find-revision "vc")
 (autoload 'vc-diff-internal "vc")
+(autoload 'vc--pick-or-revert "vc")
+(autoload 'vc--remove-revisions-from-end "vc")
+(autoload 'vc--prompt-other-working-tree "vc")
+(autoload 'vc-exec-after "vc-dispatcher")
+(eval-when-compile (require 'vc-dispatcher))
 
 (defvar cvs-minor-wrap-function)
 (defvar cvs-force-command)
@@ -121,43 +128,33 @@
   :group 'pcl-cvs
   :prefix "log-view-")
 
-(easy-mmode-defmap log-view-mode-map
-  '(
-    ("-"	. 	negative-argument)
-    ("0"	.	digit-argument)
-    ("1"	.	digit-argument)
-    ("2"	.	digit-argument)
-    ("3"	.	digit-argument)
-    ("4"	.	digit-argument)
-    ("5"	.	digit-argument)
-    ("6"	.	digit-argument)
-    ("7"	.	digit-argument)
-    ("8"	.	digit-argument)
-    ("9"	.	digit-argument)
-
-    ("\C-m" . log-view-toggle-entry-display)
-    ("m" . log-view-toggle-mark-entry)
-    ("e" . log-view-modify-change-comment)
-    ("d" . log-view-diff)
-    ("=" . log-view-diff)
-    ("D" . log-view-diff-changeset)
-    ("a" . log-view-annotate-version)
-    ("f" . log-view-find-revision)
-    ("n" . log-view-msg-next)
-    ("p" . log-view-msg-prev)
-    ("\t" . log-view-msg-next)
-    ([backtab] . log-view-msg-prev)
-    ("N" . log-view-file-next)
-    ("P" . log-view-file-prev)
-    ("\M-n" . log-view-file-next)
-    ("\M-p" . log-view-file-prev))
-  "Log-View's keymap."
-  :inherit special-mode-map
-  :group 'log-view)
+(defvar-keymap log-view-mode-map
+  "RET" #'log-view-toggle-entry-display
+  "M-RET" #'log-view-display-entry-and-diff
+  "m" #'log-view-mark-entry
+  "u" #'log-view-unmark-entry
+  "U" #'log-view-unmark-all-entries
+  "e" #'log-view-modify-change-comment
+  "d" #'log-view-diff
+  "=" #'log-view-diff
+  "D" #'log-view-diff-changeset
+  "a" #'log-view-annotate-version
+  "f" #'log-view-find-revision
+  "n" #'log-view-msg-next
+  "p" #'log-view-msg-prev
+  "M-n" #'log-view-msg-and-diff-next
+  "M-p" #'log-view-msg-and-diff-prev
+  "w" #'log-view-copy-revision-as-kill
+  "TAB" #'log-view-msg-next
+  "<backtab>" #'log-view-msg-prev
+  "C" #'log-view-cherry-pick
+  "R" #'log-view-revert-or-delete-revisions
+  "x" #'log-view-uncommit-revisions-from-end
+  "X" #'log-view-delete-revisions-from-end)
 
 (easy-menu-define log-view-mode-menu log-view-mode-map
-  "Log-View Display Menu"
-  `("Log-View"
+  "Log-View Display Menu."
+  '("Log-View"
     ;; XXX Do we need menu entries for these?
     ;; ["Quit"  quit-window]
     ;; ["Kill This Buffer"  kill-this-buffer]
@@ -176,14 +173,25 @@
     ["Toggle Details at Point" log-view-toggle-entry-display
      :active log-view-expanded-log-entry-function]
     "-----"
+    ["Cherry-Pick Revision(s)" log-view-cherry-pick
+     :help "Copy changes from revision(s) to a branch"]
+    ["Revert Revision(s)" log-view-revert-or-delete-revisions
+     :help "Undo the effects of old revision(s)"]
+    "-----"
     ["Next Log Entry"  log-view-msg-next
      :help "Go to the next count'th log message"]
     ["Previous Log Entry"  log-view-msg-prev
      :help "Go to the previous count'th log message"]
     ["Next File"  log-view-file-next
-     :help "Go to the next count'th file"]
+     :help "Go to the next count'th file"
+     :active (derived-mode-p 'vc-cvs-log-view-mode
+                             'vc-rcs-log-view-mode
+                             'vc-sccs-log-view-mode)]
     ["Previous File"  log-view-file-prev
-     :help "Go to the previous count'th file"]))
+     :help "Go to the previous count'th file"
+     :active (derived-mode-p 'vc-cvs-log-view-mode
+                             'vc-rcs-log-view-mode
+                             'vc-sccs-log-view-mode)]))
 
 (defvar log-view-mode-hook nil
   "Hook run at the end of `log-view-mode'.")
@@ -196,16 +204,28 @@ If it is nil, `log-view-toggle-entry-display' does nothing.")
 
 (defface log-view-file
   '((((class color) (background light))
-     (:background "grey70" :weight bold))
-    (t (:weight bold)))
+     (:background "grey70" :weight bold :extend t))
+    (((class color) (background dark))
+     (:background "grey20" :weight bold :extend t))
+    (t (:weight bold :extend t)))
   "Face for the file header line in `log-view-mode'."
   :group 'log-view)
 
 (defface log-view-message
   '((((class color) (background light))
-     (:background "grey85"))
-    (t (:weight bold)))
+     (:background "grey85" :extend t))
+    (t (:weight bold :extend t)))
   "Face for the message header line in `log-view-mode'."
+  :group 'log-view)
+
+(defface log-view-commit-body '((t :inherit font-lock-comment-face))
+  "Face for the commit body in `log-view-mode'."
+  :version "28.1")
+
+(defface log-view-marked
+  '((t :inherit log-view-file))
+  "Face for marked log entries in `log-view-mode'."
+  :version "32.1"
   :group 'log-view)
 
 (defvar log-view-file-re
@@ -217,7 +237,7 @@ If it is nil, `log-view-toggle-entry-display' does nothing.")
 The match group number 1 should match the file name itself.")
 
 (defvar log-view-per-file-logs t
-  "Set if to t if the logs are shown one file at a time.")
+  "Set to t if the logs are shown one file at a time.")
 
 (defvar log-view-message-re
   (concat "^\\(?:revision \\(?1:[.0-9]+\\)\\(?:\t.*\\)?" ; RCS and CVS.
@@ -257,16 +277,20 @@ The match group number 1 should match the revision number itself.")
 ;;;; Actual code
 ;;;;
 
+(declare-function project-change-to-matching-directory "project")
+
 ;;;###autoload
 (define-derived-mode log-view-mode special-mode "Log-View"
   "Major mode for browsing CVS log output."
   (setq buffer-read-only t)
-  (set (make-local-variable 'font-lock-defaults) log-view-font-lock-defaults)
-  (set (make-local-variable 'beginning-of-defun-function)
-       'log-view-beginning-of-defun)
-  (set (make-local-variable 'end-of-defun-function)
-       'log-view-end-of-defun)
-  (set (make-local-variable 'cvs-minor-wrap-function) 'log-view-minor-wrap)
+  (setq-local font-lock-defaults log-view-font-lock-defaults)
+  (setq-local beginning-of-defun-function #'log-view-beginning-of-defun)
+  (setq-local end-of-defun-function #'log-view-end-of-defun)
+  (setq-local cvs-minor-wrap-function #'log-view-minor-wrap)
+  (setq-local project-find-matching-buffer-function
+              #'project-change-to-matching-directory)
+  (add-hook 'revert-buffer-restore-functions #'log-view--restore-marks
+            nil t)
   (hack-dir-local-variables-non-file-buffer))
 
 ;;;;
@@ -284,6 +308,20 @@ The match group number 1 should match the revision number itself.")
     (while (not (equal rev (log-view-current-tag)))
       (log-view-msg-next))
     t))
+
+(defun log-view-msg-and-diff-next (count)
+  "Go to next COUNT'th entry, expand it if possible, and show its diff.
+Interactively, COUNT is the numeric prefix argument, and defaults to 1."
+  (interactive "p")
+  (log-view-msg-next count)
+  (log-view-display-entry-and-diff))
+
+(defun log-view-msg-and-diff-prev (count)
+  "Go to previous COUNT'th entry, expand it if possible, and show its diff.
+Interactively, COUNT is the numeric prefix argument, and defaults to 1."
+  (interactive "p")
+  (log-view-msg-next (- count))
+  (log-view-display-entry-and-diff))
 
 ;;;;
 ;;;; Linkage to PCL-CVS (mostly copied from cvs-status.el)
@@ -345,31 +383,108 @@ if POS is omitted or nil, it defaults to point."
 
 (defun log-view-toggle-mark-entry ()
   "Toggle the marked state for the log entry at point.
-Individual log entries can be marked and unmarked.  The marked
-entries are denoted by changing their background color.
-`log-view-get-marked' returns the list of tags for the marked
-log entries."
+See `log-view-mark-entry'."
   (interactive)
   (save-excursion
-    (let* ((entry (log-view-current-entry nil t))
-	   (beg (car entry))
-	   found)
-      (when entry
-	;; Look to see if the current entry is marked.
-	(setq found (get-char-property beg 'log-view-self))
-	(if found
-	    (delete-overlay found)
-	  ;; Create an overlay covering this entry and change its color.
-	  (let* ((end (if (get-text-property beg 'log-view-entry-expanded)
-			  (next-single-property-change beg 'log-view-comment)
-			(log-view-end-of-defun)
-			(point)))
-		 (ov (make-overlay beg end)))
-	    (overlay-put ov 'face 'log-view-file)
-	    ;; This is used to check if the overlay is present.
-	    (overlay-put ov 'log-view-self ov)
-	    (overlay-put ov 'log-view-marked (nth 1 entry))))))))
+    (when-let* ((entry (log-view-current-entry)))
+      (if (get-char-property (car entry) 'log-view-self)
+          (log-view-unmark-entry 1)
+        (log-view-mark-entry 1)))))
 
+(defun log-view--mark-unmark (mark-unmark-function arg beg end)
+  "Call MARK-UNMARK-FUNCTION on each line of an active region or ARG times.
+MARK-UNMARK-FUNCTION should end by advancing point to the next line to
+be processed.
+The last line of an active region is excluded in the case that the
+region ends right at the beginning of the line, or after only non-word
+characters."
+  (when (xor beg end)
+    (error "log-view--mark-unmark called with invalid arguments"))
+  (if (and beg end)
+      (let ((processed-line nil)
+            ;; Exclude the region's last line if the region ends right
+            ;; at the beginning of that line or almost at the beginning.
+            ;; This is like the `file' value of `dired-mark-region'.
+            ;; We don't want to include the last line unless the region
+            ;; visually includes that revision.
+            (lastl (save-excursion
+                     (goto-char end)
+                     (skip-syntax-backward "^w")
+                     (if (bolp)
+                         (1- (line-number-at-pos))
+                       (line-number-at-pos)))))
+        (save-excursion
+          (goto-char beg)
+          (while-let ((n (line-number-at-pos))
+                      ;; Make sure we don't get stuck processing the
+                      ;; same line infinitely.
+                      ((<= (line-number-at-pos) lastl))
+                      ((not (eq processed-line n))))
+            (setq processed-line n)
+            (funcall mark-unmark-function)))
+        (setq deactivate-mark t))
+    (dotimes (_ arg)
+      (funcall mark-unmark-function))))
+
+(defun log-view-mark-entry (arg &optional beg end)
+  "Mark the log entry at point.
+If the region is active in Transient Mark mode, mark all entries.
+When called with a prefix argument, mark that many log entries.
+When called from Lisp, mark ARG entries or all entries lying between BEG
+and END.  If BEG and END are supplied, ARG is ignored.
+
+When entries are marked, some commands that usually operate on the entry
+at point will instead operate on all marked entries.
+Use \\[log-view-unmark-entry] to unmark an entry.
+
+Lisp programs can use `log-view-get-marked' to obtain a list of all
+marked revisions."
+  (interactive "p\nR")
+  (log-view--mark-unmark #'log-view--mark-entry arg beg end))
+
+(defun log-view--mark-entry ()
+  "Mark the log entry at point."
+  (when-let* ((entry (log-view-current-entry))
+	      (beg (car entry)))
+    (save-excursion
+      (goto-char beg)
+      (unless (get-char-property beg 'log-view-self)
+        (let* ((end (if (get-text-property beg 'log-view-entry-expanded)
+			(next-single-property-change beg 'log-view-comment)
+		      (log-view-end-of-defun)
+		      (point)))
+	       (ov (make-overlay beg end)))
+	  (overlay-put ov 'face 'log-view-marked)
+	  ;; This is used to check if the overlay is present.
+	  (overlay-put ov 'log-view-self ov)
+	  (overlay-put ov 'log-view-marked (nth 1 entry)))))
+    (log-view-msg-next 1)))
+
+(defun log-view-unmark-entry (arg &optional beg end)
+  "Unmark the log entry at point.
+If the region is active in Transient Mark mode, unmark all entries.
+When called with a prefix argument, unmark that many log entries.
+When called from Lisp, mark ARG entries or all entries lying between BEG
+and END.  If BEG and END are supplied, ARG is ignored.
+
+See `log-view-mark-entry'."
+  (interactive "p\nR")
+  (log-view--mark-unmark #'log-view--unmark-entry arg beg end))
+
+(defun log-view--unmark-entry ()
+  "Unmark the log entry at point."
+  (when-let* ((entry (log-view-current-entry)))
+    (when-let* ((found (get-char-property (car entry) 'log-view-self)))
+      (delete-overlay found))
+    (log-view-msg-next 1)))
+
+(defun log-view-unmark-all-entries ()
+  "Unmark all marked log entries in this buffer."
+  (interactive)
+  (log-view--mark-unmark #'log-view--unmark-entry
+                         nil (point-min) (point-max)))
+
+;;;###autoload
 (defun log-view-get-marked ()
   "Return the list of tags for the marked log entries."
   (save-excursion
@@ -381,9 +496,24 @@ log entries."
 	  (setq pos (overlay-end ov))))
       marked-list)))
 
+(defun log-view--restore-marks ()
+  "Return a function to restore log entry marks after `revert-buffer'.
+Added to `revert-buffer-restore-functions' by Log View mode."
+  (let ((table (make-hash-table :test #'equal)))
+    (dolist (mark (log-view-get-marked))
+      (puthash mark t table))
+    (lambda ()
+      (vc-run-delayed
+        (log-view--mark-unmark (lambda ()
+                                 (if (gethash (log-view-current-tag) table)
+                                     (log-view--mark-entry)
+                                   (log-view-msg-next 1)))
+                               nil (point-min) (point-max))))))
+
 (defun log-view-toggle-entry-display ()
   "If possible, expand the current Log View entry.
-This calls `log-view-expanded-log-entry-function' to do the work."
+This calls `log-view-expanded-log-entry-function' to do the work.
+See also `log-view-display-entry-and-diff'."
   (interactive)
   ;; Don't do anything unless `log-view-expanded-log-entry-function'
   ;; is defined in this mode.
@@ -391,7 +521,8 @@ This calls `log-view-expanded-log-entry-function' to do the work."
     (let* ((opoint (point))
 	   (entry (log-view-current-entry nil t))
 	   (beg (car entry))
-	   (buffer-read-only nil))
+           (inhibit-read-only t)
+	   deactivate-mark)
       (when entry
 	(if (get-text-property beg 'log-view-entry-expanded)
 	    ;; If the entry is expanded, collapse it.
@@ -415,8 +546,22 @@ This calls `log-view-expanded-log-entry-function' to do the work."
 	      (insert long-entry "\n")
 	      (add-text-properties
 	       beg (point)
-	       '(font-lock-face font-lock-comment-face log-view-comment t))
+	       '(font-lock-face log-view-commit-body log-view-comment t))
 	      (goto-char opoint))))))))
+
+(defun log-view-display-entry-and-diff ()
+  "Expand current Log View entry, if possible, and also display its diff.
+If the current Log View entry is already expanded, only display its
+diff; this command never collapses entries.
+In contrast with `log-view-diff-changeset', the window displaying the
+diff is not selected.
+See also `log-view-toggle-entry-display'."
+  (interactive)
+  (when-let* ((beg (car (log-view-current-entry))))
+    (unless (get-text-property beg 'log-view-entry-expanded)
+      (log-view-toggle-entry-display)))
+  (save-selected-window
+    (log-view-diff (point) (point))))
 
 (defun log-view-beginning-of-defun (&optional arg)
   "Move backward to the beginning of a Log View entry.
@@ -426,28 +571,27 @@ to the beginning of the ARGth following entry.
 This is Log View mode's default `beginning-of-defun-function'.
 It assumes that a log entry starts with a line matching
 `log-view-message-re'."
-  (when (null arg) (setf arg 1))
-  (if (< arg 0)
+  (when (null arg) (setq arg 1))
+  (if (minusp arg)
       ;; In log view, the end of one defun is the beginning of the
       ;; next, so punting to log-view-end-of-defun is safe in this
       ;; context.
       (log-view-end-of-defun (- arg))
     (let ((found t))
-      (while (> arg 0)
-        (setf arg (1- arg))
+      (while (plusp arg)
+        (decf arg)
         (let ((cur-start (log-view-current-entry)))
-          (setf found
-                (cond ((null cur-start)
-                       (goto-char (point-min))
-                       nil)
-                      ((>= (car cur-start) (point))
-                       (unless (bobp)
-                         (forward-line -1)
-                         (setf arg (1+ arg)))
-                       nil)
-                      (t
-                       (goto-char (car cur-start))
-                       t)))))
+          (setq found (cond ((null cur-start)
+                             (goto-char (point-min))
+                             nil)
+                            ((>= (car cur-start) (point))
+                             (unless (bobp)
+                               (forward-line -1)
+                               (incf arg))
+                             nil)
+                            (t
+                             (goto-char (car cur-start))
+                             t)))))
       found)))
 
 (defun log-view-end-of-defun-1 ()
@@ -463,7 +607,7 @@ It assumes that a log entry starts with a line matching
 	  (goto-char (match-beginning 0))))
        ;; Don't advance past the end buttons inserted by
        ;; `vc-print-log-setup-buttons'.
-       ((looking-back "Show 2X entries    Show unlimited entries"
+       ((looking-back "Show 4X entries    Show unlimited entries"
                       (line-beginning-position))
 	(setq looping nil)
 	(forward-line -1))
@@ -474,12 +618,11 @@ It assumes that a log entry starts with a line matching
 (defun log-view-end-of-defun (&optional arg)
   "Move forward to the next Log View entry.
 Works like `end-of-defun'."
-  (when (null arg) (setf arg 1))
-  (if (< arg 0)
+  (when (null arg) (setq arg 1))
+  (if (minusp arg)
       (log-view-beginning-of-defun (- arg))
     (dotimes (_n arg)
-      (log-view-end-of-defun-1)
-      t)))
+      (log-view-end-of-defun-1))))
 
 (defvar cvs-minor-current-files)
 (defvar cvs-branch-prefix)
@@ -517,14 +660,17 @@ Works like `end-of-defun'."
 If called interactively, visit the version at point."
   (interactive "d")
   (unless log-view-per-file-logs
-    (when (> (length log-view-vc-fileset) 1)
-      (error "Multiple files shown in this buffer, cannot use this command here")))
+    (when (or (> (length log-view-vc-fileset) 1)
+              (null (car log-view-vc-fileset))
+              (file-directory-p (car log-view-vc-fileset)))
+      (user-error "Multiple files shown in this buffer, cannot use this command here")))
   (save-excursion
     (goto-char pos)
     (switch-to-buffer (vc-find-revision (if log-view-per-file-logs
 					    (log-view-current-file)
 					  (car log-view-vc-fileset))
-					(log-view-current-tag)))))
+					(log-view-current-tag)
+                                        log-view-vc-backend))))
 
 
 (defun log-view-extract-comment ()
@@ -550,29 +696,272 @@ If called interactively, visit the version at point."
 (defun log-view-modify-change-comment ()
   "Edit the change comment displayed at point."
   (interactive)
-  (vc-modify-change-comment (list (if log-view-per-file-logs
-				      (log-view-current-file)
-				    (car log-view-vc-fileset)))
-			    (log-view-current-tag)
-			    (log-view-extract-comment)))
+  (let* ((files (list (if log-view-per-file-logs
+			  (log-view-current-file)
+		        (car log-view-vc-fileset))))
+         (rev (log-view-current-tag))
+         ;; `log-view-extract-comment' is the legacy code for this; the
+         ;; `get-change-comment' backend action is the new way to do it.
+         ;;
+         ;; FIXME: Eventually the older backends should have
+         ;; implementations of `get-change-comment' because that ought
+         ;; to be more robust than the approach taken by
+         ;; `log-view-extract-comment'.  Then we can delete the latter.
+         ;; See discussion in bug#64055.  --spwhitton
+         ;;
+         ;; FIXME: We should implement backend actions
+         ;; `get-change-comment' and `modify-change-comment' for bzr and
+         ;; Hg, so that this command works for those backends.
+         ;; As discussed in bug#64055, `get-change-comment' is required,
+         ;; and parsing the old comment out of the Log View buffer will
+         ;; not do.  This is because for these backends there are
+         ;; `vc-*-log-switches' variables which can change what gets put
+         ;; in the Log View buffers and break any Lisp parsing attempt.
+         (comment (condition-case _
+                      (vc-call-backend log-view-vc-backend
+                                       'get-change-comment files rev)
+                    (vc-not-supported (log-view-extract-comment)))))
+    (when (memq 'log-edit-insert-message-template log-edit-hook)
+      (let* ((first-newline (string-match "\n" comment))
+             (summary (substring comment 0 first-newline))
+             (rest (and first-newline
+                        (substring comment (1+ first-newline)))))
+        (setq comment
+              ;; As we are part of the VC subsystem I think we are
+              ;; entitled to call a \\`log-edit--' function.
+              ;; --spwhitton
+              (concat (log-edit--make-header-line "Summary" summary)
+                      (if (length> rest 0) rest "\n")))))
+    (vc-modify-change-comment files rev comment)))
 
 (defun log-view-annotate-version (pos)
   "Annotate the version at POS.
 If called interactively, annotate the version at point."
   (interactive "d")
   (unless log-view-per-file-logs
-    (when (> (length log-view-vc-fileset) 1)
-      (error "Multiple files shown in this buffer, cannot use this command here")))
+    (when (or (> (length log-view-vc-fileset) 1)
+              (null (car log-view-vc-fileset))
+              (file-directory-p (car log-view-vc-fileset)))
+      (user-error "Multiple files shown in this buffer, cannot use this command here")))
   (save-excursion
     (goto-char pos)
     (vc-annotate (if log-view-per-file-logs
 		     (log-view-current-file)
 		   (car log-view-vc-fileset))
-		 (log-view-current-tag))))
+		 (log-view-current-tag)
+                 nil nil nil log-view-vc-backend)))
 
-;;
-;; diff
-;;
+;;;;
+;;;; Cherry-picks and reverts
+;;;;
+
+(defvar vc-parent-buffer-name)
+(defvar vc-log-short-style)
+(declare-function vc-print-log-internal "vc")
+
+(defun log-view--pick-or-revert
+    (directory no-comment reverse interactive delete)
+  "Copy changes from revision at point or all marked revisions.
+DIRECTORY is the destination, the root of the target working tree.
+NO-COMMENT non-nil means use the log messages of the revisions
+unmodified, instead of using the backend's default cherry-pick comment
+for that revision.
+NO-COMMENT non-nil with zero or one revisions marked also means don't
+prompt to edit the log message.
+REVERSE non-nil means to undo the effects of the revisions, instead.
+INTERACTIVE and DELETE are passed on to `vc--pick-or-revert', except
+additionally if INTERACTIVE is non-nil and `vc--pick-or-revert' returns
+`deleted', pass `no-confirm' to subsequent calls to that function."
+  (let ((default-directory directory)
+        (marked (log-view-get-marked))
+        (buf (current-buffer)))
+    (if (length> marked 1)
+        (let ((deleted 0))
+          (save-excursion
+            (dolist (rev (if reverse (reverse marked) marked))
+              ;; Unmark each revision *before* copying it.
+              ;; Then if there is a conflict such that a cherry-pick
+              ;; fails, after resolving that conflict and committing the
+              ;; cherry-pick, the right revisions will be marked to
+              ;; resume the original multiple cherry-pick operation.
+              ;; FIXME: This doesn't work so long as the backend
+              ;; functions just give up completely if there is a
+              ;; conflict (which behavior is also a FIXME).  Then in
+              ;; fact the user has to mark the revision again.
+              (log-view-goto-rev rev)
+              (log-view-unmark-entry 1)
+              (cl-case
+                  (vc--pick-or-revert rev reverse interactive delete
+                                      (if no-comment
+                                          (vc-call-backend log-view-vc-backend
+                                                           'get-change-comment
+                                                           nil rev)
+                                        t)
+                                      nil
+                                      log-view-vc-backend)
+                (deleted (incf deleted)
+                         (when interactive
+                           (setq interactive 'no-confirm))))))
+          (let ((new-commits (- (length marked) deleted)))
+            (when (and (plusp new-commits)
+                       (vc-find-backend-function log-view-vc-backend
+                                                 'modify-change-comment))
+              (let (vc-log-short-style)
+                (vc-print-log-internal log-view-vc-backend
+                                       (list default-directory)
+                                       nil nil new-commits))
+              (setq-local vc-log-short-style nil ; For \\`g'.
+                          vc-parent-buffer-name nil)
+              (message (substitute-command-keys "Use \
+\\[log-view-modify-change-comment] to modify any of these messages")))))
+      (let ((rev (or (car marked) (log-view-current-tag))))
+        (vc--pick-or-revert rev reverse interactive delete
+                            (and no-comment
+                                 (vc-call-backend log-view-vc-backend
+                                                  'get-change-comment
+                                                  nil rev))
+                            nil
+                            log-view-vc-backend)))
+    (when (eq (current-buffer) buf)
+      (revert-buffer))))
+
+(defun log-view-cherry-pick (directory &optional no-comment)
+  "Copy changes from revision at point to current branch.
+If there are marked revisions, use those instead of the revision at point.
+
+When called interactively, prompts for the target working tree to which
+to copy the revision(s); the current working tree is the default choice.
+When called from Lisp, DIRECTORY is the root of the target working tree.
+
+When copying a single revision, prompts for editing the log message for
+the new commit, except with optional argument NO-COMMENT non-nil
+(interactively, with a prefix argument).
+When copying multiple revisions, never prompts to edit log messages.
+
+Normally a log message for each new commit is generated by the backend,
+including references to the source commits so that the copy can be
+traced.  With optional argument NO-COMMENT non-nil (interactively, with
+a prefix argument), use the log messages from the source revisions
+unmodified.
+
+See also `vc-cherry-pick'."
+  (interactive
+   (list (vc--prompt-other-working-tree log-view-vc-backend
+                                        "Cherry-pick to working tree"
+                                        'allow-empty)
+         current-prefix-arg))
+  (log-view--pick-or-revert directory no-comment nil nil nil))
+
+(defun log-view-revert-or-delete-revisions
+    (directory &optional interactive delete)
+  "Undo the effects of the revision at point.
+When revisions are marked, undo the effects of each of them.
+When called interactively, prompts for the target working tree in which
+to revert; the current working tree is the default choice.
+When called from Lisp, DIRECTORY is the root of the target working tree.
+
+When called interactively (or with optional argument INTERACTIVE
+non-nil), then if the underlying VCS is distributed, offer to entirely
+delete revisions that have not been pushed.
+This is instead of creating new commits undoing their effects.
+
+With a prefix argument (or with optional argument DELETE non-nil),
+always delete revisions and never create new commits.
+In this case INTERACTIVE is ignored.
+This works only for unpublished commits, unless you have customized
+`vc-allow-rewriting-published-history' to a non-nil value.
+
+When reverting a single revision, prompts for editing the log message
+for the new commit.
+When reverting multiple revisions, never prompts to edit log messages.
+
+See also `vc-revert-or-delete-revision'."
+  (interactive (list (vc--prompt-other-working-tree
+                      (vc-responsible-backend default-directory)
+                      (if current-prefix-arg "Delete in working tree"
+                        "Revert in working tree")
+                      'allow-empty)
+                     t current-prefix-arg))
+  (log-view--pick-or-revert directory nil t interactive delete))
+
+(defun log-view-uncommit-revisions-from-end ()
+  "Uncommit revisions newer than the revision at point.
+The revision at point must be on the current branch.  The newer
+revisions are deleted from the revision history but the changes made by
+those revisions to files in the working tree are not undone.
+
+To delete revisions from the revision history and also undo the changes
+in the working tree, see `log-edit-delete-revisions-from-end'."
+  (interactive)
+  (vc--remove-revisions-from-end (log-view-current-tag)
+                                 nil t log-view-vc-backend)
+  (revert-buffer))
+
+(defun log-view-delete-revisions-from-end (&optional discard)
+  "Delete revisions newer than the revision at point.
+The revision at point must be on the current branch.  The newer
+revisions are deleted from the revision history and the changes made by
+those revisions to files in the working tree are undone.
+If the are uncommitted changes, prompts to discard them.
+With a prefix argument (when called from Lisp, with optional argument
+DISCARD non-nil), discard any uncommitted changes without prompting.
+
+To delete revisions from the revision history without undoing the
+changes in the working tree, see `log-edit-uncommit-revisions-from-end'."
+  (interactive "P")
+  (vc--remove-revisions-from-end (log-view-current-tag)
+                                 (if discard 'discard t)
+                                 t log-view-vc-backend)
+  (revert-buffer))
+
+;; These are left unbound by default.  A user who doesn't like the DWIM
+;; behavior of `log-view-revert-or-delete-revisions' can unbind that and
+;; bind these two commands instead.
+
+(defun log-view-revert-revisions (directory)
+  "Make a commit undoing the effects of the revision at point.
+When revisions are marked, make such a commit for each of them.
+When called interactively, prompts for the target working tree in which
+to make new commits; the current working tree is the default choice.
+When called from Lisp, DIRECTORY is the root of the target working tree.
+
+This is like `log-view-revert-or-delete-revisions' except that it only
+ever makes new commits undoing the effects of revisions, instead of
+considering VCS-specific alternative mechanisms to undo the effects of
+revisions.
+
+When reverting a single revision, prompts for editing the log message
+for the new commit.
+When reverting multiple revisions, never prompts to edit log messages.
+
+See also `vc-revert-revision'."
+  (interactive (list (vc--prompt-other-working-tree
+                      (vc-responsible-backend default-directory)
+                      "Revert in working tree"
+                      'allow-empty)))
+  (log-view--pick-or-revert directory nil t nil 'never))
+
+(defun log-view-delete-revisions (directory)
+  "Delete the revision at point from the revision history.
+When revisions are marked, delete all of them.
+When called interactively, prompts for the target working tree in which
+to delete revisions; the current working tree is the default choice.
+When called from Lisp, DIRECTORY is the root of the target working tree.
+
+This works only for unpublished commits, unless you have customized
+`vc-allow-rewriting-published-history' to a non-nil value.
+
+This is the same as `log-view-revert-or-delete-revisions' invoked
+interactively with a prefix argument.  See also `vc-delete-revision'."
+  (interactive (list (vc--prompt-other-working-tree
+                      (vc-responsible-backend default-directory)
+                      "Delete in working tree"
+                      'allow-empty)))
+  (log-view--pick-or-revert directory nil t nil t))
+
+;;;;
+;;;; diff
+;;;;
 
 (defun log-view-diff (beg end)
   "Get the diff between two revisions.
@@ -608,28 +997,45 @@ considered file(s)."
     (log-view-diff-common beg end t)))
 
 (defun log-view-diff-common (beg end &optional whole-changeset)
+  (defvar vc-allow-async-diff)
   (let* ((to (log-view-current-tag beg))
          (fr-entry (log-view-current-entry end))
          (fr (cadr fr-entry)))
     ;; When TO and FR are the same, or when point is on a line after
     ;; the last entry, look at the previous revision.
     (when (or (string-equal fr to)
-              (>= (point)
+              (>= end
                   (save-excursion
-                    (goto-char (car fr-entry))
-                    (forward-line))))
+                    (goto-char end)
+                    (log-view-end-of-defun)
+                    (point))))
       (setq fr (vc-call-backend log-view-vc-backend 'previous-revision nil fr)))
     (vc-diff-internal
-     t (list log-view-vc-backend
-             ;; The value passed here should follow what
-             ;; `vc-deduce-fileset' returns.  If we want to see the
-             ;; diff for all the files in the changeset, pass NIL for
-             ;; the file list.
-             (unless whole-changeset
-               (if log-view-per-file-logs
-                   (list (log-view-current-file))
-                 log-view-vc-fileset)))
+     vc-allow-async-diff
+     (list log-view-vc-backend
+           ;; The value passed here should follow what
+           ;; `vc-deduce-fileset' returns.  If we want to see the
+           ;; diff for all the files in the changeset, pass NIL for
+           ;; the file list.
+           (unless whole-changeset
+             (if log-view-per-file-logs
+                 (list (log-view-current-file))
+               log-view-vc-fileset)))
      fr to)))
+
+(defun log-view-copy-revision-as-kill ()
+  "Copy the ID of the revision at point to the kill ring.
+If there are marked revisions, copy the IDs of those, separated by spaces."
+  (interactive)
+  (let ((revisions (log-view-get-marked)))
+    (if (length> revisions 1)
+        (let ((found (string-join revisions " ")))
+          (kill-new found)
+          (message "%s" found))
+      (if-let* ((rev (or (car revisions) (log-view-current-tag))))
+          (progn (kill-new rev)
+                 (message "%s" rev))
+        (user-error "No revision at point")))))
 
 (provide 'log-view)
 

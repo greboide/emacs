@@ -1,10 +1,8 @@
 ;;; info-look.el --- major-mode-sensitive Info index lookup facility -*- lexical-binding: t -*-
-;; An older version of this was known as libc.el.
 
-;; Copyright (C) 1995-1999, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1995-1999, 2001-2026 Free Software Foundation, Inc.
 
-;; Author: Ralph Schleicher <rs@nunatak.allgaeu.org>
-;;         (did not show signs of life (Nov 2001)  -stef)
+;; Author: Ralph Schleicher <rs@ralph-schleicher.de>
 ;; Keywords: help languages
 
 ;; This file is part of GNU Emacs.
@@ -29,11 +27,11 @@
 
 ;; Some additional sources of (Tex)info files for non-GNU packages:
 ;;
-;; Scheme: <URL:http://groups.csail.mit.edu/mac/ftpdir/scm/r5rs.info.tar.gz>
-;; LaTeX:
-;;  <URL:http://ctan.tug.org/tex-archive/info/latex2e-help-texinfo/latex2e.texi>
+;; Scheme: https://groups.csail.mit.edu/mac/ftpdir/scm/r5rs.info.tar.gz
+;; LaTeX: https://mirrors.ctan.org/info/latex2e-help-texinfo/latex2e.texi
 ;;  (or CTAN mirrors)
-;; Perl: <URL:http://ftp.cpan.org/pub/CPAN/doc/manual/texinfo/> (or CPAN mirrors)
+;; Python: https://www.python.org/ftp/python/doc/
+;; SICP: https://github.com/webframp/sicp-info
 
 ;; Traditionally, makeinfo quoted `like this', but version 5 and later
 ;; quotes 'like this' or ‘like this’.  Doc specs with patterns
@@ -44,25 +42,24 @@
 
 (require 'info)
 (eval-when-compile (require 'subr-x))
+(eval-when-compile (require 'cl-lib))
 
 (defgroup info-lookup nil
   "Major mode sensitive help agent."
   :group 'help :group 'languages)
 
-(defvar info-lookup-mode nil
+(defvar-local info-lookup-mode nil
   "Symbol of the current buffer's help mode.
-Help is provided according to the buffer's major mode if value is nil.
-Automatically becomes buffer local when set in any fashion.")
-(make-variable-buffer-local 'info-lookup-mode)
+Help is provided according to the buffer's major mode if value is nil.")
 
 (defcustom info-lookup-other-window-flag t
-  "Non-nil means pop up the Info buffer in another window."
-  :group 'info-lookup :type 'boolean)
+ "Non-nil means pop up the Info buffer in another window."
+ :type 'boolean)
 
 (defcustom info-lookup-highlight-face 'match
   "Face for highlighting looked up help items.
 Setting this variable to nil disables highlighting."
-  :group 'info-lookup :type 'face)
+  :type 'face)
 
 (defvar info-lookup-highlight-overlay nil
   "Overlay object used for highlighting.")
@@ -76,7 +73,7 @@ List elements are cons cells of the form
 
 If a file name matches REGEXP, then use help mode MODE instead of the
 buffer's major mode."
-  :group 'info-lookup :type '(repeat (cons (string :tag "Regexp")
+  :type '(repeat (cons (regexp :tag "Regexp")
 					   (symbol :tag "Mode"))))
 
 (defvar info-lookup-history nil
@@ -94,7 +91,10 @@ HELP-DATA is a HELP-TOPIC's public data set.
 
     (HELP-MODE REGEXP IGNORE-CASE DOC-SPEC PARSE-RULE OTHER-MODES)
 
-HELP-MODE is a mode's symbol.
+HELP-MODE is either a mode's symbol, or a cons cell of the
+form (HELP-MODE . SYMBOL-PREFIX), where SYMBOL-PREFIX is the
+prefix (the part up to the first dash) of names of symbols whose
+documentation is specified by DOC-SPEC.
 REGEXP is a regular expression matching those help items whose
  documentation can be looked up via DOC-SPEC.
 IGNORE-CASE is non-nil if help items are case insensitive.
@@ -124,6 +124,15 @@ OTHER-MODES is a list of cross references to other help modes.")
 (defsubst info-lookup->mode-value (topic mode)
   (assoc mode (info-lookup->topic-value topic)))
 
+(defun info-lookup--expand-info (info)
+  ;; We have a dynamic doc-spec function.
+  (when (and (null (nth 3 info))
+             (nth 6 info)
+             (functionp (nth 6 info)))
+    (setf (nth 3 info) (funcall (nth 6 info))
+          (nth 6 info) nil))
+  info)
+
 (defsubst info-lookup->regexp (topic mode)
   (nth 1 (info-lookup->mode-value topic mode)))
 
@@ -146,23 +155,30 @@ Function arguments are specified as keyword/argument pairs:
     (KEYWORD . ARGUMENT)
 
 KEYWORD is either `:topic', `:mode', `:regexp', `:ignore-case',
- `:doc-spec', `:parse-rule', or `:other-modes'.
-ARGUMENT has a value as explained in the documentation of the
- variable `info-lookup-alist'.
+ `:doc-spec', `:parse-rule', `:other-modes' or `:doc-spec-function'.
+  `:doc-spec-function' is used to compute a `:doc-spec', but instead of
+  doing so at load time, this is done when the user asks for info on
+  the mode in question.
+
+ARGUMENT is the value corresponding to KEYWORD.  The meaning of the values
+is explained in the documentation of the variable `info-lookup-alist': for
+example, the value corresponding to `:topic' is documented as HELP-TOPIC,
+the value of `:mode' as HELP-MODE, etc..
 
 If no topic or mode option has been specified, then the help topic defaults
 to `symbol', and the help mode defaults to the current major mode."
-  (apply 'info-lookup-add-help* nil arg))
+  (apply #'info-lookup-add-help* nil arg))
 
 (defun info-lookup-maybe-add-help (&rest arg)
   "Add a help specification if none is defined.
 See the documentation of the function `info-lookup-add-help'
 for more details."
-  (apply 'info-lookup-add-help* t arg))
+  (apply #'info-lookup-add-help* t arg))
 
 (defun info-lookup-add-help* (maybe &rest arg)
   (let (topic mode regexp ignore-case doc-spec
-	      parse-rule other-modes keyword value)
+	      parse-rule other-modes keyword value
+              doc-spec-function)
     (setq topic 'symbol
 	  mode major-mode
 	  regexp "\\w+")
@@ -185,6 +201,8 @@ for more details."
 	     (setq ignore-case value))
 	    ((eq keyword :doc-spec)
 	     (setq doc-spec value))
+	    ((eq keyword :doc-spec-function)
+	     (setq doc-spec-function value))
 	    ((eq keyword :parse-rule)
 	     (setq parse-rule value))
 	    ((eq keyword :other-modes)
@@ -192,7 +210,8 @@ for more details."
 	    (t
 	     (error "Unknown keyword \"%S\"" keyword))))
     (or (and maybe (info-lookup->mode-value topic mode))
-	(let* ((data (list regexp ignore-case doc-spec parse-rule other-modes))
+	(let* ((data (list regexp ignore-case doc-spec parse-rule other-modes
+                           doc-spec-function))
 	       (topic-cell (or (assoc topic info-lookup-alist)
 			       (car (setq info-lookup-alist
 					  (cons (cons topic nil)
@@ -259,48 +278,67 @@ system."
 
 ;;;###autoload (put 'info-lookup-symbol 'info-file "emacs")
 ;;;###autoload
-(defun info-lookup-symbol (symbol &optional mode)
-  "Display the definition of SYMBOL, as found in the relevant manual.
-When this command is called interactively, it reads SYMBOL from the
-minibuffer.  In the minibuffer, use M-n to yank the default argument
-value into the minibuffer so you can edit it.  The default symbol is the
-one found at point.
+(defun info-lookup-symbol (symbol &optional mode same-window)
+  "Look up and display documentation of SYMBOL in the relevant Info manual.
+SYMBOL should be an identifier: a function or method, a macro, a variable,
+a data type, a class, etc.
 
-With prefix arg MODE a query for the symbol help mode is offered."
+Interactively, prompt for SYMBOL; you can use \\<minibuffer-local-completion-map>\\[next-history-element] in the minibuffer
+to yank the default argument value into the minibuffer so you can edit it.
+The default symbol is the one found at point.
+
+MODE is the major mode whose Info manuals to search for the documentation
+of SYMBOL.  It defaults to the current buffer's `major-mode'; if that
+mode doesn't have any Info manuals known to Emacs, the command will
+prompt for MODE to use, with completion.  With prefix arg, the command
+always prompts for MODE.
+
+Is SAME-WINDOW, try to reuse the current window instead of
+popping up a new one."
   (interactive
    (info-lookup-interactive-arguments 'symbol current-prefix-arg))
-  (info-lookup 'symbol symbol mode))
+  (info-lookup 'symbol symbol mode same-window))
 
 ;;;###autoload (put 'info-lookup-file 'info-file "emacs")
 ;;;###autoload
 (defun info-lookup-file (file &optional mode)
-  "Display the documentation of a file.
-When this command is called interactively, it reads FILE from the minibuffer.
-In the minibuffer, use M-n to yank the default file name
-into the minibuffer so you can edit it.
+  "Look up and display documentation of FILE in the relevant Info manual.
+FILE should be the name of a file; a notable example is a standard header
+file that is part of the C or C++ standard library.
+
+Interactively, prompt for FILE; you can use \\<minibuffer-local-completion-map>\\[next-history-element] in the minibuffer
+to yank the default argument value into the minibuffer so you can edit it.
 The default file name is the one found at point.
 
-With prefix arg MODE a query for the file help mode is offered."
+MODE is the major mode whose Info manuals to search for the documentation
+of FILE.  It defaults to the current buffer's `major-mode'; if that
+mode doesn't have any Info manuals known to Emacs, the command will
+prompt for MODE to use, with completion.  With prefix arg, the command
+always prompts for MODE."
   (interactive
    (info-lookup-interactive-arguments 'file current-prefix-arg))
   (info-lookup 'file file mode))
 
 (defun info-lookup-interactive-arguments (topic &optional query)
-  "Read and return argument value (and help mode) for help topic TOPIC.
+  "Read and return argument value (and help mode) for help TOPIC.
+TOPIC should be any known symbol of a help topic, such as `file'
+or `symbol'.  See the documentation of HELP-TOPIC in the doc
+string of `info-lookup-alist'.
 If optional argument QUERY is non-nil, query for the help mode."
   (let* ((mode (cond (query
 		      (info-lookup-change-mode topic))
-		     ((info-lookup->mode-value topic (info-lookup-select-mode))
-		      info-lookup-mode)
+		     ((when-let*
+                          ((info (info-lookup->mode-value
+                                  topic (info-lookup-select-mode))))
+                        (info-lookup--expand-info info))
+                      info-lookup-mode)
 		     ((info-lookup-change-mode topic))))
 	 (completions (info-lookup->completions topic mode))
 	 (default (info-lookup-guess-default topic mode))
 	 (completion-ignore-case (info-lookup->ignore-case topic mode))
 	 (enable-recursive-minibuffers t)
 	 (value (completing-read
-		 (if default
-		     (format "Describe %s (default %s): " topic default)
-		   (format "Describe %s: " topic))
+		 (format-prompt "Describe %s" default topic)
 		 completions nil nil nil 'info-lookup-history default)))
     (list (if (equal value "") default value) mode)))
 
@@ -314,39 +352,62 @@ If optional argument QUERY is non-nil, query for the help mode."
 	(setq file-name-alist (cdr file-name-alist)))))
 
   ;; If major-mode has no setups in info-lookup-alist, under any topic, then
-  ;; search up through derived-mode-parent to find a parent mode which does
-  ;; have some setups.  This means that a `define-derived-mode' with no
+  ;; search up through `derived-mode-all-parents' to find a parent mode which
+  ;; does have some setups.  This means that a `define-derived-mode' with no
   ;; setups of its own will select its parent mode for lookups, if one of
   ;; its parents has some setups.  Good for example on `makefile-gmake-mode'
   ;; and similar derivatives of `makefile-mode'.
   ;;
-  (let ((mode major-mode)) ;; Look for `mode' with some setups.
-    (while (and mode (not info-lookup-mode))
+  (let ((modes (derived-mode-all-parents major-mode))) ;; Look for `mode' with some setups.
+    (while (and modes (not info-lookup-mode))
       (dolist (topic-cell info-lookup-alist) ;; Usually only two topics here.
-        (if (info-lookup->mode-value (car topic-cell) mode)
-            (setq info-lookup-mode mode)))
-      (setq mode (get mode 'derived-mode-parent))))
+        (if (info-lookup->mode-value (car topic-cell) (car modes))
+            (setq info-lookup-mode (car modes))))
+      (setq modes (cdr modes))))
 
   (or info-lookup-mode (setq info-lookup-mode major-mode)))
 
 (defun info-lookup-change-mode (topic)
   (let* ((completions (mapcar (lambda (arg)
-				(cons (symbol-name (car arg)) (car arg)))
+                                (let ((mode-spec (car arg)))
+                                  (and (consp mode-spec)
+                                       (setq mode-spec (car mode-spec)))
+				  (cons (symbol-name mode-spec) mode-spec)))
 			      (info-lookup->topic-value topic)))
 	 (mode (completing-read
-		(format "Use %s help mode: " topic)
+		(format "Major mode whose manuals to search for this %s: "
+                        topic)
 		completions nil t nil 'info-lookup-history)))
     (or (setq mode (cdr (assoc mode completions)))
-	(error "No %s help available" topic))
+	(error "No manuals available for %s" topic))
     (or (info-lookup->mode-value topic mode)
-	(error "No %s help available for `%s'" topic mode))
+	(error "The manuals of `%s' have no %s help" mode topic))
     (setq info-lookup-mode mode)))
 
-(defun info-lookup (topic item mode)
-  "Display the documentation of a help item."
+(defun info-lookup--item-to-mode (item mode)
+  (let ((spec (cons mode (car (split-string (if (stringp item)
+                                                item
+                                              (symbol-name item))
+                                            "-")))))
+    (if (assoc spec (cdr (assq 'symbol info-lookup-alist)))
+        spec
+      mode)))
+
+(defun info-lookup (topic item mode &optional same-window)
+  "Display the documentation of TOPIC whose name is ITEM, using MODE's manuals.
+TOPIC should be any known symbol of a help topic type, such as `file'
+or `symbol'.  See the documentation of HELP-TOPIC in the doc
+string of `info-lookup-alist'.
+ITEM is the item whose documentation to search: file name if
+TOPIC is `file', a symbol if TOPIC is `symbol', etc.
+MODE is the `major-mode' whose Info manuals to search for documentation
+of ITEM; if it's nil, the function uses `info-lookup-file-name-alist'
+and the current buffer's file name to guess the mode.
+
+If SAME-WINDOW, reuse the current window.  If nil, pop to a
+different window."
   (or mode (setq mode (info-lookup-select-mode)))
-  (or (info-lookup->mode-value topic mode)
-      (error "No %s help available for `%s'" topic mode))
+  (setq mode (info-lookup--item-to-mode item mode))
   (let* ((completions (info-lookup->completions topic mode))
          (ignore-case (info-lookup->ignore-case topic mode))
          (entry (or (assoc (if ignore-case (downcase item) item) completions)
@@ -367,19 +428,21 @@ If optional argument QUERY is non-nil, query for the help mode."
       (if (not info-lookup-other-window-flag)
 	  (info)
 	(save-window-excursion (info))
-	(let* ((info-window (get-buffer-window "*info*" t))
-	       (info-frame (and info-window (window-frame info-window))))
-	  (if (and info-frame
-		   (not (eq info-frame (selected-frame)))
-		   (display-multi-frame-p)
-		   (memq info-frame (frames-on-display-list)))
-	      ;; *info* is visible in another frame on same display.
-	      ;; Raise that frame and select the window.
-	      (progn
-		(select-window info-window)
-		(raise-frame info-frame))
-	    ;; In any other case, switch to *info* in another window.
-	    (switch-to-buffer-other-window "*info*")))))
+        (if same-window
+            (pop-to-buffer-same-window "*info*")
+	  (let* ((info-window (get-buffer-window "*info*" t))
+	         (info-frame (and info-window (window-frame info-window))))
+	    (if (and info-frame
+		     (not (eq info-frame (selected-frame)))
+		     (display-multi-frame-p)
+		     (memq info-frame (frames-on-display-list)))
+	        ;; *info* is visible in another frame on same display.
+	        ;; Raise that frame and select the window.
+	        (progn
+		  (select-window info-window)
+		  (raise-frame info-frame))
+	      ;; In any other case, switch to *info* another window.
+	      (switch-to-buffer-other-window "*info*"))))))
     (while (and (not found) modes)
       (setq doc-spec (info-lookup->doc-spec topic (car modes)))
       (while (and (not found) doc-spec)
@@ -464,7 +527,7 @@ If optional argument QUERY is non-nil, query for the help mode."
 		(nconc (condition-case nil
 			   (info-lookup-make-completions topic mode)
 			 (error nil))
-		       (apply 'append
+		       (apply #'append
 			      (mapcar (lambda (arg)
 					(info-lookup->completions topic arg))
 				      refer-modes))))
@@ -558,7 +621,7 @@ Return nil if there is nothing appropriate in the buffer near point."
 		  (info-lookup->regexp topic mode)))
 	(start (point)) end regexp subexp result)
     (save-excursion
-      (if (symbolp rule)
+      (if (functionp rule)
 	  (setq result (funcall rule))
 	(if (consp rule)
 	    (setq regexp (car rule)
@@ -611,6 +674,7 @@ Return nil if there is nothing appropriate in the buffer near point."
 
 (defun info-lookup-guess-custom-symbol ()
   "Get symbol at point in custom buffers."
+  (declare (obsolete nil "28.1"))
   (condition-case nil
       (save-excursion
 	(let ((case-fold-search t)
@@ -667,7 +731,11 @@ Return nil if there is nothing appropriate in the buffer near point."
                 (let ((str (string-join str-list " ")))
                   (when (assoc str completions)
                     (throw 'result str))
-                  (nbutlast str-list)))))))
+                  ;; 'nbutlast' will not destructively set its argument
+                  ;; to nil when the argument is a list of 1 element.
+                  (if (= (length str-list) 1)
+                      (setq str-list nil)
+                    (nbutlast str-list))))))))
     (error nil)))
 
 ;;;###autoload
@@ -724,6 +792,8 @@ Return nil if there is nothing appropriate in the buffer near point."
 (defun info-complete (topic mode)
   "Try to complete a help item."
   (barf-if-buffer-read-only)
+  (when-let* ((info (info-lookup->mode-value topic mode)))
+    (info-lookup--expand-info info))
   (let ((data (info-lookup-completions-at-point topic mode)))
     (if (null data)
         (error "No %s completion available for `%s' at point" topic mode)
@@ -799,12 +869,12 @@ Return nil if there is nothing appropriate in the buffer near point."
 (info-lookup-maybe-add-help
  :mode 'texinfo-mode
  :regexp "@\\([a-zA-Z]+\\|[^a-zA-Z]\\)"
- :doc-spec '(("(texinfo)Command and Variable Index"
-	      ;; Ignore Emacs commands and prepend a `@'.
-	      (lambda (item)
-		(if (string-match "^\\([a-zA-Z]+\\|[^a-zA-Z]\\)\\( .*\\)?$" item)
-		    (concat "@" (match-string 1 item))))
-	      "['`‘]" "['’ ]")))
+ :doc-spec `(("(texinfo)Command and Variable Index"
+              ;; Ignore Emacs commands and prepend a `@'.
+              ,(lambda (item)
+                 (if (string-match "^\\([a-zA-Z]+\\|[^a-zA-Z]\\)\\( .*\\)?$" item)
+                     (concat "@" (match-string 1 item))))
+              "['`‘]" "['’ ]")))
 
 (info-lookup-maybe-add-help
  :mode 'm4-mode
@@ -815,31 +885,31 @@ Return nil if there is nothing appropriate in the buffer near point."
 (info-lookup-maybe-add-help
  :mode 'autoconf-mode
  :regexp "A[CM]_[_A-Z0-9]+"
- :doc-spec '(;; Autoconf Macro Index entries are without an "AC_" prefix,
-	     ;; but with "AH_" or "AU_" for those.  So add "AC_" if there
-	     ;; isn't already an "A._".
+ :doc-spec `(;; Autoconf Macro Index entries are without an "AC_" prefix,
+             ;; but with "AH_" or "AU_" for those.  So add "AC_" if there
+             ;; isn't already an "A._".
              ("(autoconf)Autoconf Macro Index"
-              (lambda (item)
-                (if (string-match "^A._" item) item (concat "AC_" item)))
-	      "^[ \t]+-+ \\(Macro\\|Variable\\): .*\\<" "\\>")
+              ,(lambda (item)
+                 (if (string-match "^A._" item) item (concat "AC_" item)))
+              "^[ \t]+-+ \\(Macro\\|Variable\\): .*\\<" "\\>")
              ;; M4 Macro Index entries are without "AS_" prefixes, and
              ;; mostly without "m4_" prefixes.  "dnl" is an exception, not
              ;; wanting any prefix.  So AS_ is added back to upper-case
              ;; names (if needed), m4_ to others which don't already an m4_.
              ("(autoconf)M4 Macro Index"
-              (lambda (item)
-                (let ((case-fold-search nil))
-                  (cond ((or (string-equal item "dnl")
-                             (string-match "^m4_" item)
-                             ;; Autoconf 2.62 index includes some macros
-                             ;; (e.g., AS_HELP_STRING), so avoid prefixing.
-                             (string-match "^AS_" item))
-                         item)
-                        ((string-match "^[A-Z0-9_]+$" item)
-                         (concat "AS_" item))
-                        (t
-                         (concat "m4_" item)))))
-	      "^[ \t]+-+ Macro: .*\\<" "\\>")
+              ,(lambda (item)
+                 (let ((case-fold-search nil))
+                   (cond ((or (string-equal item "dnl")
+                              (string-match "^m4_" item)
+                              ;; Autoconf 2.62 index includes some macros
+                              ;; (e.g., AS_HELP_STRING), so avoid prefixing.
+                              (string-match "^AS_" item))
+                          item)
+                         ((string-match "^[A-Z0-9_]+$" item)
+                          (concat "AS_" item))
+                         (t
+                          (concat "m4_" item)))))
+              "^[ \t]+-+ Macro: .*\\<" "\\>")
              ;; Autotest Macro Index entries are without "AT_".
              ("(autoconf)Autotest Macro Index" "AT_"
 	      "^[ \t]+-+ Macro: .*\\<" "\\>")
@@ -858,62 +928,79 @@ Return nil if there is nothing appropriate in the buffer near point."
 (info-lookup-maybe-add-help
  :mode 'awk-mode
  :regexp "[_a-zA-Z]+"
- :doc-spec '(("(gawk)Index"
-	      (lambda (item)
-		(let ((case-fold-search nil))
-		  (cond
-		   ;; `BEGIN' and `END'.
-		   ((string-match "^\\([A-Z]+\\) special pattern\\b" item)
-		    (match-string 1 item))
-		   ;; `if', `while', `do', ...
-		   ((string-match "^\\([a-z]+\\) statement\\b" item)
-		    (if (not (string-equal (match-string 1 item) "control"))
-			(match-string 1 item)))
-		   ;; `NR', `NF', ...
-		   ((string-match "^[A-Z]+$" item)
-		    item)
-		   ;; Built-in functions (matches to many entries).
-		   ((string-match "^[a-z]+$" item)
-		    item))))
-	      "['`‘]" "\\([ \t]*([^)]*)\\)?['’]")))
+ :doc-spec `(("(gawk)Index"
+              ,(lambda (item)
+                 (let ((case-fold-search nil))
+                   (cond
+                    ;; `BEGIN' and `END'.
+                    ((string-match "^\\([A-Z]+\\) special pattern\\b" item)
+                     (match-string 1 item))
+                    ;; `if', `while', `do', ...
+                    ((string-match "^\\([a-z]+\\) statement\\b" item)
+                     (if (not (string-equal (match-string 1 item) "control"))
+                         (match-string 1 item)))
+                    ;; `NR', `NF', ...
+                    ((string-match "^[A-Z]+$" item)
+                     item)
+                    ;; Built-in functions (matches to many entries).
+                    ((string-match "^[a-z]+$" item)
+                     item))))
+              "['`‘]" "\\([ \t]*([^)]*)\\)?['’]")))
 
 (info-lookup-maybe-add-help
  :mode 'perl-mode
  :regexp "[$@%][^a-zA-Z]\\|\\$\\^[A-Z]\\|[$@%]?[a-zA-Z][_a-zA-Z0-9]*"
- :doc-spec '(("(perl5)Function Index"
-	      (lambda (item)
-		(if (string-match "^\\([a-zA-Z0-9]+\\)" item)
-		    (match-string 1 item)))
-	      "^" "\\b")
-	     ("(perl5)Variable Index"
-	      (lambda (item)
-		;; Work around bad formatted array variables.
-		(let ((sym (cond ((or (string-match "^\\$\\(.\\|@@\\)$" item)
-				      (string-match "^\\$\\^[A-Z]$" item))
-				  item)
-				 ((string-match
-				   "^\\([$%@]\\|@@\\)?[_a-zA-Z0-9]+" item)
-				  (match-string 0 item))
-				 (t ""))))
-		  (if (string-match "@@" sym)
-		      (setq sym (concat (substring sym 0 (match-beginning 0))
-					(substring sym (1- (match-end 0))))))
-		  (if (string-equal sym "") nil sym)))
-	      "^" "\\b"))
+ :doc-spec `(("(perl5)Function Index"
+              ,(lambda (item)
+                 (if (string-match "^\\([a-zA-Z0-9]+\\)" item)
+                     (match-string 1 item)))
+              "^" "\\b")
+             ("(perl5)Variable Index"
+              ,(lambda (item)
+                 ;; Work around bad formatted array variables.
+                 (let ((sym (cond ((or (string-match "^\\$\\(.\\|@@\\)$" item)
+                                       (string-match "^\\$\\^[A-Z]$" item))
+                                   item)
+                                  ((string-match
+                                    "^\\([$%@]\\|@@\\)?[_a-zA-Z0-9]+" item)
+                                   (match-string 0 item))
+                                  (t ""))))
+                   (if (string-match "@@" sym)
+                       (setq sym (concat (substring sym 0 (match-beginning 0))
+                                         (substring sym (1- (match-end 0))))))
+                   (if (string-equal sym "") nil sym)))
+              "^" "\\b"))
  :parse-rule "[$@%]?\\([_a-zA-Z0-9]+\\|[^a-zA-Z]\\)")
 
 (info-lookup-maybe-add-help
- :mode 'cperl-mode
- :regexp "[$@%][^a-zA-Z]\\|\\$\\^[A-Z]\\|[$@%]?[a-zA-Z][_a-zA-Z0-9]*"
- :other-modes '(perl-mode))
+ :mode 'python-mode
+ ;; Debian includes Python info files, but they're version-named
+ ;; instead of having a symlink.
+ :doc-spec-function
+ (lambda ()
+   ;; Python is released annually (PEP 602).
+   (let* ((yy (- (decoded-time-year (decode-time (current-time))) 2000))
+          (manual (cl-loop for version from yy downto 7
+                           for name = (format "python3.%d" version)
+                           if (Info-find-file name t)
+                           return name
+                           finally return "python")))
+     `((,(format "(%s)Index" manual))
+       (,(format "(%s)Python Module Index" manual))))))
+
+(info-lookup-maybe-add-help
+ :mode 'perl-mode
+ :regexp "[$@%][^a-zA-Z]\\|\\$\\^[A-Z]\\|[$@%]?[a-zA-Z][_a-zA-Z0-9]*")
 
 (info-lookup-maybe-add-help
  :mode 'latex-mode
  :regexp "\\\\\\([a-zA-Z]+\\|[^a-zA-Z]\\)"
  :doc-spec `((,(if (Info-find-file "latex2e" t)
-		   ;; From http://home.gna.org/latexrefman
-		   "(latex2e)Command Index"
-		 "(latex)Command Index")
+                   ;; From CTAN's https://ctan.org/pkg/latex2e-help-texinfo
+                   ;; and https://puszcza.gnu.org.ua/projects/latexrefman/
+		   "(latex2e)Index"
+                 ;; From https://savannah.nongnu.org/projects/latex-manual/
+		 "(latex-manual)Command Index")
 	      ;; \frac{NUM}{DEN} etc can have more than one {xx} argument.
 	      ;; \sqrt[ROOT]{num} and others can have square brackets.
 	      nil "[`'‘]" "\\({[^}]*}|\\[[^]]*\\]\\)*['’]")))
@@ -938,6 +1025,76 @@ Return nil if there is nothing appropriate in the buffer near point."
              ("(cl)Function Index"    nil "^ -+ .*: " "\\( \\|$\\)")
              ("(cl)Variable Index"    nil "^ -+ .*: " "\\( \\|$\\)")))
 
+(info-lookup-maybe-add-help
+ :mode 'emacs-lisp-only
+ :regexp "[^][()`'‘’,\" \t\n]+"
+ :doc-spec '(("(elisp)Index"          nil "^ -+ .*: " "\\( \\|$\\)")
+             ("(cl)Function Index"    nil "^ -+ .*: " "\\( \\|$\\)")
+             ("(cl)Variable Index"    nil "^ -+ .*: " "\\( \\|$\\)")))
+
+(mapc
+ (lambda (elem)
+   (let* ((prefix (car elem)))
+     (info-lookup-add-help
+      :mode (cons 'emacs-lisp-mode prefix)
+      :regexp (concat "\\b" prefix "-[^][()`'‘’,\" \t\n]+")
+      :doc-spec (cl-loop for node in (cdr elem)
+                         collect
+                         (list (if (string-match-p "^(" node)
+                                   node
+                                 (format "(%s)%s" prefix node))
+                               nil "^ -+ .*: " "\\( \\|$\\)")))))
+ ;; Below we have a list of prefixes (used to match on symbols in
+ ;; `emacs-lisp-mode') and the nodes where the function/variable
+ ;; indices live.  If the prefix is different than the name of the
+ ;; manual, then the full "(manual)Node" name has to be used.
+ '(("auth" "Function Index" "Variable Index")
+   ("autotype" "Command Index" "Variable Index")
+   ("calc" "Lisp Function Index" "Variable Index")
+   ;;("cc-mode" "Variable Index" "Command and Function Index")
+   ("dbus" "Index")
+   ("ediff" "Index")
+   ("eieio" "Function Index")
+   ("gnutls" "(emacs-gnutls)Variable Index" "(emacs-gnutls)Function Index")
+   ("mm" "(emacs-mime)Index")
+   ("eglot" "Index")
+   ("epa" "Variable Index" "Function Index")
+   ("ert" "Index")
+   ("eshell" "Function and Variable Index")
+   ("eudc" "Index")
+   ("eww" "Variable Index" "Lisp Function Index")
+   ("flymake" "Index")
+   ("forms" "Index")
+   ("gnus" "Index")
+   ("htmlfontify" "Functions" "Variables & Customization")
+   ("idlwave" "Index")
+   ("ido" "Variable Index" "Function Index")
+   ("info" "Index")
+   ("mairix" "(mairix-el)Variable Index" "(mairix-el)Function Index")
+   ("message" "Index")
+   ("mh" "(mh-e)Option Index" "(mh-e)Command Index")
+   ("newsticker" "Index")
+   ("octave" "(octave-mode)Variable Index" "(octave-mode)Lisp Function Index")
+   ("org" "Variable Index" "Command and Function Index")
+   ("rcirc" "Variable Index" "Index")
+   ("reftex" "Index")
+   ("sasl" "Variable Index" "Function Index")
+   ("sc" "Variable Index")
+   ("semantic" "Index")
+   ("ses" "Index")
+   ("sieve" "Index")
+   ("smtpmail" "Function and Variable Index")
+   ("srecode" "Index")
+   ("tramp" "Variable Index" "Function Index")
+   ("url" "Variable Index" "Function Index")
+   ("use-package" "Index")
+   ("vhdl" "(vhdl-mode)Variable Index" "(vhdl-mode)Command Index")
+   ("viper" "Variable Index" "Function Index")
+   ("vtable" "Index")
+   ("widget" "Index")
+   ("wisent" "Index")
+   ("woman" "Variable Index" "Command Index")))
+
 ;; docstrings talk about elisp, so have apropos-mode follow emacs-lisp-mode
 (info-lookup-maybe-add-help
  :mode 'apropos-mode
@@ -948,6 +1105,11 @@ Return nil if there is nothing appropriate in the buffer near point."
  :mode 'lisp-interaction-mode
  :regexp "[^][()`'‘’,\" \t\n]+"
  :parse-rule 'ignore
+ :other-modes '(emacs-lisp-mode))
+
+(info-lookup-maybe-add-help
+ :mode 'inferior-emacs-lisp-mode
+ :regexp "[^][()`'‘’,:\" \t\n]+"
  :other-modes '(emacs-lisp-mode))
 
 (info-lookup-maybe-add-help
@@ -967,19 +1129,19 @@ Return nil if there is nothing appropriate in the buffer near point."
 (info-lookup-maybe-add-help
  :mode 'octave-mode
  :regexp "[_a-zA-Z0-9]+\\|\\s.+\\|[-!=^|*/.\\,><~&+]\\{1,3\\}\\|[][();,\"']"
- :doc-spec '(("(octave)Function Index" nil
-	      "^ -+ [^:]+:[ ]+\\(\\[[^=]*=[ ]+\\)?" nil)
-	     ("(octave)Variable Index" nil "^ -+ [^:]+:[ ]+" nil)
+ :doc-spec `(("(octave)Function Index" nil
+              "^ -+ [^:]+:[ ]+\\(\\[[^=]*=[ ]+\\)?" nil)
+             ("(octave)Variable Index" nil "^ -+ [^:]+:[ ]+" nil)
              ("(octave)Operator Index" nil nil nil)
-	     ;; Catch lines of the form "xyz statement"
-	     ("(octave)Concept Index"
-	      (lambda (item)
-		(cond
-		 ((string-match "^\\([A-Z]+\\) statement\\b" item)
-		    (match-string 1 item))
-		 (t nil)))
-	      nil; "^ -+ [^:]+:[ ]+" don't think this prefix is useful here.
-	      nil)))
+             ;; Catch lines of the form "xyz statement"
+             ("(octave)Concept Index"
+              ,(lambda (item)
+                 (cond
+                  ((string-match "^\\([A-Z]+\\) statement\\b" item)
+                   (match-string 1 item))
+                  (t nil)))
+              nil; "^ -+ [^:]+:[ ]+" don't think this prefix is useful here.
+              nil)))
 
 (info-lookup-maybe-add-help
  :mode 'maxima-mode
@@ -1010,7 +1172,7 @@ Return nil if there is nothing appropriate in the buffer near point."
  ;; bash has "." and ":" in its index, but those chars will probably never
  ;; work in info, so don't bother matching them in the regexp.
  :regexp "\\([a-zA-Z0-9_-]+\\|[!{}@*#?$]\\|\\[\\[?\\|]]?\\)"
- :doc-spec '(("(bash)Builtin Index"       nil "^['`‘]" "[ .'’]")
+ :doc-spec `(("(bash)Builtin Index"       nil "^['`‘]" "[ .'’]")
              ("(bash)Reserved Word Index" nil "^['`‘]" "[ .'’]")
              ("(bash)Variable Index"      nil "^['`‘]" "[ .'’]")
 
@@ -1021,30 +1183,30 @@ Return nil if there is nothing appropriate in the buffer near point."
              ;; versions have node "Index", look for both, whichever is
              ;; absent is quietly ignored
              ("(coreutils)Index"
-              (lambda (item) (if (string-match "\\`[a-z]+\\'" item) item)))
+              ,(lambda (item) (if (string-match "\\`[a-z]+\\'" item) item)))
              ("(coreutils)Concept Index"
-              (lambda (item) (if (string-match "\\`[a-z]+\\'" item) item)))
+              ,(lambda (item) (if (string-match "\\`[a-z]+\\'" item) item)))
 
              ;; diff (version 2.8.1) has only a few programs, index entries
              ;; are things like "foo invocation".
              ("(diff)Index"
-              (lambda (item)
-		(if (string-match "\\`\\([a-z]+\\) invocation\\'" item)
-                    (match-string 1 item))))
+              ,(lambda (item)
+                 (if (string-match "\\`\\([a-z]+\\) invocation\\'" item)
+                     (match-string 1 item))))
              ;; there's no plain "sed" index entry as such, mung another
              ;; hopefully unique one to get to the invocation section
              ("(sed)Concept Index"
-              (lambda (item)
-                (if (string-equal item "Standard input, processing as input")
-                    "sed")))
+              ,(lambda (item)
+                 (if (string-equal item "Standard input, processing as input")
+                     "sed")))
              ;; there's no plain "awk" or "gawk" index entries, mung other
              ;; hopefully unique ones to get to the command line options
              ("(gawk)Index"
-              (lambda (item)
-                (cond ((string-equal item "gawk, extensions, disabling")
-                       "awk")
-                      ((string-equal item "gawk, versions of, information about, printing")
-                       "gawk"))))))
+              ,(lambda (item)
+                 (cond ((string-equal item "gawk, extensions, disabling")
+                        "awk")
+                       ((string-equal item "gawk, versions of, information about, printing")
+                        "gawk"))))))
 
 ;; This misses some things which occur as node names but not in the
 ;; index.  Unfortunately it also picks up the wrong one of multiple
@@ -1052,21 +1214,23 @@ Return nil if there is nothing appropriate in the buffer near point."
 (info-lookup-maybe-add-help
  :mode 'cfengine-mode
  :regexp "[[:alnum:]_]+\\(?:()\\)?"
- :doc-spec '(("(cfengine-Reference)Variable Index"
-	      (lambda (item)
-		;; Index entries may be like `IsPlain()'
-		(if (string-match "\\([[:alnum:]_]+\\)()" item)
-		    (match-string 1 item)
-		  item))
-	      ;; This gets functions in evaluated classes.  Other
-	      ;; possible patterns don't seem to work too well.
-	      "['`‘]" "(")))
+ :doc-spec `(("(cfengine-Reference)Variable Index"
+              ,(lambda (item)
+                 ;; Index entries may be like `IsPlain()'
+                 (if (string-match "\\([[:alnum:]_]+\\)()" item)
+                     (match-string 1 item)
+                   item))
+              ;; This gets functions in evaluated classes.  Other
+              ;; possible patterns don't seem to work too well.
+              "['`‘]" "(")))
 
 (info-lookup-maybe-add-help
  :mode 'Custom-mode
  :ignore-case t
  :regexp "[^][()`'‘’,:\" \t\n]+"
- :parse-rule 'info-lookup-guess-custom-symbol
+ :parse-rule (lambda ()
+               (when-let* ((symbol (get-text-property (point) 'custom-data)))
+                 (symbol-name symbol)))
  :other-modes '(emacs-lisp-mode))
 
 (info-lookup-maybe-add-help

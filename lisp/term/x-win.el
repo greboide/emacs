@@ -1,6 +1,6 @@
 ;;; x-win.el --- parse relevant switches and set up for X  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1993-1994, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1993-1994, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: FSF
 ;; Keywords: terminals, i18n
@@ -75,7 +75,6 @@
 (require 'frame)
 (require 'mouse)
 (require 'scroll-bar)
-(require 'faces)
 (require 'select)
 (require 'menu-bar)
 (require 'fontset)
@@ -86,6 +85,8 @@
 (defvar x-selection-timeout)
 (defvar x-session-id)
 (defvar x-session-previous-id)
+(defvar x-dnd-movement-function)
+(defvar x-dnd-unsupported-drop-function)
 
 (defun x-handle-no-bitmap-icon (_switch)
   (setq default-frame-alist (cons '(icon-type) default-frame-alist)))
@@ -108,14 +109,6 @@
   (setq x-session-previous-id (car x-invocation-args)
 	x-invocation-args (cdr x-invocation-args)))
 
-(defvar emacs-save-session-functions nil
-  "Special hook run when a save-session event occurs.
-The functions do not get any argument.
-Functions can return non-nil to inform the session manager that the
-window system shutdown should be aborted.
-
-See also `emacs-session-save'.")
-
 (defun emacs-session-filename (session-id)
   "Construct a filename to save the session in based on SESSION-ID.
 Return a filename in `user-emacs-directory', unless the session file
@@ -132,7 +125,7 @@ When a session manager tells Emacs that the window system is shutting
 down, this function is called.  It calls the functions in the hook
 `emacs-save-session-functions'.  Functions are called with the current
 buffer set to a temporary buffer.  Functions should use `insert' to insert
-lisp code to save the session state.  The buffer is saved in a file in the
+Lisp code to save the session state.  The buffer is saved in a file in the
 home directory of the user running Emacs.  The file is evaluated when
 Emacs is restarted by the session manager.
 
@@ -248,7 +241,9 @@ exists."
 (defconst x-pointer-ur-angle 148)
 (defconst x-pointer-watch 150)
 (defconst x-pointer-xterm 152)
-(defconst x-pointer-invisible 255)
+(defconst x-pointer-invisible 65536) ;; This value is larger than a
+                                     ;; CARD16, so it cannot be a
+                                     ;; valid cursor.
 
 
 ;;;; Keysyms
@@ -302,7 +297,11 @@ as returned by `x-server-vendor'."
     (setq i (1+ i))))
 
 ;; Table from Kuhn's proposed additions to the `KEYSYM Encoding'
-;; appendix to the X protocol definition.
+;; appendix to the X protocol definition.  As indicated, some of these
+;; have been corrected using information found in keysymdef.h which on
+;; a typical system is installed at /usr/include/X11/keysymdef.h.  The
+;; version used here is from xorgproto version 2019.1 found here:
+;; https://gitlab.freedesktop.org/xorg/proto/xorgproto/blob/e0bba743ae7c549c58f92677b239ec7878548228/include/X11/keysymdef.h
 (dolist
      (pair
       '(
@@ -579,6 +578,7 @@ as returned by `x-server-vendor'."
 	(#x6aa . ?њ)
 	(#x6ab . ?ћ)
 	(#x6ac . ?ќ)
+	(#x6ad . ?ґ) ;; Source: keysymdef.h
 	(#x6ae . ?ў)
 	(#x6af . ?џ)
 	(#x6b0 . ?№)
@@ -594,6 +594,7 @@ as returned by `x-server-vendor'."
 	(#x6ba . ?Њ)
 	(#x6bb . ?Ћ)
 	(#x6bc . ?Ќ)
+	(#x6bd . ?Ґ) ;; Source: keysymdef.h
 	(#x6be . ?Ў)
 	(#x6bf . ?Џ)
 	(#x6c0 . ?ю)
@@ -810,6 +811,7 @@ as returned by `x-server-vendor'."
 	(#xaa8 . ? )
 	(#xaa9 . ?—)
 	(#xaaa . ?–)
+	(#xaac . ?␣) ;; Source: keysymdef.h
 	(#xaae . ?…)
 	(#xaaf . ?‥)
 	(#xab0 . ?⅓)
@@ -822,7 +824,17 @@ as returned by `x-server-vendor'."
 	(#xab7 . ?⅚)
 	(#xab8 . ?℅)
 	(#xabb . ?‒)
+	;; In keysymdef.h, the keysyms 0xabc and 0xabe are listed as
+	;; U+27E8 and U+27E9 respectively.  However, the parentheses
+	;; indicate that these mappings are deprecated legacy keysyms
+	;; that are either not one-to-one or semantically unclear.  In
+	;; order to not introduce any incompatibility with possible
+	;; existing workflows that expect these keysyms to map as they
+	;; currently do, to 0x2329 and 0x232a, respectively, they are
+	;; left as they are.  In particular, PuTTY is known to agree
+	;; with this mapping.
 	(#xabc . ?〈)
+	(#xabd . ?.) ;; Source: keysymdef.h
 	(#xabe . ?〉)
 	(#xac3 . ?⅛)
 	(#xac4 . ?⅜)
@@ -839,6 +851,7 @@ as returned by `x-server-vendor'."
 	(#xad2 . ?“)
 	(#xad3 . ?”)
 	(#xad4 . ?℞)
+	(#xad5 . ?‰) ;; Source: keysymdef.h
 	(#xad6 . ?′)
 	(#xad7 . ?″)
 	(#xad9 . ?✝)
@@ -883,20 +896,29 @@ as returned by `x-server-vendor'."
 	(#xba8 . ?∨)
 	(#xba9 . ?∧)
 	(#xbc0 . ?¯)
-	(#xbc2 . ?⊥)
+	;; Source for #xbc2: keysymdef.h.  Note that the
+	;; `KEYSYM Encoding' appendix to the X protocol definition is
+	;; incorrect.
+	(#xbc2 . ?⊤)
 	(#xbc3 . ?∩)
 	(#xbc4 . ?⌊)
 	(#xbc6 . ?_)
 	(#xbca . ?∘)
 	(#xbcc . ?⎕)
-	(#xbce . ?⊤)
+	;; Source for #xbce: keysymdef.h.  Note that the
+	;; `KEYSYM Encoding' appendix to the X protocol definition is
+	;; incorrect.
+	(#xbce . ?⊥)
 	(#xbcf . ?○)
 	(#xbd3 . ?⌈)
 	(#xbd6 . ?∪)
 	(#xbd8 . ?⊃)
 	(#xbda . ?⊂)
-	(#xbdc . ?⊢)
-	(#xbfc . ?⊣)
+	;; Source for #xbdc and #xbfc: keysymdef.h.  Note that the
+	;; `KEYSYM Encoding' appendix to the X protocol definition is
+	;; incorrect.
+	(#xbdc . ?⊣)
+	(#xbfc . ?⊢)
 	;; Hebrew
 	(#xcdf . ?‗)
 	(#xce0 . ?א)
@@ -1143,11 +1165,11 @@ as returned by `x-server-vendor'."
 ;; #x0aff	CURSOR	Publish
 ;; #x0dde	THAI MAIHANAKAT	Thai
 
+;; However, keysymdef.h does have mappings for #x0aac and #x0abd, which
+;; are used above.
+
 
 ;;;; Selections
-
-(define-obsolete-function-alias 'x-cut-buffer-or-selection-value
-  'x-selection-value "24.1")
 
 ;; Arrange for the kill and yank functions to set and check the clipboard.
 
@@ -1157,8 +1179,12 @@ as returned by `x-server-vendor'."
   (interactive "*")
   (let ((clipboard-text (gui--selection-value-internal 'CLIPBOARD))
 	(select-enable-clipboard t))
-    (if (and clipboard-text (> (length clipboard-text) 0))
-	(kill-new clipboard-text))
+    (when (and clipboard-text (> (length clipboard-text) 0))
+      ;; Avoid asserting ownership of CLIPBOARD, which will cause
+      ;; `gui-selection-value' to return nil in the future.
+      ;; (bug#56273)
+      (let ((select-enable-clipboard nil))
+        (kill-new clipboard-text)))
     (yank)))
 
 (declare-function accelerate-menu "xmenu.c" (&optional frame) t)
@@ -1266,14 +1292,6 @@ This returns an error if any Emacs frames are X frames."
 		    (cons (cons 'width (cdr (assq 'width parsed)))
 			  default-frame-alist))))))
 
-  ;; Check the reverseVideo resource.
-  (let ((case-fold-search t))
-    (let ((rv (x-get-resource "reverseVideo" "ReverseVideo")))
-      (if (and rv
-	       (string-match "^\\(true\\|yes\\|on\\)$" rv))
-	  (setq default-frame-alist
-		(cons '(reverse . t) default-frame-alist)))))
-
   ;; Set x-selection-timeout, measured in milliseconds.
   (let ((res-selection-timeout (x-get-resource "selectionTimeout"
 					       "SelectionTimeout")))
@@ -1300,7 +1318,7 @@ This returns an error if any Emacs frames are X frames."
   ;; and turned the Emacs f10 back on.
   ;; ;; Motif normally handles f10 itself, so don't try to handle it a second time.
   ;; (if (featurep 'motif)
-  ;;     (global-set-key [f10] 'ignore))
+  ;;     (keymap-global-set "<f10>" 'ignore))
 
   ;; Enable CLIPBOARD copy/paste through menu bar commands.
   (menu-bar-enable-clipboard)
@@ -1326,7 +1344,7 @@ This returns an error if any Emacs frames are X frames."
 (declare-function x-get-selection-internal "xselect.c"
 		  (selection-symbol target-type &optional time-stamp terminal))
 
-(add-to-list 'display-format-alist '("\\`[^:]*:[0-9]+\\(\\.[0-9]+\\)?\\'" . x))
+(add-to-list 'display-format-alist '("\\`.*:[0-9]+\\(\\.[0-9]+\\)?\\'" . x))
 (cl-defmethod handle-args-function (args &context (window-system x))
   (x-handle-args args))
 
@@ -1349,23 +1367,23 @@ This returns an error if any Emacs frames are X frames."
 (cl-defmethod gui-backend-get-selection (selection-symbol target-type
                                          &context (window-system x)
                                          &optional time-stamp terminal)
-  (x-get-selection-internal selection-symbol target-type time-stamp terminal))
+  (x-get-selection-internal selection-symbol target-type
+                            time-stamp terminal))
 
 ;; Initiate drag and drop
 (add-hook 'after-make-frame-functions 'x-dnd-init-frame)
 (define-key special-event-map [drag-n-drop] 'x-dnd-handle-drag-n-drop-event)
 
 (defcustom x-gtk-stock-map
-  (mapcar (lambda (arg)
-	    (cons (purecopy (car arg)) (purecopy (cdr arg))))
   '(
     ("etc/images/new" . ("document-new" "gtk-new"))
     ("etc/images/open" . ("document-open" "gtk-open"))
-    ("etc/images/diropen" . "n:system-file-manager")
+    ("etc/images/diropen" . "gtk-directory")
     ("etc/images/close" . ("window-close" "gtk-close"))
     ("etc/images/save" . ("document-save" "gtk-save"))
     ("etc/images/saveas" . ("document-save-as" "gtk-save-as"))
     ("etc/images/undo" . ("edit-undo" "gtk-undo"))
+    ("etc/images/redo" . ("edit-redo" "gtk-redo"))
     ("etc/images/cut" . ("edit-cut" "gtk-cut"))
     ("etc/images/copy" . ("edit-copy" "gtk-copy"))
     ("etc/images/paste" . ("edit-paste" "gtk-paste"))
@@ -1377,13 +1395,21 @@ This returns an error if any Emacs frames are X frames."
     ("etc/images/right-arrow" . ("go-next" "gtk-go-forward"))
     ("etc/images/home" . ("go-home" "gtk-home"))
     ("etc/images/jump-to" . ("go-jump" "gtk-jump-to"))
-    ("etc/images/index" . "gtk-index")
+    ("etc/images/index" . ("gtk-search" "gtk-index"))
     ("etc/images/exit" . ("application-exit" "gtk-quit"))
     ("etc/images/cancel" . "gtk-cancel")
     ("etc/images/info" . ("dialog-information" "gtk-info"))
     ("etc/images/bookmark_add" . "n:bookmark_add")
+    ;; Used in package-menu
+    ("images/package-menu/execute" . "gtk-apply")
+    ("images/package-menu/info" . ("dialog-information" "gtk-info"))
+    ("images/package-menu/install" . ("archive-insert" "list-add"))
+    ("images/package-menu/delete" . ("archive-remove" "gtk-remove"))
+    ("images/package-menu/unmark" . ("gnumeric-object-checkbox" "box"))
+    ("images/package-menu/url" . "globe")
+    ("images/package-menu/upgrade" . ("archive-extract" "go-bottom"))
     ;; Used in Gnus and/or MH-E:
-    ("etc/images/attach" . "gtk-attach")
+    ("etc/images/attach" . ("mail-attachment" "gtk-attach"))
     ("etc/images/connect" . "gtk-connect")
     ("etc/images/contact" . "gtk-contact")
     ("etc/images/delete" . ("edit-delete" "gtk-delete"))
@@ -1395,14 +1421,16 @@ This returns an error if any Emacs frames are X frames."
     ("etc/images/lock" . "gtk-lock")
     ("etc/images/next-page" . "gtk-next-page")
     ("etc/images/refresh" . ("view-refresh" "gtk-refresh"))
+    ("etc/images/search-replace" . "edit-find-replace")
     ("etc/images/sort-ascending" . ("view-sort-ascending" "gtk-sort-ascending"))
     ("etc/images/sort-column-ascending" . "gtk-sort-column-ascending")
     ("etc/images/sort-criteria" . "gtk-sort-criteria")
     ("etc/images/sort-descending" . ("view-sort-descending"
 				     "gtk-sort-descending"))
     ("etc/images/sort-row-ascending" . "gtk-sort-row-ascending")
+    ("etc/images/spell" . ("tools-check-spelling" "gtk-spell-check"))
     ("images/gnus/toggle-subscription" . "gtk-task-recurring")
-    ("images/mail/compose" . "gtk-mail-compose")
+    ("images/mail/compose" . ("mail-message-new" "gtk-mail-compose"))
     ("images/mail/copy" . "gtk-mail-copy")
     ("images/mail/forward" . "gtk-mail-forward")
     ("images/mail/inbox" . "gtk-inbox")
@@ -1412,7 +1440,7 @@ This returns an error if any Emacs frames are X frames."
     ("images/mail/reply-all" . "gtk-mail-reply-to-all")
     ("images/mail/reply" . "gtk-mail-reply")
     ("images/mail/save-draft" . "gtk-mail-handling")
-    ("images/mail/send" . "gtk-mail-send")
+    ("images/mail/send" . ("mail-send" "gtk-mail-send"))
     ("images/mail/spam" . "gtk-spam")
     ;; Used for GDB Graphical Interface
     ("images/gud/break" . "gtk-no")
@@ -1421,11 +1449,19 @@ This returns an error if any Emacs frames are X frames."
     ;; No themed versions available:
     ;; mail/preview (combining stock_mail and stock_zoom)
     ;; mail/save    (combining stock_mail, stock_save and stock_convert)
-    ))
+    ("images/mpc/prev" . "media-skip-backward")
+    ("images/mpc/rewind" . "media-seek-backward")
+    ("images/mpc/pause" . "media-playback-pause")
+    ("images/mpc/play" . "media-playback-start")
+    ("images/mpc/ffwd" . "media-seek-forward")
+    ("images/mpc/next" . "media-skip-forward")
+    ("images/mpc/stop" . "media-playback-stop")
+    ("images/mpc/add" . "list-add")
+    )
   "How icons for tool bars are mapped to Gtk+ stock items.
 Emacs must be compiled with the Gtk+ toolkit for this to have any effect.
 A value that begins with n: denotes a named icon instead of a stock icon."
-  :version "22.2"
+  :version "31.1"
   :type '(choice (repeat
 		  (choice symbol
 			  (cons (string :tag "Emacs icon")
@@ -1455,7 +1491,16 @@ If you don't want stock icons, set the variable to nil."
   :type '(choice (const :tag "Don't use stock icons" nil)
 		 (repeat (choice symbol
 				 (cons (string :tag "Emacs icon")
-				       (string :tag "Stock/named")))))
+                                       (choice
+                                        (group (string "Named")
+                                               (string "Stock"))
+				        (string :tag "Stock/named"))))))
+  :group 'x)
+
+(defcustom x-display-cursor-at-start-of-preedit-string nil
+  "If non-nil, display the cursor at the start of any pre-edit text."
+  :version "29.1"
+  :type 'boolean
   :group 'x)
 
 (defconst x-gtk-stock-cache (make-hash-table :weakness t :test 'equal))
@@ -1485,6 +1530,128 @@ This uses `icon-map-list' to map icon file names to stock icon names."
 	 x-gtk-stock-cache))))
 
 (global-set-key [XF86WakeUp] 'ignore)
+
+
+(defvar x-preedit-overlay nil
+  "The overlay currently used to display preedit text from a compose sequence.")
+
+;; With some input methods, text gets inserted before Emacs is told to
+;; remove any preedit text that was displayed, which causes both the
+;; preedit overlay and the text to be visible for a brief period of
+;; time.  This pre-command-hook clears the overlay before any command
+;; and should be set whenever a preedit overlay is visible.
+(defun x-clear-preedit-text ()
+  "Clear the pre-edit overlay and remove itself from `pre-command-hook'.
+This function should be installed in `pre-command-hook' whenever
+preedit text is displayed."
+  (when x-preedit-overlay
+    (delete-overlay x-preedit-overlay)
+    (setq x-preedit-overlay nil))
+  (remove-hook 'pre-command-hook #'x-clear-preedit-text))
+
+(defun x-preedit-text (event)
+  "Display preedit text from a compose sequence in EVENT.
+EVENT is a preedit-text event."
+  (interactive "e")
+  (when x-preedit-overlay
+    (delete-overlay x-preedit-overlay)
+    (setq x-preedit-overlay nil)
+    (remove-hook 'pre-command-hook #'x-clear-preedit-text))
+  (when (nth 1 event)
+    (let ((string (propertize (nth 1 event) 'face '(:underline t))))
+      (setq x-preedit-overlay (make-overlay (point) (point)))
+      (add-hook 'pre-command-hook #'x-clear-preedit-text)
+      (overlay-put x-preedit-overlay 'window (selected-window))
+      (overlay-put x-preedit-overlay 'before-string
+                   (if x-display-cursor-at-start-of-preedit-string
+                       (propertize string 'cursor t)
+                     string)))))
+
+(define-key special-event-map [preedit-text] 'x-preedit-text)
+
+(defvaralias 'x-gtk-use-system-tooltips 'use-system-tooltips)
+
+(declare-function x-internal-focus-input-context "xfns.c" (focus))
+
+(defun x-gtk-use-native-input-watcher (_symbol newval &rest _ignored)
+  "Variable watcher for `x-gtk-use-native-input'.
+If NEWVAL is non-nil, focus the GTK input context of focused
+frames on all displays."
+  (when (and (featurep 'gtk)
+             (eq (framep (selected-frame)) 'x))
+    (x-internal-focus-input-context newval)))
+
+(add-variable-watcher 'x-gtk-use-native-input
+                      #'x-gtk-use-native-input-watcher)
+
+(defun x-dnd-movement (_frame position)
+  "Handle movement to POSITION during drag-and-drop."
+  (dnd-handle-movement position))
+
+(defun x-device-class (name)
+  "Return the device class of NAME.
+Users should not call this function; see `device-class' instead."
+  (and name
+       (let ((downcased-name (downcase name)))
+         (cond
+          ((string-match-p "XTEST" name) 'test)
+          ((string= "Virtual core pointer" name) 'core-pointer)
+          ((string= "Virtual core keyboard" name) 'core-keyboard)
+          ((string-match-p "eraser" downcased-name) 'eraser)
+          ((string-match-p " pad" downcased-name) 'pad)
+          ((or (or (string-match-p "wacom" downcased-name)
+                   (string-match-p "pen" downcased-name))
+               (string-match-p "stylus" downcased-name))
+           'pen)
+          ((or (string-prefix-p "xwayland-touch:" name)
+               (string-match-p "touchscreen" downcased-name))
+           'touchscreen)
+          ((or (string-match-p "trackpoint" downcased-name)
+               (string-match-p "stick" downcased-name))
+           'trackpoint)
+          ((or (string-match-p "mouse" downcased-name)
+               (string-match-p "optical" downcased-name)
+               (string-match-p "pointer" downcased-name))
+           'mouse)
+          ((string-match-p "cursor" downcased-name) 'puck)
+          ((or (string-match-p "keyboard" downcased-name)
+               ;; One of my cheap keyboards is really named this...
+               (string= name "USB USB Keykoard"))
+           'keyboard)
+          ((string-match-p "button" downcased-name) 'power-button)
+          ((string-match-p "touchpad" downcased-name) 'touchpad)
+          ((or (string-match-p "midi" downcased-name)
+               (string-match-p "piano" downcased-name))
+           'piano)
+          ((or (string-match-p "wskbd" downcased-name) ; NetBSD/OpenBSD
+               (and (string-match-p "/dev" downcased-name)
+                    (string-match-p "kbd" downcased-name)))
+           'keyboard)))))
+
+(setq x-dnd-movement-function #'x-dnd-movement)
+(setq x-dnd-unsupported-drop-function #'x-dnd-handle-unsupported-drop)
+
+(defvar x-input-coding-function)
+
+(defun x-get-input-coding-system (x-locale)
+  "Return a coding system for the locale X-LOCALE.
+Return a coding system that is able to decode text sent with the
+X input method locale X-LOCALE, or nil if no coding system was
+found."
+  (if (equal x-locale "C")
+      ;; Treat the C locale specially, as it means "ascii" under X.
+      'ascii
+    (let ((locale (locale-translate (downcase x-locale))))
+      (or (locale-name-match locale locale-preferred-coding-systems)
+	  (when locale
+	    (if (string-match "\\.\\([^@]+\\)" locale)
+	        (locale-charset-to-coding-system
+	         (match-string 1 locale))))
+          (let ((language-name
+                 (locale-name-match locale locale-language-names)))
+            (and (consp language-name) (cdr language-name)))))))
+
+(setq x-input-coding-function #'x-get-input-coding-system)
 
 (provide 'x-win)
 (provide 'term/x-win)

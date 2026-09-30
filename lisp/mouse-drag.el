@@ -1,6 +1,6 @@
-;;; mouse-drag.el --- use mouse-2 to do a new style of scrolling
+;;; mouse-drag.el --- use mouse-2 to do a new style of scrolling  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1996-1997, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996-1997, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: John Heidemann <johnh@ISI.EDU>
 ;; Keywords: mouse
@@ -48,9 +48,9 @@
 ;;
 ;; To use mouse-drag, place the following in your init file:
 ;; -either-
-;;     (global-set-key [down-mouse-2] 'mouse-drag-throw)
+;;     (keymap-global-set "<down-mouse-2>" #'mouse-drag-throw)
 ;; -or-
-;;     (global-set-key [down-mouse-2] 'mouse-drag-drag)
+;;     (keymap-global-set "<down-mouse-2>" #'mouse-drag-drag)
 ;;
 ;;
 ;;
@@ -69,9 +69,6 @@
 ;; mouse-2 scrolling.  The package mouse-scroll.el by Tom Wurgler
 ;; <twurgler@goodyear.com> is similar to mouse-drag-throw, but
 ;; doesn't pass clicks through.
-;;
-;; These functions have been tested in emacs version 19.30,
-;; and this package has run in the past on 19.25-19.29.
 ;;
 ;; Originally mouse-drag was part of a larger package.
 ;; As of 11 July 96 the scrolling functions were split out
@@ -150,7 +147,7 @@ Keep the cursor on the screen as needed."
      (= (cdr start-col-row) (cdr end-col-row)))))
 
 (defvar mouse-drag-electric-col-scrolling t
-  "If non-nil, mouse-drag on a long line enables truncate-lines.")
+  "If non-nil, mouse-drag on a long line enables `truncate-lines'.")
 
 (defun mouse-drag-should-do-col-scrolling ()
   "Determine if it's wise to enable col-scrolling for the current window.
@@ -206,7 +203,7 @@ about which direction is natural.  Perhaps it has to do with which
 hemisphere you're in.)
 
 To test this function, evaluate:
-    (global-set-key [down-mouse-2] \\='mouse-drag-throw)"
+    (keymap-global-set \"<down-mouse-2>\" \\='mouse-drag-throw)"
   (interactive "e")
   ;; we want to do save-selected-window, but that requires 19.29
   (let* ((start-posn (event-start start-event))
@@ -225,7 +222,7 @@ To test this function, evaluate:
       ;; Don't change the mouse pointer shape while we drag.
       (setq track-mouse 'dragging)
       (while (progn
-	       (setq event (read-event)
+	       (setq event (read--potential-mouse-event)
 		     end (event-end event)
 		     row (cdr (posn-col-row end))
 		     col (car (posn-col-row end)))
@@ -266,7 +263,7 @@ Drag scrolling is identical to the \"hand\" option in MacPaint, or the
 middle button in Tk text widgets.
 
 To test this function, evaluate:
-    (global-set-key [down-mouse-2] \\='mouse-drag-drag)"
+    (keymap-global-set \"<down-mouse-2>\" \\='mouse-drag-drag)"
   (interactive "e")
   ;; we want to do save-selected-window, but that requires 19.29
   (let* ((start-posn (event-start start-event))
@@ -278,6 +275,7 @@ To test this function, evaluate:
 	 have-scrolled
 	 window-last-row
 	 col window-last-col
+         switch-frame-p
 	 (scroll-col-delta 0)
 	 ;; be conservative about allowing horizontal scrolling
 	 (col-scrolling-p (mouse-drag-should-do-col-scrolling)))
@@ -285,17 +283,25 @@ To test this function, evaluate:
     (setq window-last-row (- (window-height) 2)
 	  window-last-col (- (window-width) 2))
     (track-mouse
+      ;; Set 'track-mouse' to something neither nil nor t (Bug#51794).
+      (setq track-mouse 'drag-dragging)
       (while (progn
-	       (setq event (read-event)
-		     end (event-end event)
-		     row (cdr (posn-col-row end))
-		     col (car (posn-col-row end)))
-	       (or (mouse-movement-p event)
-		   (eq (car-safe event) 'switch-frame)))
+	       (setq event (read--potential-mouse-event)
+                     switch-frame-p (eq (car-safe event) 'switch-frame))
+               ;; We want to skip switch-frame events and treat then
+               ;; as moves over a different window.  These events have
+               ;; no position spec, so all the posn-* accessor
+               ;; functions are likely to barf if passed such an
+               ;; event.
+               (or switch-frame-p
+                   (setq end (event-end event)
+		         row (cdr (posn-col-row end))
+		         col (car (posn-col-row end))))
+	       (or (mouse-movement-p event) switch-frame-p))
 	;; Scroll if see if we're on the edge.
 	;; FIXME: should handle mouse-in-other window.
 	(cond
-	 ((not (eq start-window (posn-window end)))
+	 ((or switch-frame-p (not (eq start-window (posn-window end))))
 	  t) ; wait for return to original window
 	 ((<= row 0) (mouse-drag-repeatedly-safe-scroll -1 0))
 	 ((>= row window-last-row) (mouse-drag-repeatedly-safe-scroll 1 0))

@@ -26,15 +26,18 @@
 
 ;;; Macros
 
-(defmacro emerge-defvar-local (var value doc)
+(defmacro emerge-defvar-local (symbol value &optional doc)
   "Define SYMBOL as an advertised buffer-local variable.
-Performs a defvar, then executes `make-variable-buffer-local' on
-the variable.  Also sets the `permanent-local' property, so that
-`kill-all-local-variables' (called by major-mode setting commands)
-won't destroy Emerge control variables."
+Run `defvar-local', setting the value of the variable to VALUE
+and its docstring to DOC.
+
+Then set the `permanent-local' property, so that
+`kill-all-local-variables' (called by major-mode setting
+commands) won't destroy Emerge control variables."
+  (declare (indent defun) (doc-string 3))
   `(progn
-     (defvar-local ,var ,value ,doc)
-     (put ',var 'permanent-local t)))
+     (defvar-local ,symbol ,value ,doc)
+     (put ',symbol 'permanent-local t)))
 
 ;; We need to define this function so describe-mode can describe Emerge mode.
 (define-minor-mode emerge-mode
@@ -79,90 +82,75 @@ but can be invoked directly in `fast' mode."
 ;; way they number lines of a file.
 (defcustom emerge-diff-program "diff"
   "Name of the program which compares two files."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 (defcustom emerge-diff3-program "diff3"
   "Name of the program which compares three files.
 Its arguments are the ancestor file and the two variant files."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 (defcustom emerge-diff-options ""
   "Options to pass to `emerge-diff-program' and `emerge-diff3-program'."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 (defcustom emerge-match-diff-line
   (let ((x "\\([0-9]+\\)\\(\\|,\\([0-9]+\\)\\)"))
     (concat "^" x "\\([acd]\\)" x "$"))
   "Pattern to match lines produced by diff that describe differences.
 This is as opposed to lines from the source files."
-  :type 'regexp
-  :group 'emerge)
+  :type 'regexp)
 (defcustom emerge-diff-ok-lines-regexp
   "^\\([0-9,]+[acd][0-9,]+$\\|[<>] \\|---\\)"
   "Regexp that matches normal output lines from `emerge-diff-program'.
 Lines that do not match are assumed to be error messages."
-  :type 'regexp
-  :group 'emerge)
+  :type 'regexp)
 (defcustom emerge-diff3-ok-lines-regexp
   "^\\([1-3]:\\|====\\|  \\)"
   "Regexp that matches normal output lines from `emerge-diff3-program'.
 Lines that do not match are assumed to be error messages."
-  :type 'regexp
-  :group 'emerge)
+  :type 'regexp)
 
 (defcustom emerge-rcs-ci-program "ci"
   "Name of the program that checks in RCS revisions."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 (defcustom emerge-rcs-co-program "co"
   "Name of the program that checks out RCS revisions."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 
 (defcustom emerge-process-local-variables nil
   "Non-nil if Emerge should process local-variables lists in merge buffers.
 \(You can explicitly request processing the local-variables
 by executing `(hack-local-variables)'.)"
-  :type 'boolean
-  :group 'emerge)
+  :type 'boolean)
 (defcustom emerge-execute-line-deletions nil
   "If non-nil: `emerge-execute-line' makes no output if an input was deleted.
 It concludes that an input version has been deleted when an ancestor entry
 is present, only one A or B entry is present, and an output entry is present.
 If nil: In such circumstances, the A or B file that is present will be
 copied to the designated output file."
-  :type 'boolean
-  :group 'emerge)
+  :type 'boolean)
 
 (defcustom emerge-before-flag "vvvvvvvvvvvvvvvvvvvv\n"
-  "Flag placed above the highlighted block of code.  Must end with newline.
-Must be set before Emerge is loaded, or  emerge-new-flags  must be run
-after setting."
-  :type 'string
-  :group 'emerge)
+  "Flag placed above the highlighted block of code.
+Must end with newline.  Must be set before Emerge is loaded, or
+`emerge-new-flags' must be run after setting."
+  :type 'string)
 (defcustom emerge-after-flag "^^^^^^^^^^^^^^^^^^^^\n"
-  "Flag placed below the highlighted block of code.  Must end with newline.
-Must be set before Emerge is loaded, or  emerge-new-flags  must be run
-after setting."
-  :type 'string
-  :group 'emerge)
+  "Flag placed below the highlighted block of code.
+Must end with newline.  Must be set before Emerge is loaded, or
+`emerge-new-flags' must be run after setting."
+  :type 'string)
 
 ;; Hook variables
 
 (defcustom emerge-startup-hook nil
   "Hook to run in the merge buffer after the merge has been set up."
-  :type 'hook
-  :group 'emerge)
+  :type 'hook)
 (defcustom emerge-select-hook nil
   "Hook to run after a difference has been selected.
 The variable `n' holds the (internal) number of the difference."
-  :type 'hook
-  :group 'emerge)
+  :type 'hook)
 (defcustom emerge-unselect-hook nil
   "Hook to run after a difference has been unselected.
 The variable `n' holds the (internal) number of the difference."
-  :type 'hook
-  :group 'emerge)
+  :type 'hook)
 
 ;; Variables to control the default directories of the arguments to
 ;; Emerge commands.
@@ -171,8 +159,7 @@ The variable `n' holds the (internal) number of the difference."
   "If nil, default dir for filenames in emerge is `default-directory'.
 If non-nil, filenames complete in the directory of the last argument of the
 same type to an `emerge-files...' command."
-  :type 'boolean
-  :group 'emerge)
+  :type 'boolean)
 
 (defvar emerge-last-dir-A nil
   "Last directory for the first file of an `emerge-files...' command.")
@@ -233,26 +220,23 @@ depend on the flags."
 (emerge-new-flags)
 
 (defcustom emerge-min-visible-lines 3
-  "Number of lines that we want to show above and below the flags when we are
-displaying a difference."
-  :type 'integer
-  :group 'emerge)
+  "Number of lines to show above and below the flags when displaying a difference."
+  :type 'natnum)
 
 (defcustom emerge-temp-file-prefix
   (expand-file-name "emerge" temporary-file-directory)
   "Prefix to put on Emerge temporary file names.
 Do not start with `~/' or `~USERNAME/'."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 
 (make-obsolete-variable 'emerge-temp-file-prefix
 			"customize `temporary-file-directory' instead."
 			"24.4" 'set)
 
-(defcustom emerge-temp-file-mode 384	; u=rw only
-  "Mode for Emerge temporary files."
-  :type 'integer
-  :group 'emerge)
+(defcustom emerge-temp-file-mode #o600
+  "Mode for Emerge temporary files.
+This is decimal, not octal.  The default is 384 (0600 in octal)."
+  :type 'integer)
 
 (make-obsolete-variable 'emerge-temp-file-mode
 			"it has no effect, temporary files are always private."
@@ -268,8 +252,7 @@ The template is inserted as a string, with the following interpolations:
 Don't forget to end the template with a newline.
 Note that this variable can be made local to a particular merge buffer by
 giving a prefix argument to `emerge-set-combine-versions-template'."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 
 ;; Build keymaps
 
@@ -294,8 +277,7 @@ Makes Emerge commands directly available.")
 (defcustom emerge-command-prefix "\C-c\C-c"
   "Command prefix for Emerge commands in `edit' mode.
 Must be set before Emerge is loaded."
-  :type 'string
-  :group 'emerge)
+  :type 'string)
 
 ;; This function sets up the fixed keymaps.  It is executed when the first
 ;; Emerge is done to allow the user maximum time to set up the global keymap.
@@ -455,8 +437,7 @@ or nil if there is none.")
   '((buffer-modified-p set-buffer-modified-p)
     buffer-read-only
     buffer-auto-save-file-name)
-  "Variables and properties of a buffer which are saved, modified and restored
-during a merge.")
+  "Variables and properties of a buffer to save, modify and restore during a merge.")
 (defconst emerge-merging-values '(nil t nil)
   "Values to be assigned to emerge-saved-variables during a merge.")
 
@@ -502,10 +483,10 @@ replaced by emerge-fast-keymap.")
 (emerge-defvar-local emerge-old-keymap nil
   "The original local keymap for the merge buffer.")
 (emerge-defvar-local emerge-auto-advance nil
-		     "If non-nil, emerge-select-A and emerge-select-B automatically advance to
+  "If non-nil, emerge-select-A and emerge-select-B automatically advance to
 the next difference.")
 (emerge-defvar-local emerge-skip-prefers nil
-		     "If non-nil, differences for which there is a preference are automatically
+  "If non-nil, differences for which there is a preference are automatically
 skipped.")
 (emerge-defvar-local emerge-quit-hook nil
   "Hooks to run in the merge buffer after the merge has been finished.
@@ -602,6 +583,7 @@ This is *not* a user option, since Emerge uses it for its own processing.")
   (with-current-buffer
       emerge-diff-buffer
     (erase-buffer)
+    (setq default-directory temporary-file-directory)
     (shell-command
      (format "%s %s %s %s"
 	     (shell-quote-argument emerge-diff-program)
@@ -774,16 +756,17 @@ This is *not* a user option, since Emerge uses it for its own processing.")
 (defun emerge-make-diff3-list (file-A file-B file-ancestor)
   (setq emerge-diff-buffer (get-buffer-create "*emerge-diff*"))
   (with-current-buffer
-   emerge-diff-buffer
-   (erase-buffer)
-   (shell-command
-    (format "%s %s %s %s %s"
-	    (shell-quote-argument emerge-diff3-program)
-            emerge-diff-options
-	    (shell-quote-argument file-A)
-	    (shell-quote-argument file-ancestor)
-	    (shell-quote-argument file-B))
-    t))
+      emerge-diff-buffer
+    (erase-buffer)
+    (setq default-directory temporary-file-directory)
+    (shell-command
+     (format "%s %s %s %s %s"
+	     (shell-quote-argument emerge-diff3-program)
+             emerge-diff-options
+	     (shell-quote-argument file-A)
+	     (shell-quote-argument file-ancestor)
+	     (shell-quote-argument file-B))
+     t))
   (emerge-prepare-error-list emerge-diff3-ok-lines-regexp)
   (emerge-convert-diffs-to-markers
    emerge-A-buffer emerge-B-buffer emerge-merge-buffer
@@ -846,7 +829,7 @@ This is *not* a user option, since Emerge uses it for its own processing.")
 ;;;###autoload
 (defun emerge-files (_arg file-A file-B file-out &optional startup-hooks
 		     quit-hooks)
-  "Run Emerge on two files."
+  "Run Emerge on two files FILE-A and FILE-B."
   (interactive
    (let (f)
      (list current-prefix-arg
@@ -895,10 +878,10 @@ This is *not* a user option, since Emerge uses it for its own processing.")
 
 ;;;###autoload
 (defun emerge-buffers (buffer-A buffer-B &optional startup-hooks quit-hooks)
-  "Run Emerge on two buffers."
+  "Run Emerge on two buffers BUFFER-A and BUFFER-B."
   (interactive "bBuffer A to merge: \nbBuffer B to merge: ")
-  (let ((emerge-file-A (emerge-make-temp-file "A"))
-	(emerge-file-B (emerge-make-temp-file "B")))
+  (let ((emerge-file-A (make-temp-file "emerge-A"))
+        (emerge-file-B (make-temp-file "emerge-B")))
     (with-current-buffer
      buffer-A
      (write-region (point-min) (point-max) emerge-file-A nil 'no-message))
@@ -921,9 +904,9 @@ This is *not* a user option, since Emerge uses it for its own processing.")
   "Run Emerge on two buffers, giving another buffer as the ancestor."
   (interactive
    "bBuffer A to merge: \nbBuffer B to merge: \nbAncestor buffer: ")
-  (let ((emerge-file-A (emerge-make-temp-file "A"))
-	(emerge-file-B (emerge-make-temp-file "B"))
-	(emerge-file-ancestor (emerge-make-temp-file "anc")))
+  (let ((emerge-file-A (make-temp-file "emerge-A"))
+        (emerge-file-B (make-temp-file "emerge-B"))
+        (emerge-file-ancestor (make-temp-file "emerge-ancestor")))
     (with-current-buffer
      buffer-A
      (write-region (point-min) (point-max) emerge-file-A nil 'no-message))
@@ -1059,8 +1042,8 @@ This is *not* a user option, since Emerge uses it for its own processing.")
                                   startup-hooks quit-hooks _output-file)
   (let ((buffer-A (get-buffer-create (format "%s,%s" file revision-A)))
 	(buffer-B (get-buffer-create (format "%s,%s" file revision-B)))
-	(emerge-file-A (emerge-make-temp-file "A"))
-	(emerge-file-B (emerge-make-temp-file "B")))
+        (emerge-file-A (make-temp-file "emerge-A"))
+        (emerge-file-B (make-temp-file "emerge-B")))
     ;; Get the revisions into buffers
     (with-current-buffer
      buffer-A
@@ -1096,9 +1079,9 @@ This is *not* a user option, since Emerge uses it for its own processing.")
   (let ((buffer-A (get-buffer-create (format "%s,%s" file revision-A)))
 	(buffer-B (get-buffer-create (format "%s,%s" file revision-B)))
 	(buffer-ancestor (get-buffer-create (format "%s,%s" file ancestor)))
-	(emerge-file-A (emerge-make-temp-file "A"))
-	(emerge-file-B (emerge-make-temp-file "B"))
-	(emerge-ancestor (emerge-make-temp-file "ancestor")))
+        (emerge-file-A (make-temp-file "emerge-A"))
+        (emerge-file-B (make-temp-file "emerge-B"))
+        (emerge-ancestor (make-temp-file "emerge-ancestor")))
     ;; Get the revisions into buffers
     (with-current-buffer
      buffer-A
@@ -1245,8 +1228,7 @@ Otherwise, the A or B file present is copied to the output file."
 
 (defcustom emerge-merge-directories-filename-regexp "[^.]"
   "Regexp describing files to be processed by `emerge-merge-directories'."
-  :type 'regexp
-  :group 'emerge)
+  :type 'regexp)
 
 ;;;###autoload
 (defun emerge-merge-directories (a-dir b-dir ancestor-dir output-dir)
@@ -1320,7 +1302,7 @@ Otherwise, the A or B file present is copied to the output file."
 	      (setq ancestor-dir-files (cdr ancestor-dir-files))))
 	(if output-dir
 	    (insert "output=" output-dir f "\t"))
-	(backward-delete-char 1)
+	(delete-char -1)
 	(insert "\n")))))
 
 ;;; Common setup routines
@@ -1668,7 +1650,7 @@ the height of the merge window.
 (defun emerge-scroll-left (&optional arg)
   "Scroll left all three merge buffers, if they are in windows.
 If an argument is given, that is how many columns are scrolled, else nearly
-the width of the A and B windows.  `C-u -' alone as argument scrolls half the
+the width of the A and B windows.  \\`C-u -' alone as argument scrolls half the
 width of the A and B windows."
   (interactive "P")
   (emerge-operate-on-windows
@@ -1696,7 +1678,7 @@ width of the A and B windows."
 (defun emerge-scroll-right (&optional arg)
   "Scroll right all three merge buffers, if they are in windows.
 If an argument is given, that is how many columns are scrolled, else nearly
-the width of the A and B windows.  `C-u -' alone as argument scrolls half the
+the width of the A and B windows.  \\`C-u -' alone as argument scrolls half the
 width of the A and B windows."
   (interactive "P")
   (emerge-operate-on-windows
@@ -1795,15 +1777,15 @@ BEG must be at the beginning of a line."
 	  (emerge-unselect-and-select-difference n)))
     (error "At beginning")))
 
-(defun emerge-jump-to-difference (difference-number)
-  "Go to the N-th difference."
+(defun emerge-jump-to-difference (n)
+  "Go to difference number N."
   (interactive "p")
   (let ((inhibit-read-only t))
-    (setq difference-number (1- difference-number))
-    (if (and (>= difference-number -1)
-	     (< difference-number (1+ emerge-number-of-differences)))
-	(emerge-unselect-and-select-difference difference-number)
-      (error "Bad difference number"))))
+    (setq n (1- n))
+    (if (and (>= n -1)
+             (< n (1+ emerge-number-of-differences)))
+        (emerge-unselect-and-select-difference n)
+      (error "Bad difference number: %s" n))))
 
 (defun emerge-abort ()
   "Abort the Emerge session."
@@ -1812,7 +1794,7 @@ BEG must be at the beginning of a line."
 
 (defun emerge-quit (arg)
   "Finish the Emerge session and exit Emerge.
-Prefix argument means to abort rather than successfully finish.
+Prefix argument ARG means to abort rather than successfully finish.
 The difference depends on how the merge was started,
 but usually means to not write over one of the original files, or to signal
 to some process which invoked Emerge a failure code.
@@ -1871,7 +1853,7 @@ buffer after this will cause serious problems."
   "Select the A variant of this difference.
 Refuses to function if this difference has been edited, i.e., if it
 is neither the A nor the B variant.
-A prefix argument forces the variant to be selected
+With prefix argument FORCE, force the variant to be selected
 even if the difference has been edited."
   (interactive "P")
   (let ((operate #'emerge-select-A-edit)
@@ -1898,7 +1880,7 @@ even if the difference has been edited."
   "Select the B variant of this difference.
 Refuses to function if this difference has been edited, i.e., if it
 is neither the A nor the B variant.
-A prefix argument forces the variant to be selected
+With prefix argument FORCE, force the variant to be selected
 even if the difference has been edited."
   (interactive "P")
   (let ((operate #'emerge-select-B-edit)
@@ -1995,8 +1977,8 @@ must be prefixed with \\<emerge-fast-keymap>\\[emerge-basic-keymap]."
   "Toggle Auto-Advance mode, for Emerge.
 This mode causes `emerge-select-A' and `emerge-select-B' to automatically
 advance to the next difference.
-With a positive argument, turn on Auto-Advance mode.
-With a negative argument, turn off Auto-Advance mode."
+With a positive argument ARG, turn on Auto-Advance mode.
+With a negative argument ARG, turn off Auto-Advance mode."
   (interactive "P")
   (setq emerge-auto-advance (if (null arg)
 				(not emerge-auto-advance)
@@ -2010,8 +1992,8 @@ With a negative argument, turn off Auto-Advance mode."
   "Toggle Skip-Prefers mode, for Emerge.
 This mode causes `emerge-next-difference' and `emerge-previous-difference'
 to automatically skip over differences for which there is a preference.
-With a positive argument, turn on Skip-Prefers mode.
-With a negative argument, turn off Skip-Prefers mode."
+With a positive argument ARG, turn on Skip-Prefers mode.
+With a negative argument ARG, turn off Skip-Prefers mode."
   (interactive "P")
   (setq emerge-skip-prefers (if (null arg)
 				(not emerge-skip-prefers)
@@ -2050,7 +2032,7 @@ With a negative argument, turn off Skip-Prefers mode."
 (defun emerge-insert-A (arg)
   "Insert the A variant of this difference at the point.
 Leaves point after text, mark before.
-With prefix argument, puts point before, mark after."
+With prefix argument ARG, puts point before, mark after."
   (interactive "P")
   (emerge-validate-difference)
   (let* ((diff-vector
@@ -2068,7 +2050,7 @@ With prefix argument, puts point before, mark after."
 (defun emerge-insert-B (arg)
   "Insert the B variant of this difference at the point.
 Leaves point after text, mark before.
-With prefix argument, puts point before, mark after."
+With prefix argument ARG, puts point before, mark after."
   (interactive "P")
   (emerge-validate-difference)
   (let* ((diff-vector
@@ -2084,8 +2066,8 @@ With prefix argument, puts point before, mark after."
       (goto-char opoint))))
 
 (defun emerge-mark-difference (arg)
-  "Leaves the point before this difference and the mark after it.
-With prefix argument, puts mark before, point after."
+  "Leave the point before this difference and the mark after it.
+With prefix argument ARG, put mark before, point after."
   (interactive "P")
   (emerge-validate-difference)
   (let* ((diff-vector
@@ -2101,7 +2083,7 @@ With prefix argument, puts mark before, point after."
 
 (defun emerge-file-names ()
   "Show the names of the buffers or files being operated on by Emerge.
-Use C-u l to reset the windows afterward."
+Use \\[universal-argument] l to reset the windows afterward."
   (interactive)
   (delete-other-windows)
   (let ((temp-buffer-show-function
@@ -2144,7 +2126,7 @@ Use C-u l to reset the windows afterward."
 
 (defun emerge-join-differences (arg)
   "Join the selected difference with the following one.
-With a prefix argument, join with the preceding one."
+With a prefix argument ARG, join with the preceding one."
   (interactive "P")
   (let ((n emerge-current-difference))
     ;; adjust n to be first difference to join
@@ -2354,9 +2336,9 @@ ancestor version does not share.)"
 ;; to have it ask for a buffer.
 (defun emerge-find-difference (arg)
   "Find the difference containing the current position of the point.
-If there is no containing difference and the prefix argument is positive,
-it finds the nearest following difference.  A negative prefix argument finds
-the nearest previous difference."
+If there is no containing difference and the prefix argument ARG
+is positive, find the nearest following difference.  With
+negative prefix argument, find the nearest previous difference."
   (interactive "P")
   (cond ((eq (current-buffer) emerge-A-buffer)
 	 (emerge-find-difference-A arg))
@@ -2366,9 +2348,9 @@ the nearest previous difference."
 
 (defun emerge-find-difference-merge (arg)
   "Find the difference containing point, in the merge buffer.
-If there is no containing difference and the prefix argument is positive,
-it finds the nearest following difference.  A negative prefix argument finds
-the nearest previous difference."
+If there is no containing difference and the prefix argument ARG
+is positive, find the nearest following difference.  With
+negative prefix argument, find the nearest previous difference."
   (interactive "P")
   ;; search for the point in the merge buffer, using the markers
   ;; for the beginning and end of the differences in the merge buffer
@@ -2377,9 +2359,9 @@ the nearest previous difference."
 (defun emerge-find-difference-A (arg)
   "Find the difference containing point, in the A buffer.
 This command must be executed in the merge buffer.
-If there is no containing difference and the prefix argument is positive,
-it finds the nearest following difference.  A negative prefix argument finds
-the nearest previous difference."
+If there is no containing difference and the prefix argument ARG
+is positive, find the nearest following difference.  With
+negative prefix argument, find the nearest previous difference."
   (interactive "P")
   ;; search for the point in the A buffer, using the markers
   ;; for the beginning and end of the differences in the A buffer
@@ -2390,9 +2372,9 @@ the nearest previous difference."
 (defun emerge-find-difference-B (arg)
   "Find the difference containing point, in the B buffer.
 This command must be executed in the merge buffer.
-If there is no containing difference and the prefix argument is positive,
-it finds the nearest following difference.  A negative prefix argument finds
-the nearest previous difference."
+If there is no containing difference and the prefix argument ARG
+is positive, find the nearest following difference.  With
+negative prefix argument, find the nearest previous difference."
   (interactive "P")
   ;; search for the point in the B buffer, using the markers
   ;; for the beginning and end of the differences in the B buffer
@@ -2472,8 +2454,10 @@ merge buffers."
 (defun emerge-set-combine-template (string &optional localize)
   "Set `emerge-combine-versions-template' to STRING.
 This value controls how `emerge-combine-versions' combines the two versions.
-With prefix argument, `emerge-combine-versions-template' is made local to this
-merge buffer.  Localization is permanent for any particular merge buffer."
+
+With prefix argument LOCALIZE, `emerge-combine-versions-template'
+is made local to this merge buffer.  Localization is permanent
+for any particular merge buffer."
   (interactive "s\nP")
   (if localize
       (make-local-variable 'emerge-combine-versions-template))
@@ -2486,8 +2470,10 @@ merge buffer.  Localization is permanent for any particular merge buffer."
 (defun emerge-set-combine-versions-template (start end &optional localize)
   "Copy region into `emerge-combine-versions-template'.
 This controls how `emerge-combine-versions' will combine the two versions.
-With prefix argument, `emerge-combine-versions-template' is made local to this
-merge buffer.  Localization is permanent for any particular merge buffer."
+
+With prefix argument LOCALIZE, `emerge-combine-versions-template'
+is made local to this merge buffer.  Localization is permanent
+for any particular merge buffer."
   (interactive "r\nP")
   (if localize
       (make-local-variable 'emerge-combine-versions-template))
@@ -2501,8 +2487,9 @@ merge buffer.  Localization is permanent for any particular merge buffer."
   "Combine versions using the template in `emerge-combine-versions-template'.
 Refuses to function if this difference has been edited, i.e., if it is
 neither the A nor the B variant.
-An argument forces the variant to be selected even if the difference has
-been edited."
+
+With prefix argument FORCE, force the variant to be selected even
+if the difference has been edited."
   (interactive "P")
   (emerge-combine-versions-internal emerge-combine-versions-template force))
 
@@ -2512,8 +2499,9 @@ See documentation of the variable `emerge-combine-versions-template'
 for how the template is interpreted.
 Refuses to function if this difference has been edited, i.e., if it is
 neither the A nor the B variant.
-An argument forces the variant to be selected even if the difference has
-been edited.
+
+With prefix argument CHAR, force the variant to be selected even
+if the difference has been edited.
 
 Interactively, reads the register using `register-read-with-preview'."
   (interactive (list
@@ -2561,9 +2549,9 @@ Interactively, reads the register using `register-read-with-preview'."
     (if emerge-auto-advance (emerge-next-difference))))
 
 (defun emerge-set-merge-mode (mode)
-  "Set the major mode in a merge buffer.
-Overrides any change that the mode might make to the mode line or local
-keymap.  Leaves merge in fast mode."
+  "Set the major mode to MODE in a merge buffer.
+Override any change that the mode might make to the mode line or
+local keymap.  Leave merge in fast mode."
   (interactive
    (list (intern (completing-read "New major mode for merge buffer: "
 				  obarray 'commandp t nil))))
@@ -2700,8 +2688,8 @@ keymap.  Leaves merge in fast mode."
 	(emerge-refresh-mode-line))))
 
 (defun emerge-select-version (force a-version b-version neither-version)
-  "Perform tests to see whether user should be allowed to select a version
-of this difference:
+  "Test if user should be allowed to select a version of this difference.
+This is the case if:
   a valid difference has been selected; and
   the difference text in the merge buffer is:
     the A version (execute a-version), or
@@ -2757,15 +2745,14 @@ Otherwise, signal an error."
 	 alternative-default-dir
 	 (not (string-equal alternative-default-dir
 			    (file-name-directory A-file))))
-    (read-file-name (format "%s (default %s): "
-			    prompt (file-name-nondirectory A-file))
+    (read-file-name (format-prompt prompt (file-name-nondirectory A-file))
 		    alternative-default-dir
 		    (concat alternative-default-dir
 			    (file-name-nondirectory A-file))
 		    (and must-match 'confirm)))
    ;; If there is a default file, use it.
    (default-file
-     (read-file-name (format "%s (default %s): " prompt default-file)
+     (read-file-name (format-prompt prompt default-file)
 		     ;; If emerge-default-last-directories is set, use the
 		     ;; directory from the same argument of the last call of
 		     ;; Emerge as the default for this argument.
@@ -2867,12 +2854,6 @@ Otherwise, signal an error."
     (setq vars (cdr vars))
     (setq values (cdr values))))
 
-;; When the pointless option emerge-temp-file-prefix goes,
-;; make this function obsolete too, and just use make-temp-file.
-(defun emerge-make-temp-file (prefix)
-  "Make a private temporary file based on `emerge-temp-file-prefix'."
-  (make-temp-file (concat emerge-temp-file-prefix prefix)))
-
 ;;; Functions that query the user before he can write out the current buffer.
 
 (defun emerge-query-write-file ()
@@ -2944,7 +2925,7 @@ around the current difference are removed."
 
 ;; Define a key, even if a prefix of it is defined
 (defun emerge-force-define-key (keymap key definition)
-  "Like `define-key', but forcibly creates prefix characters as needed.
+  "Like `define-key', but forcibly create prefix characters as needed.
 If some prefix of KEY has a non-prefix definition, it is redefined."
   ;; Find out if a prefix of key is defined
   (let ((v (lookup-key keymap key)))
@@ -2956,6 +2937,7 @@ If some prefix of KEY has a non-prefix definition, it is redefined."
 
 ;; Define a key if it (or a prefix) is not already defined in the map.
 (defun emerge-define-key-if-possible (keymap key definition)
+  (declare (obsolete keymap-set "29.1"))
   ;; look up the present definition of the key
   (let ((present (lookup-key keymap key)))
     (if (integerp present)
@@ -2973,6 +2955,7 @@ If some prefix of KEY has a non-prefix definition, it is redefined."
 If the name won't fit on one line, the minibuffer is expanded to hold it,
 and the command waits for a keystroke from the user.  If the keystroke is
 SPC, it is ignored; if it is anything else, it is processed as a command."
+  (declare (obsolete nil "29.1"))
   (interactive)
   (let ((name (buffer-file-name)))
     (or name
@@ -3052,7 +3035,7 @@ See also `auto-save-file-name-p'."
 		 (if (>= b ?/)
 		     (setq b (1+ b)))
 		 (char-to-string b))
-	       bins "")))
+	       bins)))
 
 ;; Quote any /s in a string by replacing them with \!.
 ;; Also, replace any \s by \\, to make it one-to-one.
@@ -3071,9 +3054,10 @@ See also `auto-save-file-name-p'."
 
 (defcustom emerge-metachars nil
   "No longer used.  Emerge now uses `shell-quote-argument'."
-  :type '(choice (const nil) regexp)
-  :group 'emerge)
+  :type '(choice (const nil) regexp))
 (make-obsolete-variable 'emerge-metachars nil "26.1")
+
+(define-obsolete-function-alias 'emerge-make-temp-file #'make-temp-file "30.1")
 
 (provide 'emerge)
 

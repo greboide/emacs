@@ -1,6 +1,6 @@
 /* syssignal.h - System-dependent definitions for signals.
 
-Copyright (C) 1993, 1999, 2001-2018 Free Software Foundation, Inc.
+Copyright (C) 1993, 1999, 2001-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -22,7 +22,9 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 
 #include <signal.h>
 
-extern void init_signals (bool);
+#include <attribute.h>
+
+extern void init_signals (void);
 extern void block_child_signal (sigset_t *);
 extern void unblock_child_signal (sigset_t const *);
 extern void block_interrupt_signal (sigset_t *);
@@ -66,6 +68,11 @@ char const *safe_strsignal (int) ATTRIBUTE_CONST;
 
 #ifndef SA_SIGINFO
 # define SA_SIGINFO 0
+#endif
+
+#ifdef WINDOWSNT
+#define raise(sig) w32_raise(sig)
+int w32_raise (int);
 #endif
 
 #ifndef emacs_raise

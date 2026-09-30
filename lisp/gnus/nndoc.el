@@ -1,6 +1,6 @@
-;;; nndoc.el --- single file access for Gnus
+;;; nndoc.el --- single file access for Gnus  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1995-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1995-2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
 ;;	Masanobu UMEDA <umerin@flab.flab.fujitsu.junet>
@@ -23,7 +23,7 @@
 
 ;;; Commentary:
 
-;; For Outlook mail boxes format, see http://mbx2mbox.sourceforge.net/
+;; For Outlook mail boxes format, see https://mbx2mbox.sourceforge.net/
 
 ;;; Code:
 
@@ -33,7 +33,6 @@
 (require 'nnoo)
 (require 'gnus-util)
 (require 'mm-util)
-(eval-when-compile (require 'cl-lib))
 
 (nnoo-declare nndoc)
 
@@ -218,6 +217,7 @@ from the document.")
 
 (defconst nndoc-version "nndoc 1.0"
   "nndoc version.")
+(make-obsolete-variable 'nndoc-version 'emacs-version "29.1")
 
 
 
@@ -225,7 +225,7 @@ from the document.")
 
 (nnoo-define-basics nndoc)
 
-(deffoo nndoc-retrieve-headers (articles &optional newsgroup server fetch-old)
+(deffoo nndoc-retrieve-headers (articles &optional newsgroup server _fetch-old)
   (when (nndoc-possibly-change-buffer newsgroup server)
     (with-current-buffer nntp-server-buffer
       (erase-buffer)
@@ -256,11 +256,10 @@ from the document.")
 
 (deffoo nndoc-request-article (article &optional newsgroup server buffer)
   (nndoc-possibly-change-buffer newsgroup server)
-  (save-excursion
-    (let ((buffer (or buffer nntp-server-buffer))
-	  (entry (cdr (assq article nndoc-dissection-alist)))
-	  beg)
-      (set-buffer buffer)
+  (let ((buffer (or buffer nntp-server-buffer))
+        (entry (cdr (assq article nndoc-dissection-alist)))
+        beg)
+    (with-current-buffer buffer
       (erase-buffer)
       (when entry
 	(cond
@@ -281,7 +280,7 @@ from the document.")
 	    (funcall nndoc-article-transform-function article))
 	  t))))))
 
-(deffoo nndoc-request-group (group &optional server dont-check info)
+(deffoo nndoc-request-group (group &optional server dont-check _info)
   "Select news GROUP."
   (let (number)
     (cond
@@ -302,15 +301,14 @@ from the document.")
     (nndoc-request-group group server))
   t)
 
-(deffoo nndoc-request-type (group &optional article)
+(deffoo nndoc-request-type (_group &optional article)
   (cond ((not article) 'unknown)
 	(nndoc-post-type nndoc-post-type)
 	(t 'unknown)))
 
 (deffoo nndoc-close-group (group &optional server)
   (nndoc-possibly-change-buffer group server)
-  (and nndoc-current-buffer
-       (buffer-name nndoc-current-buffer)
+  (and (buffer-live-p nndoc-current-buffer)
        (kill-buffer nndoc-current-buffer))
   (setq nndoc-group-alist (delq (assoc group nndoc-group-alist)
 				nndoc-group-alist))
@@ -319,24 +317,23 @@ from the document.")
   (setq nndoc-dissection-alist nil)
   t)
 
-(deffoo nndoc-request-list (&optional server)
+(deffoo nndoc-request-list (&optional _server)
   t)
 
-(deffoo nndoc-request-newgroups (date &optional server)
+(deffoo nndoc-request-newgroups (_date &optional _server)
   nil)
 
-(deffoo nndoc-request-list-newsgroups (&optional server)
+(deffoo nndoc-request-list-newsgroups (&optional _server)
   nil)
 
 
 ;;; Internal functions.
 
-(defun nndoc-possibly-change-buffer (group source)
+(defun nndoc-possibly-change-buffer (group _source)
   (let (buf)
     (cond
      ;; The current buffer is this group's buffer.
-     ((and nndoc-current-buffer
-	   (buffer-name nndoc-current-buffer)
+     ((and (buffer-live-p nndoc-current-buffer)
 	   (eq nndoc-current-buffer
 	       (setq buf (cdr (assoc group nndoc-group-alist))))))
      ;; We change buffers by taking an old from the group alist.
@@ -344,18 +341,18 @@ from the document.")
      (buf
       (setq nndoc-current-buffer buf))
      ;; It's a totally new group.
-     ((or (and (bufferp nndoc-address)
-	       (buffer-name nndoc-address))
+     ((or (buffer-live-p nndoc-address)
 	  (and (stringp nndoc-address)
 	       (file-exists-p nndoc-address)
 	       (not (file-directory-p nndoc-address))))
       (push (cons group (setq nndoc-current-buffer
-			      (get-buffer-create
+			      (gnus-get-buffer-create
 			       (concat " *nndoc " group "*"))))
 	    nndoc-group-alist)
       (setq nndoc-dissection-alist nil)
       (with-current-buffer nndoc-current-buffer
 	(erase-buffer)
+	(set-buffer-multibyte nil)
 	(condition-case error
 	    (if (and (stringp nndoc-address)
 		     (string-match nndoc-binary-file-names nndoc-address))
@@ -429,9 +426,9 @@ from the document.")
 	  (setq result nil))))
     (unless (or result results)
       (error "Document is not of any recognized type"))
-    (if result
-	(car entry)
-      (cadar (last (sort results 'car-less-than-car))))))
+    (car (if result
+	     entry
+	   (cdar (last (sort results #'car-less-than-car)))))))
 
 ;;;
 ;;; Built-in type predicates and functions
@@ -680,7 +677,7 @@ from the document.")
        (search-forward "\ncommit " nil t)
        (search-forward "\nAuthor: " nil t)))
 
-(defun nndoc-transform-git-article (article)
+(defun nndoc-transform-git-article (_article)
   (goto-char (point-min))
   (when (re-search-forward "^Author: " nil t)
     (replace-match "From: " t t)))
@@ -701,10 +698,10 @@ from the document.")
 
 (defun nndoc-lanl-gov-announce-type-p ()
   (when (let ((case-fold-search nil))
-	  (re-search-forward "^\\\\\\\\\n\\(Paper\\( (\\*cross-listing\\*)\\)?: [a-zA-Z-\\.]+/[0-9]+\\|arXiv:\\)" nil t))
+	  (re-search-forward "^\\\\\\\\\n\\(Paper\\( (\\*cross-listing\\*)\\)?: [a-zA-Z\\.-]+/[0-9]+\\|arXiv:\\)" nil t))
     t))
 
-(defun nndoc-transform-lanl-gov-announce (article)
+(defun nndoc-transform-lanl-gov-announce (_article)
   (let ((case-fold-search nil))
     (goto-char (point-max))
     (when (re-search-backward "^\\\\\\\\ +( *\\([^ ]*\\) , *\\([^ ]*\\))" nil t)
@@ -732,7 +729,7 @@ from the document.")
       (save-restriction
 	(narrow-to-region (car entry) (nth 1 entry))
 	(goto-char (point-min))
-	(when (looking-at "^\\(Paper.*: \\|arXiv:\\)\\([0-9a-zA-Z-\\./]+\\)")
+	(when (looking-at "^\\(Paper.*: \\|arXiv:\\)\\([0-9a-zA-Z\\./-]+\\)")
 	  (setq subject (concat " (" (match-string 2) ")"))
 	  (when (re-search-forward "^From: \\(.*\\)" nil t)
 	    (setq from (concat "<"
@@ -769,9 +766,9 @@ from the document.")
 
 (defun nndoc-read-little-endian ()
   (+ (prog1 (char-after) (forward-char 1))
-     (lsh (prog1 (char-after) (forward-char 1)) 8)
-     (lsh (prog1 (char-after) (forward-char 1)) 16)
-     (lsh (prog1 (char-after) (forward-char 1)) 24)))
+     (ash (prog1 (char-after) (forward-char 1)) 8)
+     (ash (prog1 (char-after) (forward-char 1)) 16)
+     (ash (prog1 (char-after) (forward-char 1)) 24)))
 
 (defun nndoc-oe-dbx-decode-block ()
   (list
@@ -788,7 +785,7 @@ from the document.")
       (setq blk (nndoc-oe-dbx-decode-block)))
     (while (and blk (> (car blk) 0) (or (zerop (nth 3 blk))
 					(> (nth 3 blk) p)))
-      (push (list (cl-incf i) p nil nil nil 0) nndoc-dissection-alist)
+      (push (list (incf i) p nil nil nil 0) nndoc-dissection-alist)
       (while (and (> (car blk) 0) (> (nth 3 blk) p))
 	(goto-char (1+ (nth 3 blk)))
 	(setq blk (nndoc-oe-dbx-decode-block)))
@@ -861,7 +858,7 @@ from the document.")
 	  nil)
 	(goto-char point))))
 
-(deffoo nndoc-request-accept-article (group &optional server last)
+(deffoo nndoc-request-accept-article (_group &optional _server _last)
   nil)
 
 ;;;
@@ -927,7 +924,7 @@ from the document.")
 		    (and (re-search-backward nndoc-file-end nil t)
 			 (beginning-of-line)))))
 	    (setq body-end (point))
-	    (push (list (cl-incf i) head-begin head-end body-begin body-end
+            (push (list (incf i) head-begin head-end body-begin body-end
 			(count-lines body-begin body-end))
 		  nndoc-dissection-alist)))))
     (setq nndoc-dissection-alist (nreverse nndoc-dissection-alist))))
@@ -1040,7 +1037,7 @@ PARENT is the message-ID of the parent summary line, or nil for none."
 		  (replace-match line t t summary-insert)
 		(concat summary-insert line)))))
     ;; Generate dissection information for this entity.
-    (push (list (cl-incf nndoc-mime-split-ordinal)
+    (push (list (incf nndoc-mime-split-ordinal)
 		head-begin head-end body-begin body-end
 		(count-lines body-begin body-end)
 		article-insert summary-insert)
@@ -1078,7 +1075,7 @@ PARENT is the message-ID of the parent summary line, or nil for none."
 	       part-begin part-end article-insert
 	       (concat position
 		       (and position ".")
-		       (format "%d" (cl-incf part-counter)))
+                       (format "%d" (incf part-counter)))
 	       message-id)))))))))
 
 ;;;###autoload

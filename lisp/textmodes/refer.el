@@ -1,6 +1,6 @@
-;;; refer.el --- look up references in bibliography files
+;;; refer.el --- look up references in bibliography files  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1992, 1996, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1992, 1996, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Ashwin Ram <ashwin@cc.gatech.edu>
 ;; Maintainer: emacs-devel@gnu.org
@@ -46,7 +46,7 @@
 ;;	refer-yank-key to insert it at point in the current buffer
 ;;	(typically as the argument of a \cite{} command).
 ;;
-;;	I use (define-key tex-mode-map    "\C-c\C-y"  'refer-yank-key)
+;;	I use (keymap-set tex-mode-map    "C-c C-y"  'refer-yank-key)
 ;;	to bind this often-used function to a key in (la)tex-mode.
 ;;
 ;;      If the list of bibliography files changes, reinitialize the variable
@@ -92,7 +92,7 @@ it cannot search it.  Include that path explicitly in your BIBINPUTS
 environment if you really want it searched (which is not likely to
 happen anyway)."
   :type '(choice (repeat directory) (const bibinputs) (const texinputs))
-  :group 'refer)
+  :local t)
 
 (defcustom refer-bib-files 'dir
   "List of \\.bib files to search for references,
@@ -111,15 +111,15 @@ list of files when it is first used if `refer-cache-bib-files' is t.  If
 `refer-cache-bib-files' is nil, the list of \\.bib files to use is re-read
 each time it is needed."
   :type '(choice (repeat file) (const nil) (const auto) (const dir))
-  :group 'refer)
+  :local t)
 
 (defcustom refer-cache-bib-files t
   "Variable determining whether the value of `refer-bib-files' should be cached.
-If t, initialize the value of refer-bib-files the first time it is used.  If
-nil, re-read the list of \\.bib files depending on the value of `refer-bib-files'
-each time it is needed."
+If t, initialize the value of refer-bib-files the first time it is used.
+If nil, re-read the list of \\.bib files depending on the value of
+`refer-bib-files' each time it is needed."
   :type 'boolean
-  :group 'refer)
+  :local t)
 
 (defcustom refer-bib-files-regexp "\\\\bibliography"
   "Regexp matching a bibliography file declaration.
@@ -131,12 +131,7 @@ command is expected to specify a file name, or a list of comma-separated file
 names, within curly braces.
 If a specified file doesn't exist and has no extension, a \\.bib extension
 is automatically tried."
-  :type 'regexp
-  :group 'refer)
-
-(make-variable-buffer-local 'refer-bib-files)
-(make-variable-buffer-local 'refer-cache-bib-files)
-(make-variable-buffer-local 'refer-bib-directory)
+  :type 'regexp)
 
 ;;; Internal variables
 (defvar refer-saved-state nil)
@@ -180,7 +175,7 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
 
 (defun refer-find-entry-internal (keywords continue)
    (let ((keywords-list (refer-convert-string-to-list-of-strings keywords))
-         (old-buffer (current-buffer))
+         ;; (old-buffer (current-buffer))
          (old-window (selected-window))
          (new-window (selected-window))
          (files (if continue
@@ -188,7 +183,7 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
                   (setq refer-saved-pos nil)
                   (refer-get-bib-files)))
          (n 0)
-         (found nil)
+         ;; (found nil)
          (file nil))
      ;; find window in which to display bibliography file.
      ;; if a bibliography file is already displayed in a window, use
@@ -249,10 +244,10 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
        (forward-paragraph 1)
        (setq end (point))
        (setq found
-             (refer-every (function (lambda (keyword)
-                                (goto-char begin)
-                                (re-search-forward keyword end t)))
-                    keywords-list))
+             (seq-every-p (lambda (keyword)
+                            (goto-char begin)
+                            (re-search-forward keyword end t))
+                          keywords-list))
        (if (not found)
            (progn
              (setq begin end)
@@ -263,12 +258,6 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
                 (message "Scanning %s... found" file))
        (progn (message "Scanning %s... not found" file)
               nil))))
-
-(defun refer-every (pred l)
-  (cond ((null l) nil)
-	((funcall pred (car l))
-	 (or (null (cdr l))
-	     (refer-every pred (cdr l))))))
 
 (defun refer-convert-string-to-list-of-strings (s)
    (let ((current (current-buffer))
@@ -336,9 +325,9 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
              (list (expand-file-name
                     (if (eq major-mode 'bibtex-mode)
                         (read-file-name
-                         (format ".bib file (default %s): "
-                                 (file-name-nondirectory
-                                  (buffer-file-name)))
+                         (format-prompt ".bib file"
+                                        (file-name-nondirectory
+                                         (buffer-file-name)))
                          (file-name-directory (buffer-file-name))
                          (file-name-nondirectory (buffer-file-name))
                          t)
@@ -377,7 +366,7 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
                    dir files)
                (while (setq dir (car dirs))
                  (setq files
-                       (append (directory-files dir t "\\.bib$")
+                       (append (directory-files dir t "\\.bib\\'")
                                files))
                  (setq dirs (cdr dirs)))
                files))
@@ -394,5 +383,7 @@ found on the last `refer-find-entry' or `refer-find-next-entry'."
     (if refer-cache-bib-files
         (setq refer-bib-files files))
     files))
+
+(define-obsolete-function-alias 'refer-every #'seq-every-p "28.1")
 
 ;;; refer.el ends here

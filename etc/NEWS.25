@@ -1,6 +1,6 @@
 GNU Emacs NEWS -- history of user-visible changes.
 
-Copyright (C) 2014-2018 Free Software Foundation, Inc.
+Copyright (C) 2014-2026 Free Software Foundation, Inc.
 See the end of the file for license conditions.
 
 Please send Emacs bug reports to bug-gnu-emacs@gnu.org.
@@ -72,7 +72,7 @@ using large fonts, at the price of a larger memory footprint.
 ** The version number of CC Mode has been changed from 5.33 to
 5.32.99, although the software itself hasn't changed.  This aims to
 reduce confusion with the standalone CC Mode 5.33 (available from
-http://cc-mode.sourceforge.net), which is a more mature version than
+https://cc-mode.sourceforge.net), which is a more mature version than
 the one included in Emacs 25.2.
 
 
@@ -275,7 +275,7 @@ to produce its authentication key.
 *** Successive single-char deletions are collapsed in the undo-log just like
 successive char insertions.  Which commands invoke this behavior is
 controlled by the new 'undo-auto-amalgamate' function.  See the node
-"Undo" in the ELisp manual for more details.
+"Undo" in the Elisp manual for more details.
 
 *** The heuristic used to insert 'undo-boundary' after each command
 has changed, so that if a command causes changes in more than just the
@@ -283,6 +283,8 @@ current buffer, Emacs now calls 'undo-boundary' in every buffer
 affected by the command.
 
 ** New command 'comment-line' bound to 'C-x C-;'.
+
+** New commands 'upcase-dwim' and 'downcase-dwim'.
 
 ** New and improved facilities for inserting Unicode characters
 
@@ -452,6 +454,11 @@ specified message types for the respective specified targets.
 *** Nick completion is now case-insensitive again after inadvertently
 being made case-sensitive in Emacs 24.2.
 
+** Rcirc
+
+*** Rcirc now supports automatic reconnection.
+Set new user option 'rcirc-reconnect-delay' to non-zero to enable it.
+
 ** MPC
 
 *** New commands, key binds, and menu items.
@@ -543,8 +550,8 @@ When you invoke 'shell' interactively, the '*shell*' buffer will now
 display in a new window.  However, you can customize this behavior via
 the 'display-buffer-alist' variable.  For example, to get
 the old behavior -- '*shell*' buffer displays in current window -- use
-(add-to-list 'display-buffer-alist
-     '("^\\*shell\\*$" . (display-buffer-same-window))).
+    (add-to-list 'display-buffer-alist
+         '("\\`\\*shell\\*\\'" . (display-buffer-same-window))).
 
 ** EIEIO
 *** The ':protection' slot option is not obeyed any more.
@@ -1151,6 +1158,11 @@ few or no entries have changed.
 
 * New Modes and Packages in Emacs 25.1
 
+** New preloaded package 'obarray'
+
+Provides obarray operations under the 'obarray-' prefix, such as
+'obarray-make', 'obarrayp', and 'obarray-map'.
+
 ** pinentry.el allows GnuPG passphrase to be prompted through the
 minibuffer instead of a graphical dialog, depending on whether the gpg
 command is called from Emacs (i.e., INSIDE_EMACS environment variable
@@ -1257,7 +1269,7 @@ SWITCH-BUFFER to 'completion-table-dynamic'.
 
 ** window-configurations no longer record the buffers' marks.
 
-** 'inhibit-modification-hooks' now also inhibits lock-file checks, as
+** 'inhibit-modification-hooks' now also inhibits 'lock-file' checks, as
 well as active region handling.
 
 ** 'deactivate-mark' is now buffer-local.
@@ -1406,10 +1418,10 @@ continued to the next line.
 ** New macro 'define-advice'.
 
 ** Emacs Lisp now supports generators.
-See the "Generators" section of the ELisp manual for the details.
+See the "Generators" section of the Elisp manual for the details.
 
 ** New finalizer facility for running code when objects become unreachable.
-See the "Finalizer Type" subsection in the ELisp manual for the
+See the "Finalizer Type" subsection in the Elisp manual for the
 details.
 
 ** Lexical closures can use '(:documentation FORM)' to build their docstring.
@@ -1492,7 +1504,7 @@ permissions set to temporary values (e.g., for creating private files).
 system's name has changed or if the Emacs process has changed systems.
 To avoid long waits it no longer consults DNS to canonicalize the name
 (in some cases this may affect generated message-id headers - customize
-'message-user-fqdn' if this bothers you). The variable 'system-name'
+'message-user-fqdn' if this bothers you).  The variable 'system-name'
 is now obsolete.
 
 ** Function 'write-region' no longer outputs "Wrote FILE" in batch mode.

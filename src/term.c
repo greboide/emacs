@@ -1,5 +1,5 @@
 /* Terminal control module for terminals described by TERMCAP
-   Copyright (C) 1985-1987, 1993-1995, 1998, 2000-2018 Free Software
+   Copyright (C) 1985-1987, 1993-1995, 1998, 2000-2026 Free Software
    Foundation, Inc.
 
 This file is part of GNU Emacs.
@@ -62,31 +62,34 @@ static int been_here = -1;
 #include "w32term.h"
 #endif
 
+#ifndef HAVE_ANDROID
+
 static void tty_set_scroll_region (struct frame *f, int start, int stop);
-static void turn_on_face (struct frame *, int face_id);
-static void turn_off_face (struct frame *, int face_id);
+static void turn_on_face (struct frame *f, struct face *face);
+static void turn_off_face (struct frame *f, struct face *face);
 static void tty_turn_off_highlight (struct tty_display_info *);
-static void tty_show_cursor (struct tty_display_info *);
-static void tty_hide_cursor (struct tty_display_info *);
 static void tty_background_highlight (struct tty_display_info *tty);
 static void clear_tty_hooks (struct terminal *terminal);
 static void set_tty_hooks (struct terminal *terminal);
 static void dissociate_if_controlling_tty (int fd);
 static void delete_tty (struct terminal *);
-static _Noreturn void maybe_fatal (bool, struct terminal *,
-				   const char *, const char *, ...)
-  ATTRIBUTE_FORMAT_PRINTF (3, 5) ATTRIBUTE_FORMAT_PRINTF (4, 5);
-static _Noreturn void vfatal (const char *str, va_list ap)
-  ATTRIBUTE_FORMAT_PRINTF (1, 0);
 
+#endif /* !HAVE_ANDROID */
+
+static AVOID maybe_fatal (bool, struct terminal *, const char *, const char *,
+			  ...)
+  ATTRIBUTE_FORMAT_PRINTF (3, 5) ATTRIBUTE_FORMAT_PRINTF (4, 5);
+static AVOID vfatal (const char *, va_list) ATTRIBUTE_FORMAT_PRINTF (1, 0);
+
+#ifndef HAVE_ANDROID
 
 #define OUTPUT(tty, a)                                          \
-  emacs_tputs ((tty), a,                                        \
+  emacs_tputs (tty, a,                                        \
                FRAME_TOTAL_LINES (XFRAME (selected_frame)) - curY (tty),	\
                cmputc)
 
-#define OUTPUT1(tty, a) emacs_tputs ((tty), a, 1, cmputc)
-#define OUTPUTL(tty, a, lines) emacs_tputs ((tty), a, lines, cmputc)
+#define OUTPUT1(tty, a) emacs_tputs (tty, a, 1, cmputc)
+#define OUTPUTL(tty, a, lines) emacs_tputs (tty, a, lines, cmputc)
 
 #define OUTPUT_IF(tty, a)                                               \
   do {                                                                  \
@@ -94,7 +97,10 @@ static _Noreturn void vfatal (const char *str, va_list ap)
       OUTPUT (tty, a);							\
   } while (0)
 
-#define OUTPUT1_IF(tty, a) do { if (a) emacs_tputs ((tty), a, 1, cmputc); } while (0)
+#define OUTPUT1_IF(tty, a) \
+  do { if (a) emacs_tputs (tty, a, 1, cmputc); } while (0)
+
+#endif
 
 /* Display space properties.  */
 
@@ -106,21 +112,26 @@ struct tty_display_info *tty_list;
 
 enum no_color_bit
 {
-  NC_STANDOUT	 = 1 << 0,
-  NC_UNDERLINE	 = 1 << 1,
-  NC_REVERSE	 = 1 << 2,
-  NC_ITALIC	 = 1 << 3,
-  NC_DIM	 = 1 << 4,
-  NC_BOLD	 = 1 << 5,
-  NC_INVIS	 = 1 << 6,
-  NC_PROTECT	 = 1 << 7
+  NC_STANDOUT		 = 1 << 0,
+  NC_UNDERLINE		 = 1 << 1,
+  NC_REVERSE		 = 1 << 2,
+  NC_ITALIC		 = 1 << 3,
+  NC_DIM		 = 1 << 4,
+  NC_BOLD		 = 1 << 5,
+  NC_STRIKE_THROUGH	 = 1 << 6,
+  NC_PROTECT		 = 1 << 7,
+  NC_OVERLINE		 = 1 << 8
 };
 
 /* internal state */
 
+#ifndef HAVE_ANDROID
+
 /* The largest frame width in any call to calculate_costs.  */
 
 static int max_frame_cols;
+
+#endif
 
 
 
@@ -131,8 +142,11 @@ static int max_frame_cols;
 struct tty_display_info *gpm_tty = NULL;
 
 /* Last recorded mouse coordinates.  */
+static Lisp_Object last_mouse_frame;
 static int last_mouse_x, last_mouse_y;
 #endif /* HAVE_GPM */
+
+#ifndef HAVE_ANDROID
 
 /* Ring the bell on a tty. */
 
@@ -146,7 +160,7 @@ tty_ring_bell (struct frame *f)
       OUTPUT (tty, (tty->TS_visible_bell && visible_bell
                     ? tty->TS_visible_bell
                     : tty->TS_bell));
-      fflush_unlocked (tty->output);
+      fflush (tty->output);
     }
 }
 
@@ -171,10 +185,15 @@ tty_send_additional_strings (struct terminal *terminal, Lisp_Object sym)
       Lisp_Object string = XCAR (extra_codes);
       if (STRINGP (string))
         {
-	  fwrite_unlocked (SDATA (string), 1, SBYTES (string), tty->output);
+	  struct Lisp_String *str = XSTRING (string);
+	  /* Don't use SBYTES, as that is not protected from GC.  */
+	  ptrdiff_t sbytes
+	    = (str->u.s.size_byte < 0
+	       ? str->u.s.size & ~ARRAY_MARK_FLAG
+	       : str->u.s.size_byte);
+	  fwrite (SDATA (string), 1, sbytes, tty->output);
           if (tty->termscript)
-	    fwrite_unlocked (SDATA (string), 1, SBYTES (string),
-			     tty->termscript);
+	    fwrite (SDATA (string), 1, sbytes, tty->termscript);
         }
     }
 }
@@ -202,7 +221,7 @@ tty_set_terminal_modes (struct terminal *terminal)
       OUTPUT_IF (tty, tty->TS_keypad_mode);
       losecursor (tty);
       tty_send_additional_strings (terminal, Qtty_mode_set_strings);
-      fflush_unlocked (tty->output);
+      fflush (tty->output);
     }
 }
 
@@ -225,7 +244,7 @@ tty_reset_terminal_modes (struct terminal *terminal)
       /* Output raw CR so kernel can track the cursor hpos.  */
       current_tty = tty;
       cmputc ('\r');
-      fflush_unlocked (tty->output);
+      fflush (tty->output);
     }
 }
 
@@ -240,7 +259,7 @@ tty_update_end (struct frame *f)
     tty_show_cursor (tty);
   tty_turn_off_insert (tty);
   tty_background_highlight (tty);
-  fflush_unlocked (tty->output);
+  fflush (tty->output);
 }
 
 /* The implementation of set_terminal_window for termcap frames. */
@@ -323,7 +342,7 @@ tty_toggle_highlight (struct tty_display_info *tty)
 
 /* Make cursor invisible.  */
 
-static void
+void
 tty_hide_cursor (struct tty_display_info *tty)
 {
   if (tty->cursor_hidden == 0)
@@ -340,7 +359,7 @@ tty_hide_cursor (struct tty_display_info *tty)
 
 /* Ensure that cursor is visible.  */
 
-static void
+void
 tty_show_cursor (struct tty_display_info *tty)
 {
   if (tty->cursor_hidden)
@@ -502,8 +521,8 @@ tty_clear_end_of_line (struct frame *f, int first_unused_hpos)
       for (i = curX (tty); i < first_unused_hpos; i++)
 	{
 	  if (tty->termscript)
-	    fputc_unlocked (' ', tty->termscript);
-	  fputc_unlocked (' ', tty->output);
+	    putc (' ', tty->termscript);
+	  putc (' ', tty->output);
 	}
       cmplus (tty, first_unused_hpos - curX (tty));
     }
@@ -535,8 +554,8 @@ encode_terminal_code (struct glyph *src, int src_len,
      multibyte-form.  But, it may be enlarged on demand if
      Vglyph_table contains a string or a composite glyph is
      encountered.  */
-  if (INT_MULTIPLY_WRAPV (src_len, MAX_MULTIBYTE_LENGTH, &required))
-    memory_full (SIZE_MAX);
+  if (ckd_mul (&required, src_len, MAX_MULTIBYTE_LENGTH))
+    memory_full_up ();
   if (encode_terminal_src_size < required)
     encode_terminal_src = xpalloc (encode_terminal_src,
 				   &encode_terminal_src_size,
@@ -549,15 +568,16 @@ encode_terminal_code (struct glyph *src, int src_len,
   nchars = 0;
   while (src < src_end)
     {
-      if (src->type == COMPOSITE_GLYPH)
+      if (src->type == COMPOSITE_GLYPH && ! CHAR_GLYPH_PADDING_P (*src))
 	{
-	  struct composition *cmp UNINIT;
+	  struct composition *cmp;
 	  Lisp_Object gstring UNINIT;
 	  int i;
 
 	  nbytes = buf - encode_terminal_src;
 	  if (src->u.cmp.automatic)
 	    {
+	      cmp = NULL;
 	      gstring = composition_gstring_from_id (src->u.cmp.id);
 	      required = src->slice.cmp.to - src->slice.cmp.from + 1;
 	    }
@@ -565,8 +585,8 @@ encode_terminal_code (struct glyph *src, int src_len,
 	    {
 	      cmp = composition_table[src->u.cmp.id];
 	      required = cmp->glyph_len;
-	      required *= MAX_MULTIBYTE_LENGTH;
 	    }
+	  required *= MAX_MULTIBYTE_LENGTH;
 
 	  if (encode_terminal_src_size - nbytes < required)
 	    {
@@ -577,7 +597,7 @@ encode_terminal_code (struct glyph *src, int src_len,
 	      buf = encode_terminal_src + nbytes;
 	    }
 
-	  if (src->u.cmp.automatic)
+	  if (!cmp)
 	    for (i = src->slice.cmp.from; i <= src->slice.cmp.to; i++)
 	      {
 		Lisp_Object g = LGSTRING_GLYPH (gstring, i);
@@ -719,30 +739,31 @@ encode_terminal_code (struct glyph *src, int src_len,
   return (encode_terminal_dst);
 }
 
+#else /* !HAVE_ANDROID */
 
+unsigned char *
+encode_terminal_code (struct glyph *src, int src_len,
+		      struct coding_system *coding)
+{
+  /* Text terminals are simply not supported on Android.  */
+  coding->produced = 0;
+  return NULL;
+}
+
+#endif /* HAVE_ANDROID */
+
+#ifndef HAVE_ANDROID
 
 /* An implementation of write_glyphs for termcap frames. */
 
 static void
-tty_write_glyphs (struct frame *f, struct glyph *string, int len)
+tty_write_glyphs_1 (struct frame *f, struct glyph *string, int len)
 {
-  unsigned char *conversion_buffer;
-  struct coding_system *coding;
-  int n, stringlen;
-
   struct tty_display_info *tty = FRAME_TTY (f);
-
   tty_turn_off_insert (tty);
   tty_hide_cursor (tty);
 
-  /* Don't dare write in last column of bottom line, if Auto-Wrap,
-     since that would scroll the whole frame on some terminals.  */
-
-  if (AutoWrap (tty)
-      && curY (tty) + 1 == FRAME_TOTAL_LINES (f)
-      && (curX (tty) + len) == FRAME_COLS (f))
-    len --;
-  if (len <= 0)
+  if (len == 0)
     return;
 
   cmplus (tty, len);
@@ -750,54 +771,57 @@ tty_write_glyphs (struct frame *f, struct glyph *string, int len)
   /* If terminal_coding does any conversion, use it, otherwise use
      safe_terminal_coding.  We can't use CODING_REQUIRE_ENCODING here
      because it always return 1 if the member src_multibyte is 1.  */
-  coding = (FRAME_TERMINAL_CODING (f)->common_flags & CODING_REQUIRE_ENCODING_MASK
-	    ? FRAME_TERMINAL_CODING (f) : &safe_terminal_coding);
+  struct coding_system *coding
+    = (FRAME_TERMINAL_CODING (f)->common_flags & CODING_REQUIRE_ENCODING_MASK
+       ? FRAME_TERMINAL_CODING (f) : &safe_terminal_coding);
+
   /* The mode bit CODING_MODE_LAST_BLOCK should be set to 1 only at
      the tail.  */
   coding->mode &= ~CODING_MODE_LAST_BLOCK;
 
-  for (stringlen = len; stringlen != 0; stringlen -= n)
+  for (int stringlen = len, n; stringlen; stringlen -= n, string += n)
     {
       /* Identify a run of glyphs with the same face.  */
       int face_id = string->face_id;
+      struct frame *face_id_frame = string->frame;
 
       for (n = 1; n < stringlen; ++n)
-	if (string[n].face_id != face_id)
+	if (string[n].face_id != face_id || string[n].frame != face_id_frame)
 	  break;
 
       /* Turn appearance modes of the face of the run on.  */
       tty_highlight_if_desired (tty);
-      turn_on_face (f, face_id);
+      struct face *face = FACE_FROM_ID (face_id_frame, face_id);
+      turn_on_face (f, face);
 
       if (n == stringlen)
 	/* This is the last run.  */
 	coding->mode |= CODING_MODE_LAST_BLOCK;
-      conversion_buffer = encode_terminal_code (string, n, coding);
+      unsigned char *conversion_buffer
+	= encode_terminal_code (string, n, coding);
       if (coding->produced > 0)
 	{
 	  block_input ();
-	  fwrite_unlocked (conversion_buffer, 1, coding->produced, tty->output);
-	  clearerr_unlocked (tty->output);
+	  fwrite (conversion_buffer, 1, coding->produced, tty->output);
+	  clearerr (tty->output);
 	  if (tty->termscript)
-	    fwrite_unlocked (conversion_buffer, 1, coding->produced,
-			     tty->termscript);
+	    fwrite (conversion_buffer, 1, coding->produced, tty->termscript);
 	  unblock_input ();
 	}
-      string += n;
 
       /* Turn appearance modes off.  */
-      turn_off_face (f, face_id);
+      turn_off_face (f, face);
       tty_turn_off_highlight (tty);
     }
 
   cmcheckmagic (tty);
 }
 
-#ifdef HAVE_GPM			/* Only used by GPM code.  */
+#ifndef DOS_NT
 
 static void
-tty_write_glyphs_with_face (register struct frame *f, register struct glyph *string,
-			    register int len, register int face_id)
+tty_write_glyphs_with_face (struct frame *f, struct glyph *string,
+			    int len, struct face *face)
 {
   unsigned char *conversion_buffer;
   struct coding_system *coding;
@@ -830,27 +854,27 @@ tty_write_glyphs_with_face (register struct frame *f, register struct glyph *str
 
   /* Turn appearance modes of the face.  */
   tty_highlight_if_desired (tty);
-  turn_on_face (f, face_id);
+  turn_on_face (f, face);
 
   coding->mode |= CODING_MODE_LAST_BLOCK;
   conversion_buffer = encode_terminal_code (string, len, coding);
   if (coding->produced > 0)
     {
       block_input ();
-      fwrite_unlocked (conversion_buffer, 1, coding->produced, tty->output);
-      clearerr_unlocked (tty->output);
+      fwrite (conversion_buffer, 1, coding->produced, tty->output);
+      clearerr (tty->output);
       if (tty->termscript)
-	fwrite_unlocked (conversion_buffer, 1, coding->produced,
-			 tty->termscript);
+	fwrite (conversion_buffer, 1, coding->produced, tty->termscript);
       unblock_input ();
     }
 
   /* Turn appearance modes off.  */
-  turn_off_face (f, face_id);
+  turn_off_face (f, face);
   tty_turn_off_highlight (tty);
 
   cmcheckmagic (tty);
 }
+
 #endif
 
 /* An implementation of insert_glyphs for termcap frames. */
@@ -893,6 +917,7 @@ tty_insert_glyphs (struct frame *f, struct glyph *start, int len)
 
   while (len-- > 0)
     {
+      struct face *face = NULL;
       OUTPUT1_IF (tty, tty->TS_ins_char);
       if (!start)
 	{
@@ -902,7 +927,10 @@ tty_insert_glyphs (struct frame *f, struct glyph *start, int len)
       else
 	{
 	  tty_highlight_if_desired (tty);
-	  turn_on_face (f, start->face_id);
+	  int face_id = start->face_id;
+	  struct frame *face_id_frame = start->frame;
+	  face = FACE_FROM_ID (face_id_frame, face_id);
+	  turn_on_face (f, face);
 	  glyph = start;
 	  ++start;
 	  /* We must open sufficient space for a character which
@@ -923,23 +951,56 @@ tty_insert_glyphs (struct frame *f, struct glyph *start, int len)
       if (coding->produced > 0)
 	{
 	  block_input ();
-	  fwrite_unlocked (conversion_buffer, 1, coding->produced, tty->output);
-	  clearerr_unlocked (tty->output);
+	  fwrite (conversion_buffer, 1, coding->produced, tty->output);
+	  clearerr (tty->output);
 	  if (tty->termscript)
-	    fwrite_unlocked (conversion_buffer, 1, coding->produced,
-			     tty->termscript);
+	    fwrite (conversion_buffer, 1, coding->produced, tty->termscript);
 	  unblock_input ();
 	}
 
       OUTPUT1_IF (tty, tty->TS_pad_inserted_char);
-      if (start)
+      if (face)
 	{
-	  turn_off_face (f, glyph->face_id);
+	  turn_off_face (f, face);
 	  tty_turn_off_highlight (tty);
 	}
     }
 
   cmcheckmagic (tty);
+}
+
+static void
+tty_write_glyphs (struct frame *f, struct glyph *string, int len)
+{
+  struct tty_display_info *tty = FRAME_TTY (f);
+  /* Don't dare write in last column of bottom line, if Auto-Wrap,
+     since that would scroll the whole frame on some terminals.  */
+  if (AutoWrap (tty)
+      && curY (tty) + 1 == FRAME_TOTAL_LINES (f)
+      && curX (tty) + len == FRAME_COLS (f)
+      && len > 0)
+    {
+      /* If writing only one glyph in the last column, make that two so
+	 that we can shift that one glyph into the last column.  FIXME:
+	 Assuming a display width of 1 looks questionable, but that's
+	 done everywhere else involving auto-wrap.  */
+      if (len == 1)
+	{
+	  cmgoto (tty, curY (tty), curX (tty) - 1);
+	  --string;
+	  ++len;
+	}
+
+      /* Write glyphs except the first.  */
+      int old_x = curX (tty), old_y = curY (tty);
+      tty_write_glyphs_1 (f, string + 1, len - 1);
+
+      /* Insert the first glyph, shifting the rest right.  */
+      cmgoto (tty, old_y, old_x);
+      tty_insert_glyphs (f, string, 1);
+    }
+  else
+    tty_write_glyphs_1 (f, string, len);
 }
 
 /* An implementation of delete_glyphs for termcap frames. */
@@ -1049,8 +1110,10 @@ int
 string_cost (const char *str)
 {
   cost = 0;
+#ifndef HAVE_ANDROID
   if (str)
     tputs (str, 0, evalcost);
+#endif
   return cost;
 }
 
@@ -1061,8 +1124,10 @@ static int
 string_cost_one_line (const char *str)
 {
   cost = 0;
+#ifndef HAVE_ANDROID
   if (str)
     tputs (str, 1, evalcost);
+#endif
   return cost;
 }
 
@@ -1073,11 +1138,13 @@ int
 per_line_cost (const char *str)
 {
   cost = 0;
+#ifndef HAVE_ANDROID
   if (str)
     tputs (str, 0, evalcost);
   cost = - cost;
   if (str)
     tputs (str, 10, evalcost);
+#endif
   return cost;
 }
 
@@ -1087,9 +1154,8 @@ per_line_cost (const char *str)
 
 int *char_ins_del_vector;
 
-#define char_ins_del_cost(f) (&char_ins_del_vector[FRAME_COLS ((f))])
+#define char_ins_del_cost(f) (&char_ins_del_vector[FRAME_COLS (f)])
 
-/* ARGSUSED */
 static void
 calculate_ins_del_char_costs (struct frame *f)
 {
@@ -1151,11 +1217,14 @@ calculate_ins_del_char_costs (struct frame *f)
     *p++ = (ins_startup_cost += ins_cost_per_char);
 }
 
+#endif
+
 void
 calculate_costs (struct frame *frame)
 {
   FRAME_COST_BAUD_RATE (frame) = baud_rate;
 
+#ifndef HAVE_ANDROID
   if (FRAME_TERMCAP_P (frame))
     {
       struct tty_display_info *tty = FRAME_TTY (frame);
@@ -1177,7 +1246,7 @@ calculate_costs (struct frame *frame)
       max_frame_cols = max (max_frame_cols, FRAME_COLS (frame));
       if ((min (PTRDIFF_MAX, SIZE_MAX) / sizeof (int) - 1) / 2
 	  < max_frame_cols)
-	memory_full (SIZE_MAX);
+	memory_full_up ();
 
       char_ins_del_vector =
 	xrealloc (char_ins_del_vector,
@@ -1201,20 +1270,24 @@ calculate_costs (struct frame *frame)
       calculate_ins_del_char_costs (frame);
 
       /* Don't use TS_repeat if its padding is worse than sending the chars */
-      if (tty->TS_repeat && per_line_cost (tty->TS_repeat) * baud_rate < 9000)
+      if (tty->TS_repeat
+	  && (baud_rate <= 0
+	      || per_line_cost (tty->TS_repeat) < 9000 / baud_rate))
         tty->RPov = string_cost (tty->TS_repeat);
       else
         tty->RPov = FRAME_COLS (frame) * 2;
 
       cmcostinit (FRAME_TTY (frame)); /* set up cursor motion costs */
     }
+#endif
 }
 
-struct fkey_table {
+struct fkey_table
+{
   const char *cap, *name;
 };
 
-#ifndef DOS_NT
+#if !defined DOS_NT && !defined HAVE_ANDROID
   /* Termcap capability names that correspond directly to X keysyms.
      Some of these (marked "terminfo") aren't supplied by old-style
      (Berkeley) termcap entries.  They're listed in X keysym order;
@@ -1350,17 +1423,17 @@ term_get_fkeys_1 (void)
   char **address = term_get_fkeys_address;
   KBOARD *kboard = term_get_fkeys_kboard;
 
-  /* This can happen if CANNOT_DUMP or with strange options.  */
+  /* This can happen if Emacs is starting up from scratch, or with
+     strange options.  */
   if (!KEYMAPP (KVAR (kboard, Vinput_decode_map)))
     kset_input_decode_map (kboard, Fmake_sparse_keymap (Qnil));
 
-  for (i = 0; i < ARRAYELTS (keys); i++)
+  for (i = 0; i < countof (keys); i++)
     {
       char *sequence = tgetstr (keys[i].cap, address);
       if (sequence)
 	Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (sequence),
-		     Fmake_vector (make_number (1),
-				   intern (keys[i].name)));
+		     make_vector (1, intern (keys[i].name)), Qnil);
     }
 
   /* The uses of the "k0" capability are inconsistent; sometimes it
@@ -1379,13 +1452,13 @@ term_get_fkeys_1 (void)
 	  /* Define f0 first, so that f10 takes precedence in case the
 	     key sequences happens to be the same.  */
 	  Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (k0),
-		       Fmake_vector (make_number (1), intern ("f0")));
+		       make_vector (1, Qf0), Qnil);
 	Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (k_semi),
-		     Fmake_vector (make_number (1), intern ("f10")));
+		     make_vector (1, Qf10), Qnil);
       }
     else if (k0)
       Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (k0),
-		   Fmake_vector (make_number (1), intern (k0_name)));
+		   make_vector (1, intern (k0_name)), Qnil);
   }
 
   /* Set up cookies for numbered function keys above f10. */
@@ -1407,9 +1480,10 @@ term_get_fkeys_1 (void)
 	  if (sequence)
 	    {
 	      sprintf (fkey, "f%d", i);
-	      Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (sequence),
-			   Fmake_vector (make_number (1),
-					 intern (fkey)));
+	      Fdefine_key (KVAR (kboard, Vinput_decode_map),
+			   build_string (sequence),
+			   make_vector (1, intern (fkey)),
+			   Qnil);
 	    }
 	}
       }
@@ -1425,8 +1499,7 @@ term_get_fkeys_1 (void)
 	  char *sequence = tgetstr (cap2, address);			\
 	  if (sequence)                                                 \
 	    Fdefine_key (KVAR (kboard, Vinput_decode_map), build_string (sequence), \
-			 Fmake_vector (make_number (1),                 \
-				       intern (sym)));                  \
+			 make_vector (1, intern (sym)), Qnil);		\
 	}
 
       /* if there's no key_next keycap, map key_npage to `next' keysym */
@@ -1445,11 +1518,18 @@ term_get_fkeys_1 (void)
 #endif /* not DOS_NT */
 
 
+
 /***********************************************************************
 		       Character Display Information
  ***********************************************************************/
+
+/* Glyph production must be enabled on Android despite there being no
+   TTY frames on that platform, as certain packages (and now, through
+   Org, the bootstrap) require that window text measurements be
+   available from the initial frame as in batch mode.  */
+
 static void append_glyph (struct it *);
-static void append_composite_glyph (struct it *);
+static void append_composite_glyph (struct it *, int padding);
 static void produce_composite_glyph (struct it *);
 static void append_glyphless_glyph (struct it *, int, const char *);
 static void produce_glyphless_glyph (struct it *, Lisp_Object);
@@ -1469,7 +1549,15 @@ append_glyph (struct it *it)
   eassert (it->glyph_row);
   glyph = (it->glyph_row->glyphs[it->area]
 	   + it->glyph_row->used[it->area]);
-  end = it->glyph_row->glyphs[1 + it->area];
+  /* The last glyph of TEXT_AREA in all windows but the rightmost one is
+     the border glyph, except when the window has the right margin.  */
+  int reserve_last =
+    it->area == TEXT_AREA
+    /* Exclude mode/header/tab lines and menu/tool bars.  */
+    && !it->glyph_row->full_width_p
+    && !WINDOW_RIGHTMOST_P (it->w)
+    && WINDOW_RIGHT_MARGIN_WIDTH (it->w) == 0;
+  end = it->glyph_row->glyphs[1 + it->area] - reserve_last;
 
   /* If the glyph row is reversed, we need to prepend the glyph rather
      than append it.  */
@@ -1498,6 +1586,7 @@ append_glyph (struct it *it)
       glyph->type = CHAR_GLYPH;
       glyph->pixel_width = 1;
       glyph->u.ch = it->char_to_display;
+      glyph->frame = it->f;
       glyph->face_id = it->face_id;
       glyph->avoid_cursor_p = it->avoid_cursor_p;
       glyph->multibyte_p = it->multibyte_p;
@@ -1527,7 +1616,6 @@ tty_append_glyph (struct it *it)
 {
   append_glyph (it);
 }
-
 
 /* Produce glyphs for the display element described by IT.  *IT
    specifies what we want to produce a glyph for (character, image, ...),
@@ -1587,8 +1675,19 @@ produce_glyphs (struct it *it)
     it->pixel_width = it->nglyphs = 0;
   else if (it->char_to_display == '\t')
     {
+      /* wrap-prefix strings are prepended to continuation lines, so
+	 the width of tab characters inside should be computed from
+	 the start of this screen line rather than as a product of the
+	 total width of the physical line being wrapped.  */
       int absolute_x = (it->current_x
-			+ it->continuation_lines_width);
+			+ (it->string_from_prefix_prop_p
+			   /* Subtract the width of the
+			      prefix from it->current_x if
+			      it exists.  */
+			   ? 0 : (it->continuation_lines_width
+				  ? (it->continuation_lines_width
+				     - it->wrap_prefix_width)
+				  : 0)));
       int x0 = absolute_x;
       /* Adjust for line numbers.  */
       if (!NILP (Vdisplay_line_numbers) && it->line_number_produced_p)
@@ -1634,9 +1733,13 @@ produce_glyphs (struct it *it)
     }
   else
     {
-      Lisp_Object charset_list = FRAME_TERMINAL (it->f)->charset_list;
+      struct terminal *t = FRAME_TERMINAL (it->f);
+      Lisp_Object charset_list = t->charset_list, char_glyph;
 
-      if (char_charset (it->char_to_display, charset_list, NULL))
+      if (char_charset (it->char_to_display, charset_list, NULL)
+	  && (char_glyph = terminal_glyph_code (t, it->char_to_display),
+	      NILP (char_glyph)
+	      || (FIXNUMP (char_glyph) && XFIXNUM (char_glyph) >= 0)))
 	{
 	  it->pixel_width = CHARACTER_WIDTH (it->char_to_display);
 	  it->nglyphs = it->pixel_width;
@@ -1656,7 +1759,13 @@ produce_glyphs (struct it *it)
   /* Advance current_x by the pixel width as a convenience for
      the caller.  */
   if (it->area == TEXT_AREA)
-    it->current_x += it->pixel_width;
+    {
+      it->current_x += it->pixel_width;
+
+      if (it->continuation_lines_width
+	  && it->string_from_prefix_prop_p)
+	it->wrap_prefix_width = it->current_x;
+    }
   it->ascent = it->max_ascent = it->phys_ascent = it->max_phys_ascent = 0;
   it->descent = it->max_descent = it->phys_descent = it->max_phys_descent = 1;
 }
@@ -1667,79 +1776,146 @@ produce_glyphs (struct it *it)
    face.  */
 
 static void
-append_composite_glyph (struct it *it)
+append_composite_glyph (struct it *it, int padding)
 {
-  struct glyph *glyph;
+  struct glyph *glyph, *end;
+  int i, width = 1 + padding;
 
   eassert (it->glyph_row);
   glyph = it->glyph_row->glyphs[it->area] + it->glyph_row->used[it->area];
-  if (glyph < it->glyph_row->glyphs[1 + it->area])
+  /* The last glyph of TEXT_AREA in all windows but the rightmost one is
+     the border glyph, except when the window has the right margin.  */
+  int reserve_last =
+    it->area == TEXT_AREA
+    /* Exclude mode/header/tab lines and menu/tool bars.  */
+    && !it->glyph_row->full_width_p
+    && !WINDOW_RIGHTMOST_P (it->w)
+    && WINDOW_RIGHT_MARGIN_WIDTH (it->w) == 0;
+  end = it->glyph_row->glyphs[1 + it->area] - reserve_last;
+  if (glyph < end)
     {
       /* If the glyph row is reversed, we need to prepend the glyph
 	 rather than append it.  */
       if (it->glyph_row->reversed_p && it->area == TEXT_AREA)
 	{
 	  struct glyph *g;
+	  int move_by = width;
 
 	  /* Make room for the new glyph.  */
+	  if (move_by > end - glyph)
+	    move_by = end - glyph;
 	  for (g = glyph - 1; g >= it->glyph_row->glyphs[it->area]; g--)
-	    g[1] = *g;
+	    g[move_by] = *g;
 	  glyph = it->glyph_row->glyphs[it->area];
-	}
-      glyph->type = COMPOSITE_GLYPH;
-      eassert (it->pixel_width <= SHRT_MAX);
-      glyph->pixel_width = it->pixel_width;
-      glyph->u.cmp.id = it->cmp_it.id;
-      if (it->cmp_it.ch < 0)
-	{
-	  glyph->u.cmp.automatic = 0;
-	  glyph->u.cmp.id = it->cmp_it.id;
-	}
-      else
-	{
-	  glyph->u.cmp.automatic = 1;
-	  glyph->u.cmp.id = it->cmp_it.id;
-	  glyph->slice.cmp.from = it->cmp_it.from;
-	  glyph->slice.cmp.to = it->cmp_it.to - 1;
+	  end = glyph + move_by;
 	}
 
-      glyph->avoid_cursor_p = it->avoid_cursor_p;
-      glyph->multibyte_p = it->multibyte_p;
-      glyph->face_id = it->face_id;
-      glyph->padding_p = false;
-      glyph->charpos = CHARPOS (it->position);
-      glyph->object = it->object;
-      if (it->bidi_p)
+      eassert(it->pixel_width <= SHRT_MAX);
+      for (i = 0;
+	   i < width && glyph < end;
+	   ++i)
 	{
-	  glyph->resolved_level = it->bidi_it.resolved_level;
-	  eassert ((it->bidi_it.type & 7) == it->bidi_it.type);
-	  glyph->bidi_type = it->bidi_it.type;
-	}
-      else
-	{
-	  glyph->resolved_level = 0;
-	  glyph->bidi_type = UNKNOWN_BT;
-	}
+	  glyph->type = COMPOSITE_GLYPH;
+	  glyph->pixel_width = it->pixel_width - padding;
+	  glyph->u.cmp.id = it->cmp_it.id;
+	  if (it->cmp_it.ch < 0)
+	    {
+	      glyph->u.cmp.automatic = 0;
+	      glyph->u.cmp.id = it->cmp_it.id;
+	    }
+	  else
+	    {
+	      glyph->u.cmp.automatic = 1;
+	      glyph->u.cmp.id = it->cmp_it.id;
+	      glyph->slice.cmp.from = it->cmp_it.from;
+	      glyph->slice.cmp.to = it->cmp_it.to - 1;
+	    }
+	  glyph->avoid_cursor_p = it->avoid_cursor_p;
+	  glyph->multibyte_p = it->multibyte_p;
+	  glyph->frame = it->f;
+	  glyph->face_id = it->face_id;
+	  glyph->padding_p = i > 0;
+	  glyph->charpos = CHARPOS (it->position);
+	  glyph->object = it->object;
+	  if (it->bidi_p)
+	    {
+	      glyph->resolved_level = it->bidi_it.resolved_level;
+	      eassert ((it->bidi_it.type & 7) == it->bidi_it.type);
+	      glyph->bidi_type = it->bidi_it.type;
+	    }
+	  else
+	    {
+	      glyph->resolved_level = 0;
+	      glyph->bidi_type = UNKNOWN_BT;
+	    }
 
-      ++it->glyph_row->used[it->area];
-      ++glyph;
+	  ++it->glyph_row->used[it->area];
+	  ++glyph;
+	}
     }
+}
+
+
+/* For some emoji sequences, the first character width might be 1.
+   Possibly render them as wide glyphs if it's requested.  */
+
+static bool
+composite_glyph_is_emoji_sequence (struct it *it)
+{
+  Lisp_Object gstring;
+  ptrdiff_t len;
+  int first, second, third;
+
+  /* Skip static compositions.  */
+  if (it->cmp_it.ch < 0)
+    return false;
+
+  gstring = composition_gstring_from_id (it->cmp_it.id);
+  len = LGSTRING_CHAR_LEN (gstring);
+  first = XFIXNUM (LGSTRING_CHAR (gstring, 0));
+  second = len < 2 ? 0 : XFIXNUM (LGSTRING_CHAR (gstring, 1));
+
+  /* Regional Indicators ("Flags" in emoji_zwj.awk).  */
+  if (0x1F1E6 <= first && first <= 0x1F1FF
+      && 0x1F1E6 <= second && second <= 0x1F1FF)
+    return true;
+
+  /* The rest two cases both require Base.  */
+  if (NILP (Fmemq (make_fixnum (first),
+		   Vauto_composition_emoji_tty_eligible_codepoints)))
+    return false;
+
+  /* Base + VS16/Modifier.  */
+  if (second == 0xFE0F || (0x1F3FB <= second && second <= 0x1F3FF))
+    return true;
+
+  /* Unqualified RGI sequences: Base + ZWJ + TailInitial ...  */
+  third = len < 3 ? 0 : XFIXNUM (LGSTRING_CHAR (gstring, 2));
+  return second == 0x200D
+    && ! NILP (Fmemq (make_fixnum (third),
+		      Vauto_composition_emoji_unqualified_tail_initials));
 }
 
 
 /* Produce a composite glyph for iterator IT.  IT->cmp_id is the ID of
    the composition.  We simply produces components of the composition
    assuming that the terminal has a capability to layout/render it
-   correctly.  */
+   correctly.  A padding glyph is added if both the composition and the
+   first character has width >= 2.  As a special case, if the composite
+   glyph is determined to be an emoji sequence, it may also add a
+   padding glyph.  */
 
 static void
 produce_composite_glyph (struct it *it)
 {
+  int padding, first_char;
+
   if (it->cmp_it.ch < 0)
     {
       struct composition *cmp = composition_table[it->cmp_it.id];
 
       it->pixel_width = cmp->width;
+      first_char = it->c;
     }
   else
     {
@@ -1747,10 +1923,16 @@ produce_composite_glyph (struct it *it)
 
       it->pixel_width = composition_gstring_width (gstring, it->cmp_it.from,
 						   it->cmp_it.to, NULL);
+      first_char = LGLYPH_CHAR (LGSTRING_GLYPH (gstring,
+						it->cmp_it.from));
     }
-  it->nglyphs = 1;
+
+  padding = (it->pixel_width >= 2 && CHARACTER_WIDTH (first_char) >= 2)
+    || (tty_display_emoji_force_wide
+	&& composite_glyph_is_emoji_sequence (it));
+  it->nglyphs = 1 + padding;
   if (it->glyph_row)
-    append_composite_glyph (it);
+    append_composite_glyph (it, padding);
 }
 
 
@@ -1767,7 +1949,15 @@ append_glyphless_glyph (struct it *it, int face_id, const char *str)
 
   eassert (it->glyph_row);
   glyph = it->glyph_row->glyphs[it->area] + it->glyph_row->used[it->area];
-  end = it->glyph_row->glyphs[1 + it->area];
+  /* The last glyph of TEXT_AREA in all windows but the rightmost one is
+     the border glyph, except when the window has the right margin.  */
+  int reserve_last =
+    it->area == TEXT_AREA
+    /* Exclude mode/header/tab lines and menu/tool bars.  */
+    && !it->glyph_row->full_width_p
+    && !WINDOW_RIGHTMOST_P (it->w)
+    && WINDOW_RIGHT_MARGIN_WIDTH (it->w) == 0;
+  end = it->glyph_row->glyphs[1 + it->area] - reserve_last;
 
   /* If the glyph row is reversed, we need to prepend the glyph rather
      than append it.  */
@@ -1791,6 +1981,7 @@ append_glyphless_glyph (struct it *it, int face_id, const char *str)
   glyph->pixel_width = 1;
   glyph->avoid_cursor_p = it->avoid_cursor_p;
   glyph->multibyte_p = it->multibyte_p;
+  glyph->frame = it->f;
   glyph->face_id = face_id;
   glyph->padding_p = false;
   glyph->charpos = CHARPOS (it->position);
@@ -1860,12 +2051,24 @@ produce_glyphless_glyph (struct it *it, Lisp_Object acronym)
 	    acronym = CHAR_TABLE_REF (Vglyphless_char_display, it->c);
 	  if (CONSP (acronym))
 	    acronym = XCDR (acronym);
-	  buf[0] = '[';
 	  str = STRINGP (acronym) ? SSDATA (acronym) : "";
-	  for (len = 0; len < 6 && str[len] && ASCII_CHAR_P (str[len]); len++)
-	    buf[1 + len] = str[len];
-	  buf[1 + len] = ']';
-	  len += 2;
+	  /* A special kludgey feature for single-character acronyms:
+	     don't put them in a box, effectively treating them as a
+	     replacement character.  */
+	  if (STRINGP (acronym) && SCHARS (acronym) == 1)
+	    {
+	      buf[0] = str[0];
+	      len = 1;
+	    }
+	  else
+	    {
+	      buf[0] = '[';
+	      for (len = 0;
+		   len < 6 && str[len] && ASCII_CHAR_P (str[len]); len++)
+		buf[1 + len] = str[len];
+	      buf[1 + len] = ']';
+	      len += 2;
+	    }
 	}
       else
 	{
@@ -1886,8 +2089,9 @@ produce_glyphless_glyph (struct it *it, Lisp_Object acronym)
 }
 
 
+#ifndef HAVE_ANDROID
 /***********************************************************************
-				Faces
+				TTY Faces
  ***********************************************************************/
 
 /* Value is non-zero if attribute ATTR may be used.  ATTR should be
@@ -1904,9 +2108,8 @@ produce_glyphless_glyph (struct it *it, Lisp_Object acronym)
    FACE_ID is a realized face ID number, in the face cache.  */
 
 static void
-turn_on_face (struct frame *f, int face_id)
+turn_on_face (struct frame *f, struct face *face)
 {
-  struct face *face = FACE_FROM_ID (f, face_id);
   unsigned long fg = face->foreground;
   unsigned long bg = face->background;
   struct tty_display_info *tty = FRAME_TTY (f);
@@ -1934,8 +2137,27 @@ turn_on_face (struct frame *f, int face_id)
 	OUTPUT1 (tty, tty->TS_enter_dim_mode);
     }
 
-  if (face->tty_underline_p && MAY_USE_WITH_COLORS_P (tty, NC_UNDERLINE))
-    OUTPUT1_IF (tty, tty->TS_enter_underline_mode);
+  if (face->underline && MAY_USE_WITH_COLORS_P (tty, NC_UNDERLINE))
+    {
+      if (face->underline == FACE_UNDERLINE_SINGLE
+	  || !tty->TF_set_underline_style)
+	OUTPUT1_IF (tty, tty->TS_enter_underline_mode);
+      else if (tty->TF_set_underline_style)
+	{
+	  char *p;
+	  p = tparam (tty->TF_set_underline_style, NULL, 0, face->underline, 0, 0, 0);
+	  OUTPUT (tty, p);
+	  xfree (p);
+	}
+    }
+
+  if (face->tty_strike_through_p
+      && MAY_USE_WITH_COLORS_P (tty, NC_STRIKE_THROUGH))
+    OUTPUT1_IF (tty, tty->TS_enter_strike_through_mode);
+
+  if (face->tty_overline_p
+      && MAY_USE_WITH_COLORS_P (tty, NC_OVERLINE))
+    OUTPUT1_IF (tty, tty->TS_enter_overline_mode);
 
   if (tty->TN_max_colors > 0)
     {
@@ -1945,7 +2167,10 @@ turn_on_face (struct frame *f, int face_id)
       ts = tty->standout_mode ? tty->TS_set_background : tty->TS_set_foreground;
       if (face_tty_specified_color (fg) && ts)
 	{
-          p = tparam (ts, NULL, 0, fg, 0, 0, 0);
+	  if (tty->TF_rgb_separate)
+	    p = tparam (ts, NULL, 0, fg >> 16, (fg >> 8) & 0xFF, fg & 0xFF, 0);
+	  else
+	    p = tparam (ts, NULL, 0, fg, 0, 0, 0);
 	  OUTPUT (tty, p);
 	  xfree (p);
 	}
@@ -1953,10 +2178,21 @@ turn_on_face (struct frame *f, int face_id)
       ts = tty->standout_mode ? tty->TS_set_foreground : tty->TS_set_background;
       if (face_tty_specified_color (bg) && ts)
 	{
-          p = tparam (ts, NULL, 0, bg, 0, 0, 0);
+	  if (tty->TF_rgb_separate)
+	    p = tparam (ts, NULL, 0, bg >> 16, (bg >> 8) & 0xFF, bg & 0xFF, 0);
+	  else
+	    p = tparam (ts, NULL, 0, bg, 0, 0, 0);
 	  OUTPUT (tty, p);
 	  xfree (p);
 	}
+
+	ts = tty->TF_set_underline_color;
+	if (ts && face->underline_color)
+	  {
+	    p = tparam (ts, NULL, 0, face->underline_color, 0, 0, 0);
+	    OUTPUT (tty, p);
+	    xfree (p);
+	  }
     }
 }
 
@@ -1964,20 +2200,21 @@ turn_on_face (struct frame *f, int face_id)
 /* Turn off appearances of face FACE_ID on tty frame F.  */
 
 static void
-turn_off_face (struct frame *f, int face_id)
+turn_off_face (struct frame *f, struct face *face)
 {
-  struct face *face = FACE_FROM_ID (f, face_id);
   struct tty_display_info *tty = FRAME_TTY (f);
 
   if (tty->TS_exit_attribute_mode)
     {
       /* Capability "me" will turn off appearance modes double-bright,
-	 half-bright, reverse-video, standout, underline.  It may or
-	 may not turn off alt-char-mode.  */
+	 half-bright, reverse-video, standout, underline, overline,
+	 strike-through.  It may or may not turn off alt-char-mode.  */
       if (face->tty_bold_p
 	  || face->tty_italic_p
 	  || face->tty_reverse_p
-	  || face->tty_underline_p)
+	  || face->underline
+	  || face->tty_strike_through_p
+	  || face->tty_overline_p)
 	{
 	  OUTPUT1_IF (tty, tty->TS_exit_attribute_mode);
 	  if (strcmp (tty->TS_exit_attribute_mode, tty->TS_end_standout_mode) == 0)
@@ -1988,7 +2225,7 @@ turn_off_face (struct frame *f, int face_id)
     {
       /* If we don't have "me" we can only have those appearances
 	 that have exit sequences defined.  */
-      if (face->tty_underline_p)
+      if (face->underline)
 	OUTPUT_IF (tty, tty->TS_exit_underline_mode);
     }
 
@@ -2001,6 +2238,7 @@ turn_off_face (struct frame *f, int face_id)
     OUTPUT1_IF (tty, tty->TS_orig_pair);
 }
 
+#endif /* !HAVE_ANDROID */
 
 /* Return true if the terminal on frame F supports all of the
    capabilities in CAPS simultaneously.  */
@@ -2008,18 +2246,37 @@ turn_off_face (struct frame *f, int face_id)
 bool
 tty_capable_p (struct tty_display_info *tty, unsigned int caps)
 {
+#ifndef HAVE_ANDROID
 #define TTY_CAPABLE_P_TRY(tty, cap, TS, NC_bit)				\
-  if ((caps & (cap)) && (!(TS) || !MAY_USE_WITH_COLORS_P(tty, NC_bit)))	\
+  if ((caps & (cap)) && (!(TS) || !MAY_USE_WITH_COLORS_P (tty, NC_bit)))	\
     return 0;
 
-  TTY_CAPABLE_P_TRY (tty, TTY_CAP_INVERSE,	tty->TS_standout_mode, 	 	NC_REVERSE);
-  TTY_CAPABLE_P_TRY (tty, TTY_CAP_UNDERLINE, 	tty->TS_enter_underline_mode, 	NC_UNDERLINE);
-  TTY_CAPABLE_P_TRY (tty, TTY_CAP_BOLD, 	tty->TS_enter_bold_mode, 	NC_BOLD);
-  TTY_CAPABLE_P_TRY (tty, TTY_CAP_DIM, 		tty->TS_enter_dim_mode, 	NC_DIM);
-  TTY_CAPABLE_P_TRY (tty, TTY_CAP_ITALIC, 	tty->TS_enter_italic_mode, 	NC_ITALIC);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_INVERSE,	  tty->TS_standout_mode, NC_REVERSE);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_UNDERLINE,	  tty->TS_enter_underline_mode,
+		     NC_UNDERLINE);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_UNDERLINE_STYLED,	  tty->TF_set_underline_style,
+		     NC_UNDERLINE);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_BOLD,	  tty->TS_enter_bold_mode, NC_BOLD);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_DIM,	  tty->TS_enter_dim_mode, NC_DIM);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_ITALIC,	  tty->TS_enter_italic_mode, NC_ITALIC);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_STRIKE_THROUGH, tty->TS_enter_strike_through_mode,
+		     NC_STRIKE_THROUGH);
+  TTY_CAPABLE_P_TRY (tty,
+		     TTY_CAP_OVERLINE,    tty->TS_enter_overline_mode,
+		     NC_OVERLINE);
 
   /* We can do it!  */
   return 1;
+#else
+  return false;
+#endif
 }
 
 /* Return non-zero if the terminal is capable to display colors.  */
@@ -2050,10 +2307,10 @@ TERMINAL does not refer to a text terminal.  */)
 {
   struct terminal *t = decode_tty_terminal (terminal);
 
-  return make_number (t ? t->display_info.tty->TN_max_colors : 0);
+  return make_fixnum (t ? t->display_info.tty->TN_max_colors : 0);
 }
 
-#ifndef DOS_NT
+#if !defined MSDOS && !defined HAVE_ANDROID
 
 /* Declare here rather than in the function, as in the rest of Emacs,
    to work around an HPUX compiler bug (?). See
@@ -2092,7 +2349,7 @@ tty_default_color_capabilities (struct tty_display_info *tty, bool save)
    MODE's value is generally the number of colors which we want to
    support; zero means set up for the default capabilities, the ones
    we saw at init_tty time; -1 means turn off color support.  */
-static void
+void
 tty_setup_colors (struct tty_display_info *tty, int mode)
 {
   /* Canonicalize all negative values of MODE.  */
@@ -2115,6 +2372,10 @@ tty_setup_colors (struct tty_display_info *tty, int mode)
 #ifdef TERMINFO
 	tty->TS_set_foreground = "\033[3%p1%dm";
 	tty->TS_set_background = "\033[4%p1%dm";
+#elif WINDOWSNT
+	tty->TS_orig_pair = "\x1b[39m\x1b[49m";
+	tty->TS_set_foreground = "\x1b[%lum";
+	tty->TS_set_background = "\x1b[%lum";
 #else
 	tty->TS_set_foreground = "\033[3%dm";
 	tty->TS_set_background = "\033[4%dm";
@@ -2122,6 +2383,26 @@ tty_setup_colors (struct tty_display_info *tty, int mode)
 	tty->TN_max_colors = 8;
 	tty->TN_no_color_video = 0;
 	break;
+#ifdef WINDOWSNT
+      case 16:
+	tty->TN_max_colors = 16;
+	tty->TS_set_foreground = "\x1b[%lum";
+	tty->TS_set_background = "\x1b[%lum";
+	tty->TN_no_color_video = 0;
+	break;
+      case 256:
+	tty->TN_max_colors = 256;
+	tty->TS_set_foreground = "\x1b[38;5;%lum";
+	tty->TS_set_background = "\x1b[48;5;%lum";
+	tty->TN_no_color_video = 0;
+	break;
+      case 16777216:
+	tty->TN_max_colors = 16777216;
+	tty->TS_set_foreground = "\x1b[38;2;%lu;%lu;%lum";
+	tty->TS_set_background = "\x1b[48;2;%lu;%lu;%lum";
+	tty->TN_no_color_video = 0;
+	break;
+#endif
     }
 }
 
@@ -2137,7 +2418,7 @@ set_tty_color_mode (struct tty_display_info *tty, struct frame *f)
   tem = assq_no_quit (Qtty_color_mode, f->param_alist);
   val = CONSP (tem) ? XCDR (tem) : Qnil;
 
-  if (INTEGERP (val))
+  if (FIXNUMP (val))
     color_mode = val;
   else if (SYMBOLP (tty_color_mode_alist))
     {
@@ -2147,18 +2428,26 @@ set_tty_color_mode (struct tty_display_info *tty, struct frame *f)
   else
     color_mode = Qnil;
 
-  mode = TYPE_RANGED_INTEGERP (int, color_mode) ? XINT (color_mode) : 0;
+  mode = TYPE_RANGED_FIXNUMP (int, color_mode) ? XFIXNUM (color_mode) : 0;
 
   if (mode != tty->previous_color_mode)
     {
       tty->previous_color_mode = mode;
       tty_setup_colors (tty , mode);
       /*  This recomputes all the faces given the new color definitions.  */
-      safe_call (1, intern ("tty-set-up-initial-frame-faces"));
+      safe_calln (Qtty_set_up_initial_frame_faces);
     }
 }
 
-#endif /* !DOS_NT */
+#endif /* !MSDOS && !HAVE_ANDROID */
+
+char *
+tty_type_name (Lisp_Object terminal)
+{
+  struct terminal *t = decode_tty_terminal (terminal);
+
+  return t? t->display_info.tty->type: NULL;
+}
 
 DEFUN ("tty-type", Ftty_type, Stty_type, 0, 1, 0,
        doc: /* Return the type of the tty device that TERMINAL uses.
@@ -2168,10 +2457,9 @@ TERMINAL can be a terminal object, a frame, or nil (meaning the
 selected frame's terminal).  */)
   (Lisp_Object terminal)
 {
-  struct terminal *t = decode_tty_terminal (terminal);
+  char *name = tty_type_name (terminal);
 
-  return (t && t->display_info.tty->type
-	  ? build_string (t->display_info.tty->type) : Qnil);
+  return (name? build_string (name) : Qnil);
 }
 
 DEFUN ("controlling-tty-p", Fcontrolling_tty_p, Scontrolling_tty_p, 0, 1, 0,
@@ -2184,7 +2472,7 @@ TERMINAL is not on a tty device.  */)
 {
   struct terminal *t = decode_tty_terminal (terminal);
 
-  return (t && !strcmp (t->display_info.tty->name, DEV_TTY) ? Qt : Qnil);
+  return (t && !strcmp (t->display_info.tty->name, dev_tty) ? Qt : Qnil);
 }
 
 DEFUN ("tty-no-underline", Ftty_no_underline, Stty_no_underline, 0, 1, 0,
@@ -2202,6 +2490,27 @@ TERMINAL does not refer to a text terminal.  */)
 
   if (t->type == output_termcap)
     t->display_info.tty->TS_enter_underline_mode = 0;
+  return Qnil;
+}
+
+DEFUN ("tty-enable-overline", Ftty_enable_overline, Stty_enable_overline, 1, 2, 0,
+       doc: /* Enable or disable overline support in TERMINAL.
+This is used to override terminfo data for terminals that do not
+accurately state the Smol (overline) string capability.
+
+When FLAG is non-nil enable overline support, when FLAG is nil disable
+overline support.  When this function enables overline support, Emacs
+will always use the SGR 53 escape sequence regardless of what is in the
+terminfo database.  This function has no effect if used on a non-tty
+terminal.  */)
+  (Lisp_Object flag, Lisp_Object terminal)
+{
+  struct terminal *t = decode_live_terminal (terminal);
+  if (t->type == output_termcap)
+    {
+      t->display_info.tty->TS_enter_overline_mode =
+	(NILP (flag) ? NULL : "\e[53m");
+    }
   return Qnil;
 }
 
@@ -2243,6 +2552,7 @@ suspended.
 A suspended tty may be resumed by calling `resume-tty' on it.  */)
   (Lisp_Object tty)
 {
+#ifndef HAVE_ANDROID
   struct terminal *t = decode_tty_terminal (tty);
   FILE *f;
 
@@ -2258,27 +2568,34 @@ A suspended tty may be resumed by calling `resume-tty' on it.  */)
 	 the tty state.  */
       Lisp_Object term;
       XSETTERMINAL (term, t);
-      CALLN (Frun_hook_with_args, intern ("suspend-tty-functions"), term);
+      CALLN (Frun_hook_with_args, Qsuspend_tty_functions, term);
 
       reset_sys_modes (t->display_info.tty);
       delete_keyboard_wait_descriptor (fileno (f));
 
 #ifndef MSDOS
-      fclose (f);
       if (f != t->display_info.tty->output)
-        fclose (t->display_info.tty->output);
-#endif
+        emacs_fclose (t->display_info.tty->output);
+      emacs_fclose (f);
+#endif /* !MSDOS */
 
       t->display_info.tty->input = 0;
       t->display_info.tty->output = 0;
 
       if (FRAMEP (t->display_info.tty->top_frame))
-        SET_FRAME_VISIBLE (XFRAME (t->display_info.tty->top_frame), 0);
-
+	{
+	  struct frame *top = XFRAME (t->display_info.tty->top_frame);
+	  SET_FRAME_VISIBLE (root_frame (top), false);
+	}
     }
 
   /* Clear display hooks to prevent further output.  */
   clear_tty_hooks (t);
+#else /* HAVE_ANDROID */
+  /* Android doesn't support TTY terminal devices, so unconditionally
+     signal.  */
+  error ("Attempt to suspend a non-text terminal device");
+#endif /* !HAVE_ANDROID */
 
   return Qnil;
 }
@@ -2302,8 +2619,11 @@ TTY may be a terminal object, a frame, or nil (meaning the selected
 frame's terminal). */)
   (Lisp_Object tty)
 {
-  struct terminal *t = decode_tty_terminal (tty);
+#ifndef HAVE_ANDROID
+  struct terminal *t;
   int fd;
+
+  t = decode_tty_terminal (tty);
 
   if (!t)
     error ("Attempt to resume a non-text terminal device");
@@ -2319,7 +2639,7 @@ frame's terminal). */)
 #else  /* !MSDOS */
       fd = emacs_open (t->display_info.tty->name, O_RDWR | O_NOCTTY, 0);
       t->display_info.tty->input = t->display_info.tty->output
-	= fd < 0 ? 0 : fdopen (fd, "w+");
+	= fd < 0 ? 0 : emacs_fdopen (fd, "w+");
 
       if (! t->display_info.tty->input)
 	{
@@ -2330,15 +2650,16 @@ frame's terminal). */)
 			     open_errno);
 	}
 
-      if (!O_IGNORE_CTTY && strcmp (t->display_info.tty->name, DEV_TTY) != 0)
+      if (!O_IGNORE_CTTY && strcmp (t->display_info.tty->name, dev_tty) != 0)
         dissociate_if_controlling_tty (fd);
-#endif
+#endif /* MSDOS */
 
       add_keyboard_wait_descriptor (fd);
 
       if (FRAMEP (t->display_info.tty->top_frame))
 	{
-	  struct frame *f = XFRAME (t->display_info.tty->top_frame);
+	  struct frame *top = XFRAME (t->display_info.tty->top_frame);
+	  struct frame *f = root_frame (top);
 	  int width, height;
 	  int old_height = FRAME_COLS (f);
 	  int old_width = FRAME_TOTAL_LINES (f);
@@ -2347,9 +2668,8 @@ frame's terminal). */)
 	     was suspended.  */
 	  get_tty_size (fileno (t->display_info.tty->input), &width, &height);
 	  if (width != old_width || height != old_height)
-	    change_frame_size (f, width, height - FRAME_MENU_BAR_LINES (f),
-			       0, 0, 0, 0);
-	  SET_FRAME_VISIBLE (XFRAME (t->display_info.tty->top_frame), 1);
+	    change_frame_size (f, width, height, false, false, false);
+	  SET_FRAME_VISIBLE (f, true);
 	}
 
       set_tty_hooks (t);
@@ -2358,22 +2678,259 @@ frame's terminal). */)
       /* Run `resume-tty-functions'.  */
       Lisp_Object term;
       XSETTERMINAL (term, t);
-      CALLN (Frun_hook_with_args, intern ("resume-tty-functions"), term);
+      CALLN (Frun_hook_with_args, Qresume_tty_functions, term);
     }
 
   set_tty_hooks (t);
+#else /* HAVE_ANDROID */
+  /* Android doesn't support TTY terminal devices, so unconditionally
+     signal.  */
+  error ("Attempt to suspend a non-text terminal device");
+#endif /* !HAVE_ANDROID */
 
   return Qnil;
 }
+
+#ifndef HAVE_ANDROID
+
+DEFUN ("tty--set-output-buffer-size", Ftty__set_output_buffer_size,
+       Stty__set_output_buffer_size, 1, 2, 0, doc:
+       /* Set the output buffer size for a TTY.
+
+SIZE zero means use the system's default value.  If SIZE is
+non-zero, this also avoids flushing the output stream.
+
+TTY may be a terminal object, a frame, or nil (meaning the selected
+frame's terminal).
+
+This function temporarily suspends and resumes the terminal
+device.  */)
+  (Lisp_Object size, Lisp_Object tty)
+{
+  if (!RANGED_FIXNUMP (0, size, min (PTRDIFF_MAX, SIZE_MAX)))
+    error ("Invalid output buffer size");
+  Fsuspend_tty (tty);
+  struct terminal *terminal = decode_tty_terminal (tty);
+  terminal->display_info.tty->output_buffer_size = XFIXNUM (size);
+  return Fresume_tty (tty);
+}
+
+DEFUN ("tty--output-buffer-size", Ftty__output_buffer_size,
+       Stty__output_buffer_size, 0, 1, 0, doc:
+       /* Return the output buffer size of TTY.
+
+TTY may be a terminal object, a frame, or nil (meaning the selected
+frame's terminal).
+
+A value of zero means TTY uses the system's default value.  */)
+  (Lisp_Object tty)
+{
+  struct terminal *terminal = decode_tty_terminal (tty);
+  if (terminal)
+    return make_fixnum (terminal->display_info.tty->output_buffer_size);
+  error ("Not a tty terminal");
+}
+
+#endif /* !HAVE_ANDROID */
 
 
 /***********************************************************************
 			       Mouse
  ***********************************************************************/
 
+#if !defined DOS_NT && !defined HAVE_ANDROID
+
+/* Implementation of draw_row_with_mouse_face for TTY/GPM and macOS.  */
+
+void
+tty_draw_row_with_mouse_face (struct window *w, struct glyph_row *window_row,
+			      int window_start_x,
+			      int window_end_x,
+			      enum draw_glyphs_face draw)
+{
+  struct frame *f = XFRAME (w->frame);
+  struct frame *root = root_frame (f);
+
+  /* Window coordinates are relative to the text area.  Make
+     them relative to the window's left edge,  */
+  window_end_x = min (window_end_x, window_row->used[TEXT_AREA]);
+  window_start_x += window_row->used[LEFT_MARGIN_AREA];
+  window_end_x += window_row->used[LEFT_MARGIN_AREA];
+
+  /* Translate from window to window's frame.  */
+  int frame_start_x = WINDOW_LEFT_EDGE_X (w) + window_start_x;
+  int frame_end_x = WINDOW_LEFT_EDGE_X (w) + window_end_x;
+  int frame_y = window_row->y + WINDOW_TOP_EDGE_Y (w);
+
+  /* Translate from (possible) child frame to root frame.  */
+  int root_start_x, root_end_x, root_y;
+  root_xy (f, frame_start_x, frame_y, &root_start_x, &root_y);
+  root_xy (f, frame_end_x, frame_y, &root_end_x, &root_y);
+  struct glyph_row *root_row = MATRIX_ROW (root->current_matrix, root_y);
+
+  /* Remember current cursor coordinates so that we can restore
+     them at the end.  */
+  struct tty_display_info *tty = FRAME_TTY (root);
+  int save_x = curX (tty);
+  int save_y = curY (tty);
+
+  /* If the root frame displays child frames, we cannot naively
+     write to the terminal what the window thinks should be drawn.
+     Instead, write only those parts that are not obscured by
+     other frames.  */
+  for (int root_x = root_start_x; root_x < root_end_x; )
+    {
+      /* Find the start of a run of glyphs from frame F.  */
+      struct glyph *root_start = root_row->glyphs[TEXT_AREA] + root_x;
+      while (root_x < root_end_x && root_start->frame != f)
+	++root_x, ++root_start;
+
+      /* If start of a run of glyphs from F found.  */
+      int root_run_start_x = root_x;
+      if (root_run_start_x < root_end_x)
+	{
+	  /* Find the end of the run of glyphs from frame F.  */
+	  struct glyph *root_end = root_start;
+	  while (root_x < root_end_x && root_end->frame == f)
+	    ++root_x, ++root_end;
+
+	  /* If we have a run glyphs to output, do it.  */
+	  if (root_end > root_start)
+	    {
+	      cursor_to (root, root_y, root_run_start_x);
+	      ptrdiff_t n = root_end - root_start;
+	      switch (draw)
+		{
+		case DRAW_NORMAL_TEXT:
+		  write_glyphs (f, root_start, n);
+		  break;
+
+		case DRAW_MOUSE_FACE:
+		  {
+		    int face_id = tty->mouse_highlight.mouse_face_face_id;
+		    struct face *face = FACE_FROM_ID (f, face_id);
+		    tty_write_glyphs_with_face (f, root_start, n, face);
+		  }
+		  break;
+
+		case DRAW_INVERSE_VIDEO:
+		case DRAW_CURSOR:
+		case DRAW_IMAGE_RAISED:
+		case DRAW_IMAGE_SUNKEN:
+		  emacs_abort ();
+		}
+	    }
+	}
+    }
+
+  /* Restore cursor where it was before.  */
+  cursor_to (f, save_y, save_x);
+}
+
+#endif
+
+static Lisp_Object
+tty_frame_at (int x, int y, int *cx, int *cy)
+{
+#ifndef HAVE_ANDROID
+  for (Lisp_Object frames = Ftty_frame_list_z_order (Qnil);
+       !NILP (frames);
+       frames = Fcdr (frames))
+    {
+      Lisp_Object frame = Fcar (frames);
+      struct frame *f = XFRAME (frame);
+      int fx, fy;
+      bool on_border = false;
+
+      root_xy (f, 0, 0, &fx, &fy);
+
+      if (!FRAME_UNDECORATED (f) && FRAME_PARENT_FRAME (f))
+	{
+	  if (fy - 1 <= y && y <= fy + f->pixel_height + 1)
+	    {
+	      if (fx == x + 1)
+		{
+		  *cx = -1;
+		  on_border = true;
+		}
+	      else if (fx + f->pixel_width == x)
+		{
+		  *cx = f->pixel_width;
+		  on_border = true;
+		}
+
+	      if (on_border)
+		{
+		  *cy = y - fy;
+
+		  return frame;
+		}
+	    }
+
+	  if (fx - 1 <= x && x <= fx + f->pixel_width + 1)
+	    {
+	      if (fy == y + 1)
+		{
+		  *cy = -1;
+		  on_border = true;
+		}
+	      else if (fy + f->pixel_height == y)
+		{
+		  *cy = f->pixel_height;
+		  on_border = true;
+		}
+
+	      if (on_border)
+		{
+		  *cx = x - fx;
+
+		  return frame;
+		}
+	    }
+
+
+	  if ((fx <= x && x <= fx + f->pixel_width)
+	      && (fy <= y && y <= fy + f->pixel_height))
+	    {
+	      child_xy (XFRAME (frame), x, y, cx, cy);
+
+	      return frame;
+	    }
+	}
+      else if ((fx <= x && x <= fx + f->pixel_width)
+	       && (fy <= y && y <= fy + f->pixel_height))
+	{
+	  child_xy (XFRAME (frame), x, y, cx, cy);
+
+	  return frame;
+	}
+    }
+#endif /* !HAVE_ANDROID */
+
+  return Qnil;
+}
+
+DEFUN ("tty-frame-at", Ftty_frame_at, Stty_frame_at, 2, 2, 0,
+       doc: /* Return tty frame containing absolute pixel position (X, Y).
+Value is nil if no frame found.  Otherwise it is a list (FRAME CX CY),
+where FRAME is the frame containing (X, Y) and CX and CY are X and Y
+relative to FRAME.  */)
+  (Lisp_Object x, Lisp_Object y)
+{
+  if (! FIXNUMP (x) || ! FIXNUMP (y))
+    /* Coordinates this big can not correspond to any frame.  */
+    return Qnil;
+
+  int cx, cy;
+  Lisp_Object frame = tty_frame_at (XFIXNUM (x), XFIXNUM (y), &cx, &cy);
+  if (NILP (frame))
+    return Qnil;
+
+  return list3 (frame, make_fixnum (cx), make_fixnum (cy));
+}
+
 #ifdef HAVE_GPM
 
-#ifndef HAVE_WINDOW_SYSTEM
 void
 term_mouse_moveto (int x, int y)
 {
@@ -2387,65 +2944,15 @@ term_mouse_moveto (int x, int y)
   last_mouse_x = x;
   last_mouse_y = y;  */
 }
-#endif /* HAVE_WINDOW_SYSTEM */
 
-/* Implementation of draw_row_with_mouse_face for TTY/GPM.  */
-void
-tty_draw_row_with_mouse_face (struct window *w, struct glyph_row *row,
-			      int start_hpos, int end_hpos,
-			      enum draw_glyphs_face draw)
-{
-  int nglyphs = end_hpos - start_hpos;
-  struct frame *f = XFRAME (WINDOW_FRAME (w));
-  struct tty_display_info *tty = FRAME_TTY (f);
-  int face_id = tty->mouse_highlight.mouse_face_face_id;
-  int save_x, save_y, pos_x, pos_y;
-
-  if (end_hpos >= row->used[TEXT_AREA])
-    nglyphs = row->used[TEXT_AREA] - start_hpos;
-
-  pos_y = row->y + WINDOW_TOP_EDGE_Y (w);
-  pos_x = row->used[LEFT_MARGIN_AREA] + start_hpos + WINDOW_LEFT_EDGE_X (w);
-
-  /* Save current cursor co-ordinates.  */
-  save_y = curY (tty);
-  save_x = curX (tty);
-  cursor_to (f, pos_y, pos_x);
-
-  if (draw == DRAW_MOUSE_FACE)
-    tty_write_glyphs_with_face (f, row->glyphs[TEXT_AREA] + start_hpos,
-				nglyphs, face_id);
-  else if (draw == DRAW_NORMAL_TEXT)
-    write_glyphs (f, row->glyphs[TEXT_AREA] + start_hpos, nglyphs);
-
-  cursor_to (f, save_y, save_x);
-}
-
-static bool
-term_mouse_movement (struct frame *frame, Gpm_Event *event)
-{
-  /* Has the mouse moved off the glyph it was on at the last sighting?  */
-  if (event->x != last_mouse_x || event->y != last_mouse_y)
-    {
-      frame->mouse_moved = 1;
-      note_mouse_highlight (frame, event->x, event->y);
-      /* Remember which glyph we're now on.  */
-      last_mouse_x = event->x;
-      last_mouse_y = event->y;
-      return 1;
-    }
-  return 0;
-}
-
-/* Return the Time that corresponds to T.  Wrap around on overflow.  */
+/* Return the current time, as a Time value.  Wrap around on overflow.  */
 static Time
-timeval_to_Time (struct timeval const *t)
+current_Time (void)
 {
-  Time s_1000, ms;
-
-  s_1000 = t->tv_sec;
+  struct timespec now = current_timespec ();
+  Time s_1000 = now.tv_sec;
   s_1000 *= 1000;
-  ms = t->tv_usec / 1000;
+  Time ms = now.tv_nsec / 1000000;
   return s_1000 + ms;
 }
 
@@ -2467,9 +2974,15 @@ term_mouse_position (struct frame **fp, int insist, Lisp_Object *bar_window,
 		     enum scroll_bar_part *part, Lisp_Object *x,
 		     Lisp_Object *y, Time *timeptr)
 {
-  struct timeval now;
+  /* If we've gotten no GPM mouse events yet, last_mouse_frame won't be
+     set.  Perhaps `gpm-mouse-mode' was never active.  */
+  if (!FRAMEP (last_mouse_frame))
+    return;
 
-  *fp = SELECTED_FRAME ();
+  *fp = XFRAME (last_mouse_frame);
+  if (!FRAME_LIVE_P (*fp))
+    return;
+
   (*fp)->mouse_moved = 0;
 
   *bar_window = Qnil;
@@ -2477,8 +2990,7 @@ term_mouse_position (struct frame **fp, int insist, Lisp_Object *bar_window,
 
   XSETINT (*x, last_mouse_x);
   XSETINT (*y, last_mouse_y);
-  gettimeofday(&now, 0);
-  *timeptr = timeval_to_Time (&now);
+  *timeptr = current_Time ();
 }
 
 /* Prepare a mouse-event in *RESULT for placement in the input queue.
@@ -2490,10 +3002,9 @@ static Lisp_Object
 term_mouse_click (struct input_event *result, Gpm_Event *event,
 		  struct frame *f)
 {
-  struct timeval now;
   int i, j;
 
-  result->kind = GPM_CLICK_EVENT;
+  result->kind = MOUSE_CLICK_EVENT;
   for (i = 0, j = GPM_B_LEFT; i < 3; i++, j >>= 1 )
     {
       if (event->buttons & j) {
@@ -2501,8 +3012,7 @@ term_mouse_click (struct input_event *result, Gpm_Event *event,
 	break;
       }
     }
-  gettimeofday(&now, 0);
-  result->timestamp = timeval_to_Time (&now);
+  result->timestamp = current_Time ();
 
   if (event->type & GPM_UP)
     result->modifiers = up_modifier;
@@ -2547,59 +3057,52 @@ term_mouse_click (struct input_event *result, Gpm_Event *event,
 }
 
 int
-handle_one_term_event (struct tty_display_info *tty, Gpm_Event *event,
-		       struct input_event *hold_quit)
+handle_one_term_event (struct tty_display_info *tty, const Gpm_Event *event_in)
 {
-  struct frame *f = XFRAME (tty->top_frame);
+  int child_x = event_in->x, child_y = event_in->y;
+  Lisp_Object frame = tty_frame_at (child_x, child_y, &child_x, &child_y);
+  Gpm_Event event = *event_in;
+  event.x = child_x;
+  event.y = child_y;
+  struct frame *f = decode_live_frame (frame);
+
   struct input_event ie;
-  bool do_help = 0;
   int count = 0;
 
   EVENT_INIT (ie);
   ie.kind = NO_EVENT;
   ie.arg = Qnil;
 
-  if (event->type & (GPM_MOVE | GPM_DRAG)) {
-    previous_help_echo_string = help_echo_string;
-    help_echo_string = Qnil;
-
-    Gpm_DrawPointer (event->x, event->y, fileno (tty->output));
-
-    if (!term_mouse_movement (f, event))
-      help_echo_string = previous_help_echo_string;
-
-    /* If the contents of the global variable help_echo_string
-       has changed, generate a HELP_EVENT.  */
-    if (!NILP (help_echo_string)
-	|| !NILP (previous_help_echo_string))
-      do_help = 1;
-
-    goto done;
-  }
-  else {
-    f->mouse_moved = 0;
-    term_mouse_click (&ie, event, f);
-  }
-
- done:
-  if (ie.kind != NO_EVENT)
+  if (event.type & (GPM_MOVE | GPM_DRAG))
     {
-      kbd_buffer_store_event_hold (&ie, hold_quit);
-      count++;
+      /* The pointer must be drawn using screen coordinates (x,y), not
+	 frame coordinates.  Use event_in which has an unmodified event
+	 directly from GPM.  */
+      Gpm_DrawPointer (event_in->x, event_in->y, fileno (tty->output));
+
+      /* Has the mouse moved off the glyph it was on at the last
+         sighting?  */
+      if (event.x != last_mouse_x || event.y != last_mouse_y)
+        {
+          /* FIXME: These four lines can not be moved into
+             update_mouse_position unless xterm-mouse gets updated to
+             generate mouse events via C code.  See
+             https://lists.gnu.org/archive/html/emacs-devel/2020-11/msg00163.html */
+          last_mouse_frame = frame;
+          last_mouse_x = event.x;
+          last_mouse_y = event.y;
+          f->mouse_moved = 1;
+
+          count += update_mouse_position (f, event.x, event.y);
+        }
     }
-
-  if (do_help
-      && !(hold_quit && hold_quit->kind != NO_EVENT))
+  else
     {
-      Lisp_Object frame;
-
-      if (f)
-	XSETFRAME (frame, f);
-      else
-	frame = Qnil;
-
-      gen_help_event (help_echo_string, frame, help_echo_window,
-		      help_echo_object, help_echo_pos);
+      f->mouse_moved = 0;
+      term_mouse_click (&ie, &event, f);
+      ie.arg = tty_handle_tab_bar_click (f, event.x, event.y,
+					 (ie.modifiers & down_modifier) != 0, &ie);
+      kbd_buffer_store_event (&ie);
       count++;
     }
 
@@ -2613,9 +3116,7 @@ Gpm-mouse can only be activated for one tty at a time.  */)
   (void)
 {
   struct frame *f = SELECTED_FRAME ();
-  struct tty_display_info *tty
-    = ((f)->output_method == output_termcap
-       ? (f)->terminal->display_info.tty : NULL);
+  struct tty_display_info *tty = FRAME_TERMCAP_P (f) ? FRAME_TTY (f) : NULL;
   Gpm_Connect connection;
 
   if (!tty)
@@ -2661,9 +3162,7 @@ DEFUN ("gpm-mouse-stop", Fgpm_mouse_stop, Sgpm_mouse_stop,
   (void)
 {
   struct frame *f = SELECTED_FRAME ();
-  struct tty_display_info *tty
-    = ((f)->output_method == output_termcap
-       ? (f)->terminal->display_info.tty : NULL);
+  struct tty_display_info *tty = FRAME_TERMCAP_P (f) ? FRAME_TTY (f) : NULL;
 
   if (!tty || gpm_tty != tty)
     return Qnil;       /* Not activated on this terminal, nothing to do.  */
@@ -2678,7 +3177,7 @@ DEFUN ("gpm-mouse-stop", Fgpm_mouse_stop, Sgpm_mouse_stop,
 			       Menus
  ***********************************************************************/
 
-#if !defined (MSDOS)
+#if !defined (MSDOS) && !defined HAVE_ANDROID
 
 /* TTY menu implementation and main ideas are borrowed from msdos.c.
 
@@ -2793,20 +3292,19 @@ tty_menu_calc_size (tty_menu *menu, int *width, int *height)
 static void
 mouse_get_xy (int *x, int *y)
 {
-  struct frame *sf = SELECTED_FRAME ();
-  Lisp_Object lmx = Qnil, lmy = Qnil, lisp_dummy;
-  enum scroll_bar_part part_dummy;
-  Time time_dummy;
+  Lisp_Object mouse = mouse_position (tty_menu_calls_mouse_position_function);
 
-  if (FRAME_TERMINAL (sf)->mouse_position_hook)
-    (*FRAME_TERMINAL (sf)->mouse_position_hook) (&sf, -1,
-                                                 &lisp_dummy, &part_dummy,
-						 &lmx, &lmy,
-						 &time_dummy);
-  if (!NILP (lmx))
+  struct frame *f = XFRAME (XCAR (mouse));
+  struct frame *sf = SELECTED_FRAME ();
+  if (f == sf || frame_ancestor_p (sf, f))
     {
-      *x = XINT (lmx);
-      *y = XINT (lmy);
+      Lisp_Object lmx = XCAR (XCDR (mouse)), lmy = XCDR (XCDR (mouse));
+      if (FIXNUMP (lmx) && FIXNUMP (lmy))
+	{
+	  int mx = XFIXNUM (lmx);
+	  int my = XFIXNUM (lmy);
+	  root_xy (f, mx, my, x, y);
+	}
     }
 }
 
@@ -2973,9 +3471,7 @@ save_and_enable_current_matrix (struct frame *f)
 static void
 restore_desired_matrix (struct frame *f, struct glyph_matrix *saved)
 {
-  int i;
-
-  for (i = 0; i < saved->nrows; ++i)
+  for (int i = 0; i < saved->nrows; ++i)
     {
       struct glyph_row *from = saved->rows + i;
       struct glyph_row *to = f->desired_matrix->rows + i;
@@ -2985,7 +3481,23 @@ restore_desired_matrix (struct frame *f, struct glyph_matrix *saved)
       memcpy (to->glyphs[TEXT_AREA], from->glyphs[TEXT_AREA], nbytes);
       to->used[TEXT_AREA] = from->used[TEXT_AREA];
       to->enabled_p = from->enabled_p;
-      to->hash = from->hash;
+
+      bool need_new_hash = false;
+      for (int x = 0; x < f->desired_matrix->matrix_w; ++x)
+	{
+	  struct glyph *glyph = to->glyphs[0] + x;
+	  if (!FRAME_LIVE_P (glyph->frame))
+	    {
+	      glyph->frame = f;
+	      glyph->face_id = DEFAULT_FACE_ID;
+	      need_new_hash = true;
+	    }
+	}
+
+      if (need_new_hash)
+	to->hash = row_hash (to);
+      else
+	to->hash = from->hash;
     }
 }
 
@@ -3044,18 +3556,18 @@ read_menu_input (struct frame *sf, int *x, int *y, int min_y, int max_y,
       bool usable_input = 1;
       mi_result st = MI_CONTINUE;
       struct tty_display_info *tty = FRAME_TTY (sf);
-      Lisp_Object saved_mouse_tracking = do_mouse_tracking;
+      Lisp_Object old_track_mouse = track_mouse;
 
       /* Signal the keyboard reading routines we are displaying a menu
 	 on this terminal.  */
       tty->showing_menu = 1;
       /* We want mouse movements be reported by read_menu_command.  */
-      do_mouse_tracking = Qt;
+      track_mouse = Qt;
       do {
 	cmd = read_menu_command ();
       } while (NILP (cmd));
       tty->showing_menu = 0;
-      do_mouse_tracking = saved_mouse_tracking;
+      track_mouse = old_track_mouse;
 
       if (EQ (cmd, Qt) || EQ (cmd, Qtty_menu_exit)
 	  /* If some input switched frames under our feet, exit the
@@ -3132,10 +3644,10 @@ tty_menu_activate (tty_menu *menu, int *pane, int *selidx,
   SAFE_NALLOCA (state, 1, menu->panecount);
   memset (state, 0, sizeof (*state));
   faces[0]
-    = lookup_derived_face (NULL, sf, intern ("tty-menu-disabled-face"),
+    = lookup_derived_face (NULL, sf, Qtty_menu_disabled_face,
 			   DEFAULT_FACE_ID, 1);
   faces[1]
-    = lookup_derived_face (NULL, sf, intern ("tty-menu-enabled-face"),
+    = lookup_derived_face (NULL, sf, Qtty_menu_enabled_face,
 			   DEFAULT_FACE_ID, 1);
   selectface = intern ("tty-menu-selected-face");
   faces[2] = lookup_derived_face (NULL, sf, selectface,
@@ -3285,7 +3797,7 @@ tty_menu_activate (tty_menu *menu, int *pane, int *selidx,
 		       active submenu.  */
 		    if (i != statecount - 2
 			|| state[i].menu->submenu[dy] != state[i + 1].menu)
-		      while (i != statecount - 1)
+		      while (i < statecount - 1)
 			{
 			  statecount--;
 			  screen_update (sf, state[statecount].screen_behind);
@@ -3338,7 +3850,7 @@ tty_menu_activate (tty_menu *menu, int *pane, int *selidx,
 	 which calls tty_show_cursor.  Re-hide it, so it doesn't show
 	 through the menus.  */
       tty_hide_cursor (tty);
-      fflush_unlocked (tty->output);
+      fflush (tty->output);
     }
 
   sf->mouse_moved = 0;
@@ -3346,7 +3858,7 @@ tty_menu_activate (tty_menu *menu, int *pane, int *selidx,
   while (statecount--)
     free_saved_screen (state[statecount].screen_behind);
   tty_show_cursor (tty);	/* Turn cursor back on.  */
-  fflush_unlocked (tty->output);
+  fflush (tty->output);
 
 /* Clean up any mouse events that are waiting inside Emacs event queue.
      These events are likely to be generated before the menu was even
@@ -3403,9 +3915,9 @@ tty_menu_help_callback (char const *help_string, int pane, int item)
     pane_name = first_item[MENU_ITEMS_ITEM_NAME];
 
   /* (menu-item MENU-NAME PANE-NUMBER)  */
-  menu_object = list3 (Qmenu_item, pane_name, make_number (pane));
+  menu_object = list3 (Qmenu_item, pane_name, make_fixnum (pane));
   show_help_echo (help_string ? build_string (help_string) : Qnil,
- 		  Qnil, menu_object, make_number (item));
+		  Qnil, menu_object, make_fixnum (item));
 }
 
 struct tty_pop_down_menu
@@ -3477,7 +3989,7 @@ tty_menu_new_item_coords (struct frame *f, int which, int *x, int *y)
 	  pos = AREF (items, i + 3);
 	  if (NILP (str))
 	    return;
-	  ix = XINT (pos);
+	  ix = XFIXNUM (pos);
 	  if (ix <= *x
 	      /* We use <= so the blank between 2 items on a TTY is
 		 considered part of the previous item.  */
@@ -3488,14 +4000,14 @@ tty_menu_new_item_coords (struct frame *f, int which, int *x, int *y)
 	      if (which == TTYM_NEXT)
 		{
 		  if (i < last_i)
-		    *x = XINT (AREF (items, i + 4 + 3));
+		    *x = XFIXNUM (AREF (items, i + 4 + 3));
 		  else
 		    *x = 0;	/* Wrap around to the first item.  */
 		}
 	      else if (prev_x < 0)
 		{
 		  /* Wrap around to the last item.  */
-		  *x = XINT (AREF (items, last_i + 3));
+		  *x = XFIXNUM (AREF (items, last_i + 3));
 		}
 	      else
 		*x = prev_x;
@@ -3520,7 +4032,7 @@ tty_menu_show (struct frame *f, int x, int y, int menuflags,
   int dispwidth, dispheight;
   int i, j, lines, maxlines;
   int maxwidth;
-  ptrdiff_t specpdl_count;
+  specpdl_ref specpdl_count;
 
   eassert (FRAME_TERMCAP_P (f));
 
@@ -3528,7 +4040,7 @@ tty_menu_show (struct frame *f, int x, int y, int menuflags,
   if (menu_items_n_panes == 0)
     return Qnil;
 
-  if (menu_items_used <= MENU_ITEMS_PANE_LENGTH)
+  if (menu_items_used <= MENU_ITEMS_PANE_LENGTH || !VECTORP (menu_items))
     {
       *error_name = "Empty menu";
       return Qnil;
@@ -3711,6 +4223,9 @@ tty_menu_show (struct frame *f, int x, int y, int menuflags,
   status = tty_menu_activate (menu, &pane, &selidx, x, y, &datap,
 			      tty_menu_help_callback,
 			      menuflags & MENU_KBD_NAVIGATION);
+  if (status == TTYM_SUCCESS && !VECTORP (menu_items))
+    status = TTYM_IA_SELECT;
+
   entry = pane_prefix = Qnil;
 
   switch (status)
@@ -3754,7 +4269,7 @@ tty_menu_show (struct frame *f, int x, int y, int menuflags,
     case TTYM_NEXT:
     case TTYM_PREV:
       tty_menu_new_item_coords (f, status, &item_x, &item_y);
-      entry = Fcons (make_number (item_x), make_number (item_y));
+      entry = Fcons (make_fixnum (item_x), make_fixnum (item_y));
       break;
 
     case TTYM_FAILURE:
@@ -3776,15 +4291,15 @@ tty_menu_show (struct frame *f, int x, int y, int menuflags,
 
  tty_menu_end:
 
-  SAFE_FREE ();
-  unbind_to (specpdl_count, Qnil);
-  return entry;
+  return SAFE_FREE_UNBIND_TO (specpdl_count, entry);
 }
 
-#endif	/* !MSDOS */
+#endif	/* !MSDOS && !defined HAVE_ANDROID */
 
 
-#ifndef MSDOS
+
+#if !defined MSDOS && !defined HAVE_ANDROID
+
 /***********************************************************************
 			    Initialization
  ***********************************************************************/
@@ -3804,7 +4319,8 @@ create_tty_output (struct frame *f)
   f->output_data.tty = t;
 }
 
-/* Delete frame F's face cache, and its tty-dependent part.  */
+/* Delete frame F's face cache, and its tty-dependent part.  This is
+   installed as a delete_frame_hook.  */
 
 static void
 tty_free_frame_resources (struct frame *f)
@@ -3812,20 +4328,34 @@ tty_free_frame_resources (struct frame *f)
   eassert (FRAME_TERMCAP_P (f));
   free_frame_faces (f);
   xfree (f->output_data.tty);
+
+  /* Deleting a child frame means we have to thoroughly redisplay its
+     root frame to make sure the child disappears from the display.  */
+  if (FRAME_PARENT_FRAME (f))
+    SET_FRAME_GARBAGED (root_frame (f));
 }
 
-#else  /* MSDOS */
+#elif defined MSDOS
 
 /* Delete frame F's face cache.  */
 
 static void
 tty_free_frame_resources (struct frame *f)
 {
-  eassert (FRAME_TERMCAP_P (f) || FRAME_MSDOS_P (f));
+  eassert (is_tty_frame (f));
   free_frame_faces (f);
+  /* Deleting a child frame means we have to thoroughly redisplay its
+     root frame to make sure the child disappears from the display.  */
+  if (FRAME_PARENT_FRAME (f))
+    SET_FRAME_GARBAGED (root_frame (f));
 }
-#endif	/* MSDOS */
-
+
+#endif
+
+
+
+#ifndef HAVE_ANDROID
+
 /* Reset the hooks in TERMINAL.  */
 
 static void
@@ -3847,6 +4377,9 @@ clear_tty_hooks (struct terminal *terminal)
   terminal->update_begin_hook = 0;
   terminal->update_end_hook = 0;
   terminal->set_terminal_window_hook = 0;
+  /* Don't clear the defined_color_hook, as that makes it impossible
+     to unload or load a theme when some TTY frame is suspended.  */
+  /* terminal->defined_color_hook = 0; */
   terminal->mouse_position_hook = 0;
   terminal->frame_rehighlight_hook = 0;
   terminal->frame_raise_lower_hook = 0;
@@ -3890,9 +4423,12 @@ set_tty_hooks (struct terminal *terminal)
   terminal->menu_show_hook = &tty_menu_show;
 #endif
   terminal->set_terminal_window_hook = &tty_set_terminal_window;
+  terminal->defined_color_hook = &tty_defined_color; /* xfaces.c */
   terminal->read_socket_hook = &tty_read_avail_input; /* keyboard.c */
   terminal->delete_frame_hook = &tty_free_frame_resources;
   terminal->delete_terminal_hook = &delete_tty;
+
+  terminal->frame_raise_lower_hook = tty_raise_lower_frame;
   /* Other hooks are NULL by default.  */
 }
 
@@ -3916,20 +4452,34 @@ dissociate_if_controlling_tty (int fd)
     }
 }
 
+#endif /* !HAVE_ANDROID */
+
 /* Create a termcap display on the tty device with the given name and
    type.
 
-   If NAME is NULL, then use the controlling tty, i.e., DEV_TTY.
+   If NAME is NULL, then use the controlling tty, i.e., dev_tty.
    Otherwise NAME should be a path to the tty device file,
    e.g. "/dev/pts/7".
 
    TERMINAL_TYPE is the termcap type of the device, e.g. "vt100".
 
-   If MUST_SUCCEED is true, then all errors are fatal.  */
+   If MUST_SUCCEED is true, then all errors are fatal.  This function
+   always signals on Android, where text terminals are prohibited by
+   system policy (and the required libraries are usually not
+   available.)  */
+
+#ifdef HAVE_ANDROID
+_Noreturn
+#endif
 
 struct terminal *
 init_tty (const char *name, const char *terminal_type, bool must_succeed)
 {
+#ifdef HAVE_ANDROID
+  maybe_fatal (must_succeed, 0, "Text terminals are not supported"
+	       " under Android", "Text terminals are not supported"
+	       " under Android");
+#else
   struct tty_display_info *tty = NULL;
   struct terminal *terminal = NULL;
 #ifndef DOS_NT
@@ -3946,9 +4496,9 @@ init_tty (const char *name, const char *terminal_type, bool must_succeed)
                  "Unknown terminal type");
 
   if (name == NULL)
-    name = DEV_TTY;
+    name = dev_tty;
 #ifndef DOS_NT
-  if (!strcmp (name, DEV_TTY))
+  if (!strcmp (name, dev_tty))
     ctty = 1;
 #endif
 
@@ -4003,13 +4553,14 @@ init_tty (const char *name, const char *terminal_type, bool must_succeed)
     tty->input = tty->output
       = ((fd < 0 || ! isatty (fd))
 	 ? NULL
-	 : fdopen (fd, "w+"));
+	 : emacs_fdopen (fd, "w+"));
 
     if (! tty->input)
       {
 	char const *diagnostic
 	  = (fd < 0) ? "Could not open file: %s" : "Not a tty device: %s";
 	emacs_close (fd);
+        delete_terminal_internal (terminal);
 	maybe_fatal (must_succeed, terminal, diagnostic, diagnostic, name);
       }
 
@@ -4126,6 +4677,19 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
   tty->TS_enter_alt_charset_mode = tgetstr ("as", address);
   tty->TS_exit_alt_charset_mode = tgetstr ("ae", address);
   tty->TS_exit_attribute_mode = tgetstr ("me", address);
+#ifdef TERMINFO
+  tty->TS_enter_strike_through_mode = tigetstr ("smxx");
+  if (tty->TS_enter_strike_through_mode == (char *) (intptr_t) {-1})
+    tty->TS_enter_strike_through_mode = NULL;
+  tty->TS_enter_overline_mode = tigetstr ("Smol");
+  if (tty->TS_enter_overline_mode == (char *) (intptr_t) -1)
+    tty->TS_enter_overline_mode = NULL;
+#else
+  /* FIXME: Is calling tgetstr here for non-terminfo case correct,
+     even though "smxx" is more than 2 characters?  */
+  tty->TS_enter_strike_through_mode = tgetstr ("smxx", address);
+  tty->TS_enter_overline_mode = tgetstr ("Smol", address);
+#endif
 
   MultiUp (tty) = tgetstr ("UP", address);
   MultiDown (tty) = tgetstr ("DO", address);
@@ -4151,16 +4715,26 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
 
 #ifdef TERMINFO
       {
-	const char *fg = tigetstr ("setf24");
-	const char *bg = tigetstr ("setb24");
-	/* Non-standard support for 24-bit colors. */
-	if (fg && bg
-	    && fg != (char *) (intptr_t) -1
-	    && bg != (char *) (intptr_t) -1)
+	const char *fg;
+	const char *bg;
+	/* Our own non-standard support for 24-bit colors. */
+	if ((fg = tigetstr ("setf24")) && (bg = tigetstr ("setb24"))
+	    && fg != (char *) (intptr_t) {-1}
+	    && bg != (char *) (intptr_t) {-1})
 	  {
 	    tty->TS_set_foreground = fg;
 	    tty->TS_set_background = bg;
 	    tty->TN_max_colors = 16777216;
+	  }
+	/* Other non-standard support for 24-bit colors. */
+	else if ((fg = tigetstr ("setrgbf")) && (bg = tigetstr ("setrgbb"))
+	    && fg != (char *) (intptr_t) {-1}
+	    && bg != (char *) (intptr_t) {-1})
+	  {
+	    tty->TS_set_foreground = fg;
+	    tty->TS_set_background = bg;
+	    tty->TN_max_colors = 16777216;
+	    tty->TF_rgb_separate = 1;
 	  }
 	/* Standard support for 24-bit colors.  */
 	else if (tigetflag ("RGB") > 0)
@@ -4169,6 +4743,24 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
 	       signed values, tgetnum("Co") and tigetnum("colors")
 	       could return 32767.  */
 	    tty->TN_max_colors = 16777216;
+
+	    /* FIXME: When the RGB terminfo capability is given, we
+	       should avoid trying to use colors 000000 to 000007 as if
+	       they were RGB values.  The escape sequences given by
+	       setaf and setab treat them as the first eight indexed
+	       ANSI colors. */
+	  }
+	/* Fall back to direct color by RGB value (semicolon version)
+	   if Tc is set (de-facto standard introduced by tmux) or if
+	   requested by the COLORTERM environment variable.  */
+	else if ((tigetflag ("Tc") > 0)
+		 || ((bg = getenv ("COLORTERM")) != NULL
+		     && strcasecmp (bg, "truecolor") == 0))
+	  {
+	    tty->TS_set_foreground = "\033[38;2;%p1%d;%p2%d;%p3%d%;m";
+	    tty->TS_set_background = "\033[48;2;%p1%d;%p2%d;%p3%d%;m";
+	    tty->TN_max_colors = 16777216;
+	    tty->TF_rgb_separate = 1;
 	  }
       }
 #endif
@@ -4193,6 +4785,26 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
   tty->TF_underscore = tgetflag ("ul");
   tty->TF_teleray = tgetflag ("xt");
 
+  /* Styled underlines.  Support for this is provided either by the
+     escape sequence in Smulx or the Su flag.  The latter results in a
+     common default escape sequence and is not recommended.  */
+#ifdef TERMINFO
+  tty->TF_set_underline_style = tigetstr ("Smulx");
+  if (tty->TF_set_underline_style == (char *) (intptr_t) {-1})
+    tty->TF_set_underline_style = NULL;
+#else
+  tty->TF_set_underline_style = tgetstr ("Smulx", address);
+#endif
+  if (!tty->TF_set_underline_style && tgetflag ("Su"))
+    /* Default to the kitty escape sequence.  See
+       https://sw.kovidgoyal.net/kitty/underlines/.  */
+    tty->TF_set_underline_style = "\x1b[4:%p1%dm";
+
+  if (tty->TF_set_underline_style)
+    /* Standard escape sequence to set the underline color.
+       Requires a single parameter, the color index.  */
+    tty->TF_set_underline_color = "\x1b[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%dm";
+
 #else /* DOS_NT */
 #ifdef WINDOWSNT
   {
@@ -4200,6 +4812,25 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
     int height, width;
 
     initialize_w32_display (terminal, &width, &height);
+
+    tty->TN_no_color_video = 0;
+    tty->TN_max_colors = 16777216;
+    tty->TS_orig_pair = "\x1b[39m\x1b[49m";
+    tty->TS_set_foreground = "\x1b[38;2;%lu;%lu;%lum";
+    tty->TS_set_background = "\x1b[48;2;%lu;%lu;%lum";
+
+    /* Save default color capabilities */
+    tty_default_color_capabilities (tty, 1);
+
+    tty->TS_enter_bold_mode = "\x1b[1m";
+    tty->TS_enter_italic_mode = "\x1b[3m";
+    tty->TS_enter_strike_through_mode = "\x1b[9m";
+    tty->TS_enter_underline_mode = "\x1b[4m";
+    tty->TF_set_underline_style = "\x1b[4:%um";
+    tty->TF_set_underline_color = "\x1b[58:2::%lu:%lu:%lum";
+    tty->TS_enter_overline_mode = "\x1b[53m";
+    tty->TS_enter_reverse_mode = "\x1b[7m";
+    tty->TS_exit_attribute_mode = "\x1b[0m";
 
     FrameRows (tty) = height;
     FrameCols (tty) = width;
@@ -4221,6 +4852,7 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
     FrameCols (tty) = width;
     FrameRows (tty) = height;
     tty->char_ins_del_ok = 0;
+    tty->TN_max_colors = 16;  /* Must be non-zero for tty-display-color-p.  */
     init_baud_rate (fileno (tty->input));
   }
 #endif	/* MSDOS */
@@ -4246,13 +4878,12 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
      don't think we're losing anything by turning it off.  */
   tty->line_ins_del_ok = 0;
 
-  tty->TN_max_colors = 16;  /* Must be non-zero for tty-display-color-p.  */
 #endif	/* DOS_NT */
 
 #ifdef HAVE_GPM
   terminal->mouse_position_hook = term_mouse_position;
-  tty->mouse_highlight.mouse_face_window = Qnil;
 #endif
+  tty->mouse_highlight.mouse_face_window = Qnil;
 
   terminal->kboard = allocate_kboard (Qnil);
   terminal->kboard->reference_count++;
@@ -4398,17 +5029,17 @@ use the Bourne shell command 'TERM=...; export TERM' (C-shell:\n\
   init_sys_modes (tty);
 
   return terminal;
+#endif /* !HAVE_ANDROID */
 }
 
 
 static void
 vfatal (const char *str, va_list ap)
 {
-  fprintf (stderr, "emacs: ");
+  fputs ("emacs: ", stderr);
   vfprintf (stderr, str, ap);
-  if (!(strlen (str) > 0 && str[strlen (str) - 1] == '\n'))
-    fprintf (stderr, "\n");
-  fflush (stderr);
+  if (! (str[0] && str[strlen (str) - 1] == '\n'))
+    putc ('\n', stderr);
   exit (1);
 }
 
@@ -4423,8 +5054,13 @@ maybe_fatal (bool must_succeed, struct terminal *terminal,
 {
   va_list ap;
   va_start (ap, str2);
+
+#ifndef HAVE_ANDROID
   if (terminal)
     delete_tty (terminal);
+#else
+  eassert (terminal == NULL);
+#endif
 
   if (must_succeed)
     vfatal (str2, ap);
@@ -4441,6 +5077,8 @@ fatal (const char *str, ...)
 }
 
 
+
+#ifndef HAVE_ANDROID
 
 /* Delete the given tty terminal, closing all frames on it.  */
 
@@ -4487,16 +5125,198 @@ delete_tty (struct terminal *terminal)
     {
       delete_keyboard_wait_descriptor (fileno (tty->input));
       if (tty->input != stdin)
-        fclose (tty->input);
+        emacs_fclose (tty->input);
     }
   if (tty->output && tty->output != stdout && tty->output != tty->input)
-    fclose (tty->output);
+    emacs_fclose (tty->output);
   if (tty->termscript)
-    fclose (tty->termscript);
+    emacs_fclose (tty->termscript);
 
   xfree (tty->old_tty);
   xfree (tty->Wcm);
   xfree (tty);
+}
+
+#endif
+
+/* Return geometric attributes of FRAME.  According to the value of
+   ATTRIBUTES return the outer edges of FRAME (Qouter_edges), the
+   native edges of FRAME (Qnative_edges), or the inner edges of frame
+   (Qinner_edges).  Any other value means to return the geometry as
+   returned by Fx_frame_geometry.  */
+
+static Lisp_Object
+tty_frame_geometry (Lisp_Object frame, Lisp_Object attribute)
+{
+  struct frame *f = decode_live_frame (frame);
+  if (FRAME_INITIAL_P (f) || !FRAME_TTY (f))
+    return Qnil;
+
+  int native_width = f->pixel_width;
+  int native_height = f->pixel_height;
+
+  eassert (FRAME_PARENT_FRAME (f) || (f->left_pos == 0 && f->top_pos == 0));
+  int outer_left = f->left_pos;
+  int outer_top = f->top_pos;
+  int outer_right = outer_left + native_width;
+  int outer_bottom = outer_top + native_height;
+
+  int native_left = outer_left;
+  int native_top = outer_top;
+  int native_right = outer_right;
+  int native_bottom = outer_bottom;
+
+  int internal_border_width = FRAME_INTERNAL_BORDER_WIDTH (f);
+  int inner_left = native_left + internal_border_width;
+  int inner_top = native_top + internal_border_width;
+  int inner_right = native_right - internal_border_width;
+  int inner_bottom = native_bottom - internal_border_width;
+
+  int menu_bar_height = FRAME_MENU_BAR_HEIGHT (f);
+  inner_top += menu_bar_height;
+  int menu_bar_width = menu_bar_height ? native_width : 0;
+
+  int tab_bar_height = FRAME_TAB_BAR_HEIGHT (f);
+  int tab_bar_width = (tab_bar_height
+		       ? native_width - 2 * internal_border_width
+		       : 0);
+  inner_top += tab_bar_height;
+
+  int tool_bar_height = FRAME_TOOL_BAR_HEIGHT (f);
+  int tool_bar_width = (tool_bar_height
+			? native_width - 2 * internal_border_width
+			: 0);
+
+  /* Subtract or add to the inner dimensions based on the tool bar
+     position.  */
+  if (EQ (FRAME_TOOL_BAR_POSITION (f), Qtop))
+    inner_top += tool_bar_height;
+  else
+    inner_bottom -= tool_bar_height;
+
+  /* Construct list.  */
+  if (EQ (attribute, Qouter_edges))
+    return list4i (outer_left, outer_top, outer_right, outer_bottom);
+  else if (EQ (attribute, Qnative_edges))
+    return list4i (native_left, native_top, native_right, native_bottom);
+  else if (EQ (attribute, Qinner_edges))
+    return list4i (inner_left, inner_top, inner_right, inner_bottom);
+  else
+    return list (Fcons (Qouter_position, Fcons (make_fixnum (outer_left),
+						make_fixnum (outer_top))),
+		 Fcons (Qouter_size,
+			Fcons (make_fixnum (outer_right - outer_left),
+			       make_fixnum (outer_bottom - outer_top))),
+		 Fcons (Qouter_border_width, make_fixnum (0)),
+		 Fcons (Qexternal_border_size,
+			Fcons (make_fixnum (0), make_fixnum (0))),
+		 Fcons (Qtitle_bar_size,
+			Fcons (make_fixnum (0), make_fixnum (0))),
+		 Fcons (Qmenu_bar_external, Qnil),
+		 Fcons (Qmenu_bar_size,
+			Fcons (make_fixnum (menu_bar_width),
+			       make_fixnum (menu_bar_height))),
+		 Fcons (Qtab_bar_size,
+			Fcons (make_fixnum (tab_bar_width),
+			       make_fixnum (tab_bar_height))),
+		 Fcons (Qtool_bar_external, Qnil),
+		 Fcons (Qtool_bar_position, FRAME_TOOL_BAR_POSITION (f)),
+		 Fcons (Qtool_bar_size,
+			Fcons (make_fixnum (tool_bar_width),
+			       make_fixnum (tool_bar_height))),
+		 Fcons (Qinternal_border_width,
+			make_fixnum (internal_border_width)));
+}
+
+DEFUN ("tty-frame-geometry", Ftty_frame_geometry, Stty_frame_geometry, 0, 1, 0,
+       doc: /* Return geometric attributes of terminal frame FRAME.
+See also `frame-geometry'.  */)
+  (Lisp_Object frame)
+{
+  return tty_frame_geometry (frame, Qnil);
+}
+
+DEFUN ("tty-frame-edges", Ftty_frame_edges, Stty_frame_edges, 0, 2, 0,
+       doc: /* Return coordinates of FRAME's edges.
+See also `frame-edges'.  */)
+  (Lisp_Object frame, Lisp_Object type)
+{
+  if (!EQ (type, Qouter_edges) && !EQ (type, Qinner_edges))
+    type = Qnative_edges;
+  return tty_frame_geometry (frame, type);
+}
+
+DEFUN ("tty-frame-list-z-order", Ftty_frame_list_z_order,
+       Stty_frame_list_z_order, 0, 1, 0,
+       doc: /* Return list of Emacs's frames, in Z (stacking) order.
+See also `frame-list-z-order'.  */)
+  (Lisp_Object frame)
+{
+  struct frame *f = decode_tty_frame (frame);
+  Lisp_Object frames = frames_in_reverse_z_order (f, true);
+  return Fnreverse (frames);
+}
+
+DEFUN ("tty-frame-restack", Ftty_frame_restack,
+       Stty_frame_restack, 2, 3, 0,
+       doc: /* Restack FRAME1 below FRAME2 on terminals.
+See also `frame-restack'.  */
+       attributes: noreturn)
+  (Lisp_Object frame1, Lisp_Object frame2, Lisp_Object above)
+{
+  /* FIXME/tty: tty-frame-restack implementation.  */
+  error ("tty-frame-restack is not implemented");
+}
+
+static void
+tty_display_dimension (Lisp_Object frame, int *width, int *height)
+{
+  if (!FRAMEP (frame))
+    frame = Fselected_frame ();
+  struct frame *f = XFRAME (frame);
+  switch (f->output_method)
+    {
+    case output_initial:
+      *width = 80;
+      *height = 25;
+      break;
+    case output_termcap:
+      *width = FrameCols (FRAME_TTY (f));
+      *height = FrameRows (FRAME_TTY (f));
+      break;
+    case output_x_window:
+    case output_msdos_raw:
+    case output_w32:
+    case output_ns:
+    case output_pgtk:
+    case output_haiku:
+    case output_android:
+    default:
+      emacs_abort ();
+      break;
+    }
+}
+
+DEFUN ("tty-display-pixel-width", Ftty_display_pixel_width,
+       Stty_display_pixel_width, 0, 1, 0,
+       doc: /* Return the width of DISPLAY's screen in pixels.
+See also `display-pixel-width'.  */)
+  (Lisp_Object display)
+{
+  int width, height;
+  tty_display_dimension (display, &width, &height);
+  return make_fixnum (width);
+}
+
+DEFUN ("tty-display-pixel-height", Ftty_display_pixel_height,
+       Stty_display_pixel_height, 0, 1, 0,
+       doc: /* Return the height of DISPLAY's screen in pixels.
+See also `display-pixel-height'.  */)
+  (Lisp_Object display)
+{
+  int width, height;
+  tty_display_dimension (display, &width, &height);
+  return make_fixnum (height);
 }
 
 void
@@ -4505,7 +5325,7 @@ syms_of_term (void)
   DEFVAR_BOOL ("system-uses-terminfo", system_uses_terminfo,
     doc: /* Non-nil means the system uses terminfo rather than termcap.
 This variable can be used by terminal emulator packages.  */);
-#ifdef TERMINFO
+#if defined TERMINFO || (defined HAVE_ANDROID && !defined ANDROID_STUBIFY)
   system_uses_terminfo = 1;
 #else
   system_uses_terminfo = 0;
@@ -4531,27 +5351,108 @@ What means \"very visible\" is up to your terminal.  It may make the cursor
 bigger, or it may make it blink, or it may do nothing at all.  */);
   visible_cursor = 1;
 
+  DEFVAR_BOOL ("tty-menu-calls-mouse-position-function",
+               tty_menu_calls_mouse_position_function,
+    doc: /* Non-nil means TTY menu code will call `mouse-position-function'.
+This should be set if the function in `mouse-position-function' does not
+trigger redisplay.  */);
+  tty_menu_calls_mouse_position_function = 0;
+
+  DEFVAR_BOOL ("tty-cursor-movement-use-TAB-BS", tty_cursor_movement_use_TAB_BS,
+    doc: /* Whether TTY frames may use the combination TAB + BACKSPACE for moving around.
+On TTY frames, as a display optimization, Emacs may move to a position
+by "overshooting" with TAB characters and one BACKSPACE character, when
+this is more efficient.  This combination can interfere with the
+functioning of some software, such as screen readers.  Set this to
+non-nil to enable this optimization.
+If `tty-cursor-movement-use-TAB' is nil, this variable has no effect,
+as Emacs will never use TABs for cursor movement.  */);
+  tty_cursor_movement_use_TAB_BS = 0;
+
+  DEFVAR_BOOL ("tty-cursor-movement-use-TAB", tty_cursor_movement_use_TAB,
+    doc: /* Whether TTY frames may use TAB for cursor motion.
+On TTY frames, as a display optimization, Emacs may move cursor to a
+position with TAB characters, when this is more efficient.  This might
+produce wrong results if the hardware tabs of the terminal were set to
+be of different width than Emacs expects.  Set this to nil to disable
+using TABs for cursor motion.  */);
+  tty_cursor_movement_use_TAB = 1;
+
+  DEFVAR_LISP ("auto-composition-emoji-tty-eligible-codepoints", Vauto_composition_emoji_tty_eligible_codepoints,
+    doc: /* List of characters displayed as Emoji on TTY frames when followed by VS-16.
+
+These are codepoints which have Emoji_Presentation = No, and thus by
+default are not displayed as Emoji.  When followed by U+FE0F (VS-16),
+they may be considered as the beginning of an Emoji sequence instead.
+
+Some initial code points may have character width 1, and non-compliant
+terminals may render them narrow.  In that case, set
+`tty-display-emoji-force-wide' to nil.
+
+This list is auto-generated, you should not need to modify it.  */);
+  Vauto_composition_emoji_tty_eligible_codepoints = Qnil;
+
+  DEFVAR_LISP ("auto-composition-emoji-unqualified-tail-initials", Vauto_composition_emoji_unqualified_tail_initials,
+    doc: /* List of characters that may begin the tail of an unqualified RGI sequence.
+
+An unqualified RGI sequence begins with a codepoint in
+`auto-composition-emoji-tty-eligible-codepoints', followed by a
+Zero-Width Joiner.  The first character after the first ZWJ must be in
+this list to be recognized as an Emoji sequence.
+
+This list is auto-generated, you should not need to modify it.  */);
+  Vauto_composition_emoji_unqualified_tail_initials = Qnil;
+
+  DEFVAR_BOOL ("tty-display-emoji-force-wide", tty_display_emoji_force_wide,
+    doc: /* Whether Emoji sequences on TTY frames should always be considered wide.
+
+On TTY frames, an Emoji sequence considered for composition may begin
+with any code point in `auto-composition-emoji-tty-eligible-codepoints',
+which does not necessarily has width 2.  A compliant terminal emulator
+typically render an Emoji sequence as a wide glyph.
+
+When nil, an Emoji sequence whose first character's width is 1 may be
+considered as a narrow glyph to be compatible with some non-compliant
+terminal emulators.  */);
+  tty_display_emoji_force_wide = true;
+
   defsubr (&Stty_display_color_p);
   defsubr (&Stty_display_color_cells);
   defsubr (&Stty_no_underline);
+  defsubr (&Stty_enable_overline);
   defsubr (&Stty_type);
   defsubr (&Scontrolling_tty_p);
   defsubr (&Stty_top_frame);
   defsubr (&Ssuspend_tty);
   defsubr (&Sresume_tty);
+#ifndef HAVE_ANDROID
+  defsubr (&Stty__set_output_buffer_size);
+  defsubr (&Stty__output_buffer_size);
+#endif /* !HAVE_ANDROID */
+  defsubr (&Stty_frame_at);
 #ifdef HAVE_GPM
   defsubr (&Sgpm_mouse_start);
   defsubr (&Sgpm_mouse_stop);
+  staticpro (&last_mouse_frame);
 #endif /* HAVE_GPM */
 
-#ifndef DOS_NT
+  defsubr (&Stty_frame_geometry);
+  defsubr (&Stty_frame_edges);
+  defsubr (&Stty_frame_list_z_order);
+  defsubr (&Stty_frame_restack);
+  defsubr (&Stty_display_pixel_width);
+  defsubr (&Stty_display_pixel_height);
+
+#if !defined MSDOS && !defined HAVE_ANDROID
   default_orig_pair = NULL;
   default_set_foreground = NULL;
   default_set_background = NULL;
-#endif /* !DOS_NT */
+#endif /* !MSDOS && !HAVE_ANDROID */
 
+#ifndef HAVE_ANDROID
   encode_terminal_src = NULL;
   encode_terminal_dst = NULL;
+#endif
 
   DEFSYM (Qtty_mode_set_strings, "tty-mode-set-strings");
   DEFSYM (Qtty_mode_reset_strings, "tty-mode-reset-strings");
@@ -4567,4 +5468,12 @@ bigger, or it may make it blink, or it may do nothing at all.  */);
   DEFSYM (Qtty_menu_mouse_movement, "tty-menu-mouse-movement");
   DEFSYM (Qtty_menu_navigation_map, "tty-menu-navigation-map");
 #endif
+  DEFSYM (Qf0, "f0");
+  DEFSYM (Qf10, "f10");
+  DEFSYM (Qtty_set_up_initial_frame_faces,
+	  "tty-set-up-initial-frame-faces");
+  DEFSYM (Qsuspend_tty_functions, "suspend-tty-functions");
+  DEFSYM (Qresume_tty_functions, "resume-tty-functions");
+  DEFSYM (Qtty_menu_disabled_face, "tty-menu-disabled-face");
+  DEFSYM (Qtty_menu_enabled_face, "tty-menu-enabled-face");
 }

@@ -83,6 +83,7 @@ the second with them pointing to the XEmacs manuals.
 
 @setfilename  ../../info/ccmode.info
 @settitle     CC Mode Manual
+@documentlanguage en
 @include docstyle.texi
 @footnotestyle end
 
@@ -148,7 +149,17 @@ CC Mode
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 @comment Define an index for syntactic symbols.
+@c Version for Texinfo <= 4.x
+@ifclear txicommandconditionals
+@ifnottex @c In texi2dvi, the @defindex would create an empty cc-mode.ss
+          @c For Info, unlike tex, @syncodeindex needs a matching @defindex.
 @defindex ss
+@end ifnottex
+@end ifclear
+@c Version for Texinfo >= 5.x
+@ifset txicommandconditionals
+@defindex ss
+@end ifset
 
 @comment Combine key, syntactic symbol and concept indices into one.
 @syncodeindex ss cp
@@ -157,7 +168,7 @@ CC Mode
 @copying
 This manual is for CC Mode in Emacs.
 
-Copyright @copyright{} 1995--2018 Free Software Foundation, Inc.
+Copyright @copyright{} 1995--2026 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document
@@ -172,7 +183,7 @@ modify this GNU manual.''
 @end quotation
 @end copying
 
-@comment Info directory entry for use by install-info. The indentation
+@comment Info directory entry for use by install-info.  The indentation
 @comment here is by request from the FSF folks.
 @dircategory Emacs editing modes
 @direntry
@@ -187,7 +198,7 @@ modify this GNU manual.''
 @titlepage
 @sp 10
 
-@center @titlefont{CC Mode 5.32}
+@center @titlefont{CC Mode 5.35}
 @sp 2
 @center A GNU Emacs mode for editing C and C-like languages
 @sp 2
@@ -209,10 +220,9 @@ or can be downloaded from @url{https://savannah.gnu.org/projects/emacs/}.
 @summarycontents
 @contents
 
-@node    Top, Introduction, (dir), (dir)
-@comment node-name, next, previous, up
 
 @ifnottex
+@node    Top
 @top @ccmode{}
 
 @ccmode{} is a GNU Emacs mode for editing files containing C, C++,
@@ -274,6 +284,7 @@ Font Locking
 * Font Locking Preliminaries::
 * Faces::
 * Doc Comments::
+* Wrong Comment Style::
 * Misc Font Locking::
 * AWK Mode Font Locking::
 
@@ -314,12 +325,14 @@ Syntactic Symbols
 * Conditional Construct Symbols::
 * Switch Statement Symbols::
 * Brace List Symbols::
+* Enum Symbols::
 * External Scope Symbols::
 * Paren List Symbols::
 * Literal Symbols::
 * Multiline Macro Symbols::
 * Objective-C Method Symbols::
 * Java Symbols::
+* Constraint Symbols::
 * Statement Block Symbols::
 * K&R Symbols::
 
@@ -340,17 +353,17 @@ Line-Up Functions
 * Misc Line-Up::
 
 
-Customizing Macros
+Custom Macros
 
 * Macro Backslashes::
 * Macros with ;::
 * Noise Macros::
+* Indenting Directives::
 
 @end detailmenu
 @end menu
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Introduction, Overview, Top, Top
-@comment node-name, next, previous, up
+@node    Introduction
 @chapter Introduction
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -377,13 +390,13 @@ was added in version 5.30.
 
 This manual describes @ccmode{}
 @comment The following line must appear on its own, so that the
-version 5.32.
+version 5.35.
 @comment Release.py script can update the version number automatically
 
 @ccmode{} supports the editing of C, C++, Objective-C,
 Java, CORBA's Interface Definition Language, Pike@footnote{A C-like
 scripting language with its roots in the LPC language used in some MUD
-engines.  See @uref{http://pike.ida.liu.se/}.} and AWK files.  In this
+engines.  See @uref{https://pike.lysator.liu.se/}.} and AWK files.  In this
 way, you can easily set up consistent font locking and coding styles for
 use in editing all of these languages, although AWK is not yet as
 uniformly integrated as the other languages.
@@ -409,7 +422,7 @@ also like to thank all the @ccmode{} victims who help enormously
 during the early beta stages of @ccmode{}'s development.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Overview, Getting Started, Introduction, Top
+@node    Overview
 @comment  node-name,  next,  previous,  up@cindex organization of the manual
 @chapter Overview of the Manual
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -478,8 +491,7 @@ project: whether for updating @ccmode{} or submitting bug reports.
 Finally, there are the customary indices.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Getting Started, Commands, Overview, Top
-@comment node-name, next, previous, up
+@node    Getting Started
 @chapter Getting Started
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -571,7 +583,7 @@ you are going to be editing AWK files, @file{README} describes how to
 configure your (X)Emacs so that @ccmode{} will supersede the obsolete
 @code{awk-mode.el} which might have been supplied with your (X)Emacs.
 @ccmode{} might not work with older versions of Emacs or XEmacs.  See
-the @ccmode{} release notes at @uref{http://cc-mode.sourceforge.net}
+the @ccmode{} release notes at @uref{https://www.nongnu.org/cc-mode/}
 for the latest information on Emacs version and package compatibility
 (@pxref{Updating CC Mode}).
 
@@ -590,8 +602,7 @@ where @samp{XX} is the minor release number.
 @end deffn
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Commands, Font Locking, Getting Started, Top
-@comment node-name, next, previous, up
+@node    Commands
 @chapter Commands
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -627,7 +638,7 @@ structures.
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Indentation Commands, Comment Commands, Commands, Commands
+@node    Indentation Commands
 @comment node-name, next, previous,up
 @section Indentation Commands
 @cindex indentation
@@ -659,7 +670,7 @@ expression, to some statements, or perhaps to whole functions, the
 syntactic recognition can be wrong.  @ccmode{} manages to figure it
 out correctly most of the time, though.
 
-Some macros, when invoked, ''have their own semicolon''.  To get the
+Some macros, when invoked, ``have their own semicolon''.  To get the
 next line indented correctly, rather than as a continuation line,
 @xref{Macros with ;}.
 
@@ -806,8 +817,7 @@ often (in seconds) progress messages are to be displayed.
 @end defopt
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Comment Commands, Movement Commands, Indentation Commands, Commands
-@comment node-name, next, previous, up
+@node    Comment Commands
 @section Comment Commands
 @cindex comments (insertion of)
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -827,12 +837,14 @@ Emacs Manual}, for fuller details.  @code{comment-region} isn't
 actually part of @ccmode{}; it is given a @ccmode{} binding for
 convenience.
 
-@item @kbd{M-;} (@code{comment-dwim} or @code{indent-for-comment} @footnote{The name of this command varies between (X)Emacs versions.})
+@item @kbd{M-;} (@code{comment-dwim} or @code{indent-for-comment})
 @kindex M-;
 @findex comment-dwim
 @findex indent-for-comment
 Insert a comment at the end of the current line, if none is there
-already.  Then reindent the comment according to @code{comment-column}
+already@footnote{The name of this command varies between (X)Emacs
+versions.}.  Then reindent the comment according to
+@code{comment-column}
 @ifclear XEMACS
 (@pxref{Options for Comments,,, emacs, GNU Emacs Manual})
 @end ifclear
@@ -875,8 +887,7 @@ lines.
 @end table
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Movement Commands, Filling and Breaking, Comment Commands, Commands
-@comment node-name, next, previous, up
+@node    Movement Commands
 @section Movement Commands
 @cindex movement
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -892,7 +903,7 @@ lines.
 @vindex defun-tactic @r{(c-)}
 
 Move to the beginning or end of the current or next function.  Other
-constructs (such as a structs or classes) which have a brace block
+constructs (such as structs or classes) which have a brace block
 also count as ``functions'' here.  To move over several functions, you
 can give these commands a repeat count.
 
@@ -915,7 +926,7 @@ behavior prior to version 5.32.}, set @code{c-defun-tactic} to
 These functions are analogous to the Emacs built-in commands
 @code{beginning-of-defun} and @code{end-of-defun}, except they
 eliminate the constraint that the top-level opening brace of the defun
-must be in column zero.  See @ref{Defuns,,,@emacsman{},
+must be in column zero.  @xref{Defuns,,,@emacsman{},
 @emacsmantitle{}}, for more information.
 
 @item @kbd{C-M-a} (AWK Mode) (@code{c-awk-beginning-of-defun})
@@ -1013,9 +1024,7 @@ These key sequences are not bound in AWK Mode, which doesn't have
 preprocessor statements.
 
 @item @kbd{M-x c-backward-into-nomenclature}
-@itemx @kbd{M-x c-forward-into-nomenclature}
 @findex c-backward-into-nomenclature
-@findex c-forward-into-nomenclature
 @findex backward-into-nomenclature @r{(c-)}
 @findex forward-into-nomenclature @r{(c-)}
 A popular programming style, especially for object-oriented languages
@@ -1033,7 +1042,7 @@ Movement}.  They might be removed from a future release of @ccmode{}.
 @end table
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Filling and Breaking, Minor Modes, Movement Commands, Commands
+@node    Filling and Breaking
 @comment  node-name,  next,  previous,  up
 @section Filling and Line Breaking Commands
 @cindex text filling
@@ -1050,7 +1059,7 @@ there's a piece of normal text without having to think much about it.
 and so on.
 
 You can configure the exact way comments get filled and broken, and
-where Emacs does auto-filling (see @pxref{Custom Filling and
+where Emacs does auto-filling (@pxref{Custom Filling and
 Breaking}).  Typically, the style system (@pxref{Styles}) will have
 set this up for you, so you probably won't have to bother.
 
@@ -1127,8 +1136,7 @@ line break.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Minor Modes, Electric Keys, Filling and Breaking, Commands
-@comment node-name, next, previous, up
+@node    Minor Modes
 @section Minor Modes
 @cindex Minor Modes
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1139,7 +1147,9 @@ find useful while writing new code or editing old code:
 @table @asis
 @item comment style
 This specifies whether comment commands (such as @kbd{M-;}) insert
-block comments or line comments.
+block comments or line comments@footnote{You can emphasize
+non-default style comments in your code by giving their delimiters
+@code{font-lock-warning-face}.  @xref{Wrong Comment Style}.}.
 @item electric mode
 When this is enabled, certain visible characters cause reformatting as
 they are typed.  This is normally helpful, but can be a nuisance when
@@ -1215,15 +1225,17 @@ also suppresses auto-newline mode.
 Toggle auto-newline minor mode.  When the command turns the mode on,
 it also enables electric minor mode.
 
-@item @kbd{M-x c-toggle-hungry-state}@footnote{Prior to @ccmode{} 5.31, this command was bound to @kbd{C-c C-d}.}
+@item @kbd{M-x c-toggle-hungry-state}
 @findex c-toggle-hungry-state
 @findex toggle-hungry-state @r{(c-)}
-Toggle hungry-delete minor mode.
+Toggle hungry-delete minor mode@footnote{Prior to @ccmode{} 5.31, this
+command was bound to @kbd{C-c C-d}.}.
 
-@item @kbd{M-x c-toggle-auto-hungry-state}@footnote{Prior to @ccmode{} 5.31, this command was bound to @kbd{C-c C-t}.}
+@item @kbd{M-x c-toggle-auto-hungry-state}
 @findex c-toggle-auto-hungry-state
 @findex toggle-auto-hungry-state @r{(c-)}
-Toggle both auto-newline and hungry delete minor modes.
+Toggle both auto-newline and hungry delete minor modes@footnote{Prior to
+@ccmode{} 5.31, this command was bound to @kbd{C-c C-t}.}.
 
 @item @kbd{C-c C-w} (@code{M-x subword-mode})
 @kindex C-c C-w
@@ -1246,8 +1258,7 @@ value will turn it (or them) off.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Electric Keys, Auto-newlines, Minor Modes, Commands
-@comment node-name, next, previous, up
+@node    Electric Keys
 @section Electric Keys and Keywords
 @cindex electric characters
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1420,14 +1431,13 @@ continuation of the preceding @code{if}.
 @findex abbrev-mode
 @cindex Abbrev mode
 @ccmode{} uses Abbrev mode (@pxref{Abbrevs,,,@emacsman{}, @emacsmantitle{}})
-to accomplish this. It's therefore turned on by default in all language
+to accomplish this.  It's therefore turned on by default in all language
 modes except IDL mode, since CORBA IDL doesn't have any statements.
 @end deffn
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Auto-newlines, Hungry WS Deletion, Electric Keys, Commands
-@comment node-name, next, previous, up
+@node    Auto-newlines
 @section Auto-newline Insertion
 @cindex auto-newline
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1468,7 +1478,7 @@ normal, with no @kbd{C-u} prefix).
 @end itemize
 
 You can configure the precise circumstances in which newlines get
-inserted (see @pxref{Custom Auto-newlines}).  Typically, the style
+inserted (@pxref{Custom Auto-newlines}).  Typically, the style
 system (@pxref{Styles}) will have set this up for you, so you probably
 won't have to bother.
 
@@ -1476,14 +1486,13 @@ Sometimes @ccmode{} inserts an auto-newline where you don't want one,
 such as after a @samp{@}} when you're about to type a @samp{;}.
 Hungry deletion can help here (@pxref{Hungry WS Deletion}), or you can
 activate an appropriate @dfn{clean-up}, which will remove the excess
-whitespace after you've typed the @samp{;}.  See @ref{Clean-ups} for a
-full description.  See also @ref{Electric Keys} for a summary of
+whitespace after you've typed the @samp{;}.  @xref{Clean-ups}, for a
+full description.  See also @ref{Electric Keys}, for a summary of
 clean-ups listed by key.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Hungry WS Deletion, Subword Movement, Auto-newlines, Commands
-@comment node-name, next, previous, up
+@node    Hungry WS Deletion
 @section Hungry Deletion of Whitespace
 @cindex hungry-deletion
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1566,7 +1575,7 @@ perform @code{c-hungry-delete-backwards} and
 rather than using the minor mode toggling.
 
 @table @asis
-@item @kbd{C-c C-@key{DEL}}, or @kbd{C-c @key{DEL}} (@code{c-hungry-delete-backwards})@footnote{This command was formerly known as @code{c-hungry-backspace}.}
+@item @kbd{C-c C-@key{DEL}}, or @kbd{C-c @key{DEL}} (@code{c-hungry-delete-backwards})
 @kindex C-c C-Backspace
 @kindex C-c Backspace
 @kindex C-c C-DEL
@@ -1577,7 +1586,8 @@ Delete any amount of whitespace in the backwards direction (regardless
 whether hungry-delete mode is enabled or not).  This command is bound
 to both @kbd{C-c C-@key{DEL}} and @kbd{C-c @key{DEL}}, since the more
 natural one, @kbd{C-c C-@key{DEL}}, is sometimes difficult to type at
-a character terminal.
+a character terminal@footnote{This command was formerly known as
+@code{c-hungry-backspace}.}.
 
 @item @kbd{C-c C-d}, @kbd{C-c C-@key{DELETE}}, or @kbd{C-c @key{DELETE}} (@code{c-hungry-delete-forward})
 @kindex C-c C-d
@@ -1640,8 +1650,7 @@ trouble with this in GNU Emacs.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Subword Movement, Other Commands, Hungry WS Deletion, Commands
-@comment node-name, next, previous, up
+@node    Subword Movement
 @section Subword Movement and Editing
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1733,8 +1742,7 @@ As a bonus, you can also use @code{subword-mode} in non-@ccmode{}
 buffers by typing @kbd{M-x subword-mode}.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Other Commands,  , Subword Movement, Commands
-@comment node-name, next, previous, up
+@node    Other Commands
 @section Other Commands
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1831,8 +1839,7 @@ ask for help in the standard (X)Emacs forums.
 @end table
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Font Locking, Config Basics, Commands, Top
-@comment node-name, next, previous, up
+@node    Font Locking
 @chapter Font Locking
 @cindex font locking
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1856,14 +1863,14 @@ sections apply to the other languages.
 * Font Locking Preliminaries::
 * Faces::
 * Doc Comments::
+* Wrong Comment Style::
 * Misc Font Locking::
 * AWK Mode Font Locking::
 @end menu
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Font Locking Preliminaries, Faces, Font Locking, Font Locking
-@comment node-name, next, previous, up
+@node    Font Locking Preliminaries
 @section Font Locking Preliminaries
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1960,8 +1967,7 @@ recognize types.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Faces, Doc Comments, Font Locking Preliminaries, Font Locking
-@comment node-name, next, previous, up
+@node    Faces
 @section Faces
 @cindex faces
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2059,8 +2065,7 @@ since those aren't syntactic errors in themselves.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Doc Comments, Misc Font Locking, Faces, Font Locking
-@comment node-name, next, previous, up
+@node    Doc Comments
 @section Documentation Comments
 @cindex documentation comments
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2118,6 +2123,11 @@ For Pike autodoc markup, the standard in Pike.
 @item gtkdoc
 @cindex GtkDoc markup
 For GtkDoc markup, widely used in the Gnome community.
+
+@item doxygen
+@cindex Doxygen markup
+For Doxygen markup, which can be used with C, C++, Java and variety of
+other languages.
 @end table
 
 The above is by no means complete.  If you'd like to see support for
@@ -2130,16 +2140,58 @@ with @code{c-doc-comment-style}: Supply a variable or function
 in @code{c-doc-comment-style}.  If it's a variable, it's prepended to
 @code{font-lock-keywords}.  If it's a function, it's called at mode
 initialization and the result is prepended.  For an example, see
-@code{javadoc-font-lock-keywords} in @file{cc-fonts.el}.
+@code{javadoc-font-lock-keywords} in @file{cc-fonts.el}.  It is even
+possible, to a limited extent, to fontify constructs inside a doc
+comment with other faces.  For an example, see pike autodoc comment
+style towards the end of @file{cc-fonts-el}.
 
 If you add support for another doc comment style, please consider
 contributing it: send a note to @email{bug-cc-mode@@gnu.org}.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Misc Font Locking, AWK Mode Font Locking, Doc Comments, Font Locking
+@node    Wrong Comment Style
+@comment  node-name,  next,  previous,  up
+@section Marking ``Wrong'' style comments
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Most languages supported by @ccmode{} have two styles of comments,
+namely block comments and line comments.  Your project may have such a
+strong preference for one of them, that you wish ``wrong'' style
+comments to be clearly marked.
+
+You can get @ccmode{} to do this by setting the default comment style,
+if necessary, (@pxref{Minor Modes}) and setting the customizable
+option @code{c-mark-wrong-style-of-comment} to non-@code{nil}.
+
+@defvar c-mark-wrong-style-of-comment
+@vindex mark-wrong-style-of-comment (c-)
+When this customizable option is non-@code{nil}, comment delimiters
+which aren't of the default style will be fontified with
+@code{font-lock-warning-face}.
+@end defvar
+
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+@node    Misc Font Locking
 @comment  node-name,  next,  previous,  up
 @section Miscellaneous Font Locking
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Some compilers, notably GCC, allow the character @samp{$} to be a
+constituent of identifiers in the languages C, C++, and Objective C.
+CC Mode defaults to accepting these @samp{$} characters and fontifying
+the identifiers in which they appear like any others.
+
+However, the compiler you're using, or your project coding standards
+may disallow such use.  In such cases, you can set
+@code{c-warn-ids-with-dollar} to non-@code{nil}.  This causes these
+invalid identifiers to be fontified distinctively.
+
+@defvar c-warn-ids-with-dollar
+@vindex warn-ids-with-dollar (c-)
+When this customization option is non-@code{nil}, identifiers
+containing the @samp{$} character are fontified with
+@code{font-lock-warning-face}.
+@end defvar
 
 In some languages, particularly in C++, there are constructs which are
 syntactically ambiguous---they could be either declarations or
@@ -2164,10 +2216,10 @@ foo& bar
 
 @defvar c-asymmetry-fontification-flag
 @vindex asymmetry-fontification-flag @r{(c-)}
-When @code{c-asymmetry-fontification-flag} is non-nil (which it is by
-default), code like the above, with white space either before or after
-the operator, but not both, is fontified as a declaration.  When the
-variable is nil, such a construct gets the default face.
+When @code{c-asymmetry-fontification-flag} is non-@code{nil} (which it
+is by default), code like the above, with white space either before or
+after the operator, but not both, is fontified as a declaration.  When
+the variable is @code{nil}, such a construct gets the default face.
 @end defvar
 
 When the construct is an expression there will often be white space
@@ -2191,7 +2243,7 @@ section only applies when CC Mode cannot disambiguate a construct in
 any other way.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    AWK Mode Font Locking,  , Misc Font Locking, Font Locking
+@node    AWK Mode Font Locking
 @comment  node-name,  next,  previous,  up
 @section AWK Mode Font Locking
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2252,7 +2304,7 @@ escaped newline.  The @samp{\} is highlighted.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Config Basics, Custom Filling and Breaking, Font Locking, Top
+@node    Config Basics
 @comment  node-name,  next,  previous,  up
 @chapter Configuration Basics
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2282,6 +2334,8 @@ method, ``Top-level commands or the customization interface''.
 
 If you make conflicting settings in several of these ways, the way
 that takes precedence is the one that appears latest in this list:
+@c Version of list for Texinfo <= 4.x
+@ifclear txicommandconditionals
 @itemize @w{}
 @item
 @table @asis
@@ -2292,6 +2346,18 @@ that takes precedence is the one that appears latest in this list:
 @itemx File Local Variable setting
 @end table
 @end itemize
+@end ifclear
+@c Version of list for Texinfo >= 5.x
+@ifset txicommandconditionals
+@itemize @w{}
+@item Style
+@item File Style@footnote{In earlier versions of @ccmode{}, a File Style setting took precedence over any other setting apart from a File Local Variable setting.}
+@item Top-level command or ``customization interface''
+@item Hook
+@item File Local Variable setting
+@end itemize
+@end ifset
+
 
 Here is a summary of the different ways of writing your configuration
 settings:
@@ -2355,7 +2421,7 @@ Mode and Java Mode buffers, you could do it like this:
 @end group
 @end example
 
-See @ref{CC Hooks} for more details on the use of @ccmode{} hooks.
+@xref{CC Hooks}, for more details on the use of @ccmode{} hooks.
 
 @item Styles
 A @ccmode{} @dfn{style} is a coherent collection of customizations
@@ -2373,7 +2439,7 @@ in your @file{.emacs} file:
                         (other . "free-group-style")))
 @end example
 
-See @ref{Styles} for fuller details on using @ccmode{} styles and how
+@xref{Styles}, for fuller details on using @ccmode{} styles and how
 to create them.
 
 @item File Local Variable setting
@@ -2430,8 +2496,7 @@ have it enabled by default by placing the following in your
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    CC Hooks, Style Variables, Config Basics, Config Basics
-@comment node-name, next, previous, up
+@node    CC Hooks
 @section Hooks
 @cindex mode hooks
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2504,8 +2569,7 @@ file.
 @end example
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Style Variables, Styles, CC Hooks, Config Basics
-@comment node-name, next, previous, up
+@node    Style Variables
 @section Style Variables
 @cindex styles
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2548,7 +2612,7 @@ Basics}).
 @item
 The style variable @code{c-offsets-alist} (@pxref{c-offsets-alist}) is
 an association list with an element for each syntactic symbol.  It's
-handled a little differently from the other style variables.  It's
+handled a little differently from the other style variables.  Its
 default global binding is the empty list @code{nil}, rather than
 @code{set-from-style}.  Before the style system is initialized, you
 can add individual elements to @code{c-offsets-alist} by calling
@@ -2592,8 +2656,7 @@ Commas});@*
 (@pxref{Custom Macros}).
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Styles,  , Style Variables, Config Basics
-@comment node-name, next, previous, up
+@node    Styles
 @section Styles
 @cindex styles
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2627,8 +2690,7 @@ already formatted piece of your code, @ref{Guessing the Style}.
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Built-in Styles, Choosing a Style, Styles, Styles
-@comment node-name, next, previous, up
+@node    Built-in Styles
 @subsection Built-in Styles
 @cindex styles, built-in
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -2644,7 +2706,7 @@ for C code in GNU programs.
 
 @item k&r
 @cindex K&R style
-The classic Kernighan and Ritchie style for C code. If you're looking
+The classic Kernighan and Ritchie style for C code.  If you're looking
 for the style used in the 2nd edition of their book ``The C
 Programming Language'', then check out the @code{stroustrup} style.
 
@@ -2666,7 +2728,7 @@ The classic Stroustrup style for C++ code.
 Popular C++ coding standards as defined by ``Programming in C++, Rules
 and Recommendations,'' Erik Nyquist and Mats Henricson,
 Ellemtel@footnote{This document is available at
-@uref{http://www.doc.ic.ac.uk/lab/cplus/c++.rules/} among other
+@uref{https://www.doc.ic.ac.uk/lab/cplus/c++.rules/} among other
 places.}.
 @c N.B.  This URL was still valid at 2005/8/28  (ACM).
 
@@ -2678,7 +2740,7 @@ C coding standard for Linux (the kernel).
 @cindex Python style
 C coding standard for Python extension modules@footnote{Python is a
 high level scripting language with a C/C++ foreign function interface.
-For more information, see @uref{http://www.python.org/}.}.
+For more information, see @uref{https://www.python.org/}.}.
 
 @item java
 @cindex Java style
@@ -2705,8 +2767,7 @@ afterwards.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Choosing a Style, Adding Styles, Built-in Styles, Styles
-@comment node-name, next, previous, up
+@node    Choosing a Style
 @subsection Choosing a Style
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -2763,8 +2824,7 @@ string.
 @end defvar
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Adding Styles, Guessing the Style, Choosing a Style, Styles
-@comment node-name, next, previous, up
+@node    Adding Styles
 @subsection Adding and Amending Styles
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -2851,18 +2911,17 @@ should not be changed directly; use @code{c-add-style} instead.
 @end defvar
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Guessing the Style, File Styles, Adding Styles, Styles
-@comment node-name, next, previous, up
+@node    Guessing the Style
 @subsection Guessing the Style
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 Instead of specifying a style, you can get @ccmode{} to @dfn{guess}
 your style by examining an already formatted code buffer.  @ccmode{}
-then determines the ''most frequent'' offset (@pxref{c-offsets-alist})
+then determines the ``most frequent'' offset (@pxref{c-offsets-alist})
 for each of the syntactic symbols (@pxref{Indentation Engine Basics})
-encountered in the buffer, and the ''most frequent'' value of
+encountered in the buffer, and the ``most frequent'' value of
 c-basic-offset (@pxref{Customizing Indentation}), then merges the
-current style with these ''guesses'' to form a new style.  This
+current style with these ``guesses'' to form a new style.  This
 combined style is known as the @dfn{guessed style}.
 
 To do this, call @code{c-guess} (or one of the other 5 guessing
@@ -2974,8 +3033,7 @@ these offsets or the parent style name.
 @end table
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    File Styles,  , Guessing the Style, Styles
-@comment node-name, next, previous, up
+@node    File Styles
 @subsection File Styles
 @cindex styles, file local
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3023,8 +3081,7 @@ mode hooks (@pxref{CC Hooks}).  Any individual setting of a variable
 will override one made through @code{c-file-style} or
 @code{c-file-offsets}.
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Custom Filling and Breaking, Custom Auto-newlines, Config Basics, Top
-@comment node-name, next, previous, up
+@node    Custom Filling and Breaking
 @chapter Customizing Filling and Line Breaking
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -3134,11 +3191,11 @@ margins of the texts kept intact:
 @cindex Filladapt mode
 It's also possible to use other adaptive filling packages, notably Kyle
 E. Jones' Filladapt package@footnote{It's available from
-@uref{http://www.wonderworks.com/}.  As of version 2.12, it does however
+@uref{https://elpa.gnu.org/packages/filladapt.html}.  As of version 2.12, it does however
 lack a feature that makes it work suboptimally when
 @code{c-comment-prefix-regexp} matches the empty string (which it does
 by default).  A patch for that is available from
-@uref{http://cc-mode.sourceforge.net/,, the CC Mode web site}.},
+@uref{https://www.nongnu.org/cc-mode/,, the CC Mode web site}.},
 @c 2005/11/22:  The above is still believed to be the case.
 which handles things like bulleted lists nicely.  There's a convenience
 function @code{c-setup-filladapt} that tunes the relevant variables in
@@ -3242,8 +3299,7 @@ as one comment, and the rest of the paragraph handling code
 inconsistent behavior.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Custom Auto-newlines, Clean-ups, Custom Filling and Breaking, Top
-@comment node-name, next, previous, up
+@node    Custom Auto-newlines
 @chapter Customizing Auto-newlines
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -3257,7 +3313,7 @@ different ways, depending on the character just typed:
 an alist.  This element specifies where to put newlines: this is any
 combination of before and after the brace or colon.  If no alist
 element is found, newlines are inserted both before and after a brace,
-but none are inserted around a colon.  See @ref{Hanging Braces} and
+but none are inserted around a colon.  @xref{Hanging Braces}, and
 @ref{Hanging Colons}.
 
 @item Semicolons and Commas
@@ -3298,8 +3354,7 @@ circumstances.  @xref{Clean-ups}.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Hanging Braces, Hanging Colons, Custom Auto-newlines, Custom Auto-newlines
-@comment node-name, next, previous, up
+@node    Hanging Braces
 @section Hanging Braces
 @cindex hanging braces
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3448,8 +3503,7 @@ themselves.
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Custom Braces,  , Hanging Braces, Hanging Braces
-@comment node-name, next, previous, up
+@node    Custom Braces
 @subsection Custom Brace Hanging
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -3536,8 +3590,7 @@ In all other cases, it returns the list @samp{(before after)} so
 that the brace appears on a line by itself.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Hanging Colons, Hanging Semicolons and Commas, Hanging Braces, Custom Auto-newlines
-@comment node-name, next, previous, up
+@node    Hanging Colons
 @section Hanging Colons
 @cindex hanging colons
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3579,8 +3632,7 @@ them are controlled by a different mechanism, called @dfn{clean-ups} in
 @ccmode{}.  @xref{Clean-ups}, for details.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Hanging Semicolons and Commas,  , Hanging Colons, Custom Auto-newlines
-@comment node-name, next, previous, up
+@node    Hanging Semicolons and Commas
 @section Hanging Semicolons and Commas
 @cindex hanging semicolons
 @cindex hanging commas
@@ -3659,8 +3711,7 @@ newlines after semicolons inside one-line inline method definitions
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Clean-ups, Indentation Engine Basics, Custom Auto-newlines, Top
-@comment node-name, next, previous, up
+@node    Clean-ups
 @chapter Clean-ups
 @cindex clean-ups
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -3912,8 +3963,7 @@ situation if you just want a literal @samp{/} inserted.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Indentation Engine Basics, Customizing Indentation, Clean-ups, Top
-@comment node-name, next, previous, up
+@node    Indentation Engine Basics
 @chapter Indentation Engine Basics
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -3972,8 +4022,7 @@ of the variables associated with indentation, not even
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Syntactic Analysis, Syntactic Symbols, Indentation Engine Basics, Indentation Engine Basics
-@comment node-name, next, previous, up
+@node    Syntactic Analysis
 @section Syntactic Analysis
 @cindex syntactic analysis
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -4129,10 +4178,55 @@ and you can see that the syntactic context contains two syntactic
 elements.  Notice that the first element, @samp{(comment-intro)}, has no
 anchor position.
 
+@cindex label line
+There are special ways of handling lines beginning with labels.  Such
+a line gets a syntactic element beginning with @code{label} or
+@code{substatement-label} rather than the element(s) it would have
+had, were there no label on the line.
+
+Also, a line beginning with a label (or a comment) is never the anchor
+position of a later line.  Instead, that anchor position is the latest
+line at the same level of nesting before the labeled line without a
+leading label or comment.  If there is no such line, the latest line
+containing an enclosing opening brace or parenthesis, which doesn't
+start with a label or comment, provides the anchor position.  In this
+case extra syntactic element(s) with syntactic symbol
+@code{defun-block-intro}, @code{statement-block-intro}, or some other
+``-intro'' symbol are inserted into the syntactic context to allow the
+correct indentation of the later line using that anchor position.
+
+These conventions allow a style to indent labels specially, perhaps
+giving them greater visibility by indenting them less than the
+surrounding code.
+
+For example, in the following pike fragment:
+
+@example
+ 1: int a()
+ 2: @{
+ 3:   foo: @{
+ 4:     bar: if (t)
+ 5:         x;
+ 6:       y;
+ 7:     @}
+ 8:     y;
+ 9: @}
+@end example
+
+@noindent
+Line 4 gets the syntactic context
+
+@example
+((defun-block-intro 9) (label 9))
+@end example
+
+@noindent
+where position 9 is the brace on line 2, the latest line before line 4
+without a label.
+
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Syntactic Symbols, Indentation Calculation, Syntactic Analysis, Indentation Engine Basics
-@comment node-name, next, previous, up
+@node    Syntactic Symbols
 @section Syntactic Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4149,17 +4243,19 @@ More detailed descriptions of these symbols, together with snippets of
 source code to which they apply, appear in the examples in the
 subsections below.  Note that, in the interests of brevity, the anchor
 position associated with most syntactic symbols is @emph{not}
-specified.  In cases of doubt, type @kbd{C-c C-s} on a pertinent
-line---this highlights the anchor position.
+specified@footnote{These are briefly specified in comments in
+@code{(defvar c-offsets-alist ...)} in the source file
+@file{cc-vars.el}}.  In cases of doubt, type @kbd{C-c C-s} on a
+pertinent line---this highlights the anchor position.
 
 @ssindex -open symbols
 @ssindex -close symbols
-@ssindex -block-intro symbols
+@ssindex -intro symbols
 The syntactic symbols which indicate brace constructs follow a general
 naming convention.  When a line begins with an open or close brace,
 its syntactic symbol will contain the suffix @code{-open} or
 @code{-close} respectively.  The first line within the brace block
-construct will contain the suffix @code{-block-intro}.
+construct will contain the suffix @code{-intro}.
 
 @ssindex -intro symbols
 @ssindex -cont symbols
@@ -4211,6 +4307,9 @@ The first line in a ``topmost'' definition.  @ref{Function Symbols}.
 Topmost definition continuation lines.  This is only used in the parts
 that aren't covered by other symbols such as @code{func-decl-cont} and
 @code{knr-argdecl}.  @ref{Function Symbols}.
+@item constraint-cont
+Continuation line of a topmost C++20 concept or requires clause.
+@ref{Constraint Symbols}.
 @item annotation-top-cont
 Topmost definition continuation lines where all previous items are
 annotations.  @ref{Java Symbols}.
@@ -4218,6 +4317,9 @@ annotations.  @ref{Java Symbols}.
 First line in a member initialization list.  @ref{Class Symbols}.
 @item member-init-cont
 Subsequent member initialization list lines.  @ref{Class Symbols}.
+@item class-field-cont
+Lines continuing the first line inside a class/struct etc. definition.
+@ref{Class Symbols}.
 @item inher-intro
 First line of a multiple inheritance list.  @ref{Class Symbols}.
 @item inher-cont
@@ -4227,18 +4329,26 @@ Statement block open brace.  @ref{Literal Symbols}.
 @item block-close
 Statement block close brace.  @ref{Conditional Construct Symbols}.
 @item brace-list-open
-Open brace of an enum or static array list.  @ref{Brace List Symbols}.
+Open brace of a static array list.  @ref{Brace List Symbols}.
 @item brace-list-close
-Close brace of an enum or static array list.  @ref{Brace List Symbols}.
+Close brace of a static array list.  @ref{Brace List Symbols}.
 @item brace-list-intro
-First line after the opening @samp{@{} in an enum or static array
-list.  @ref{Brace List Symbols}.
+First line after the opening @samp{@{} in a static array list.
+@ref{Brace List Symbols}.
 @item brace-list-entry
-Subsequent lines in an enum or static array list.  @ref{Brace List
-Symbols}.
+Subsequent lines in a static array list.  @ref{Brace List Symbols}.
 @item brace-entry-open
-Subsequent lines in an enum or static array list where the line begins
-with an open brace.  @ref{Brace List Symbols}.
+Subsequent lines in a static array list where the line begins with an
+open brace.  @ref{Brace List Symbols}.
+@item enum-open
+Open brace of an enum list.  @ref{Brace List Symbols}.
+@item enum-close
+Close brace of an enum list.  @ref{Brace List Symbols}.
+@item enum-intro
+First line after the opening @samp{@{} in an enum list.  @ref{Brace
+List Symbols}.
+@item enum-entry
+Subsequent lines in an enum ilst.  @ref{Brace List Symbols}.
 @item statement
 A statement.  @ref{Function Symbols}.
 @item statement-cont
@@ -4368,19 +4478,20 @@ Java.  @ref{Java Symbols}.
 * Conditional Construct Symbols::
 * Switch Statement Symbols::
 * Brace List Symbols::
+* Enum Symbols::
 * External Scope Symbols::
 * Paren List Symbols::
 * Literal Symbols::
 * Multiline Macro Symbols::
 * Objective-C Method Symbols::
 * Java Symbols::
+* Constraint Symbols::
 * Statement Block Symbols::
 * K&R Symbols::
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Function Symbols, Class Symbols, Syntactic Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Function Symbols
 @subsection Function Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4422,8 +4533,7 @@ isn't much special about them.  Note however that line 8 is given
 on the previous line.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Class Symbols, Conditional Construct Symbols, Function Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Class Symbols
 @subsection Class related Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4463,6 +4573,13 @@ for C and Objective-C@.  For consistency, structs in all supported
 languages are syntactically equivalent to classes.  Note however that
 the keyword @code{class} is meaningless in C and Objective-C.}.
 Similarly, line 18 is assigned @code{class-close} syntax.
+
+Note that @code{class-open} and @code{class-close} syntactic elements
+have two anchor points.  The first is the position of the beginning of
+the statement, the second is the position of the keyword which defines
+the construct (e.g.  @code{class}).  These are usually the same
+position, but differ when the statement starts off with
+@code{template} (C++ Mode) or @code{generic} (Java Mode) or similar.
 
 @ssindex inher-intro
 @ssindex inher-cont
@@ -4556,6 +4673,25 @@ elements:
 The @code{friend} and @code{inline-open} syntactic symbols are
 modifiers that do not have anchor positions.
 
+@ssindex class-field-cont
+In the following example, line 1 gets the syntax @code{topmost-intro},
+and line 2 @code{((inclass 1) (topmost-intro 1))} as expected.  Lines
+3, 4, and 5 are given the syntax @code{(class-field-cont 18 12)}
+rather than @code{topmost-intro-cont}.  This makes it easier to indent
+several comma separated fields with respect to their defining type,
+when @code{topmost-intro-cont} would tend to leave elements directly
+underneath their type.  @xref{Function Symbols}.  The anchor points are
+the positions of the type and the enclosing class's brace.
+
+@example
+ 1. struct foo @{
+ 2.     long
+ 3.         a,
+ 4.         b,
+ 5.         c;
+ 6. @};
+@end example
+
 @ssindex template-args-cont
 Template definitions introduce yet another syntactic symbol:
 
@@ -4569,8 +4705,7 @@ Here, line 1 is analyzed as a @code{topmost-intro}, but lines 2 and 3
 are both analyzed as @code{template-args-cont} lines.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Conditional Construct Symbols, Switch Statement Symbols, Class Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Conditional Construct Symbols
 @subsection Conditional Construct Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4637,8 +4772,7 @@ the same line as the preceding close brace, that line would still have
 @code{block-close} syntax.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Switch Statement Symbols, Brace List Symbols, Conditional Construct Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Switch Statement Symbols
 @subsection Switch Statement Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4673,18 +4807,19 @@ is treated slightly differently since it contains a brace that opens a
 block; it is given @code{statement-case-open} syntax.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Brace List Symbols, External Scope Symbols, Switch Statement Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Brace List Symbols
 @subsection Brace List Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 @cindex brace lists
-There are a set of syntactic symbols that are used to recognize
+There is a set of syntactic symbols that is used to recognize
 constructs inside of brace lists.  A brace list is defined as an
-@code{enum} or aggregate initializer list, such as might statically
-initialize an array of structs.  The three special aggregate constructs
-in Pike, @code{(@{ @})}, @code{([ ])} and @code{(< >)}, are treated as
-brace lists too.  An example:
+aggregate initializer list, such as might statically initialize an
+array of structs.  Note that an @code{enum} construct is (since
+2024-09) no longer parsed as a brace list.  Instead it now has its own
+syntactic symbols.  @ref{Enum Symbols}.  The three special aggregate
+constructs in Pike, @code{(@{ @})}, @code{([ ])} and @code{(< >)}, are
+treated as brace lists too.  An example:
 
 @example
  1: static char* ingredients[] =
@@ -4740,8 +4875,55 @@ giving @code{brace-list-entry} an offset of
 @code{brace-list-entry} anchored on the @samp{1} of line 8.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    External Scope Symbols, Paren List Symbols, Brace List Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Enum Symbols
+@subsection Enum Symbols
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+@cindex enum symbols
+There is a set of syntactic symbols that characterize the components
+of @code{enum} constructs.  These are very like the brace list
+symbols@footnote{Indeed an @code{enum} used to be parsed with these
+other symbols.  The two types of construct were separated in 2024-09
+to make it easier to give an @code{enum} indentation like that of a
+@code{class}.} (@pxref{Brace List Symbols}).
+
+@example
+ 1: enum test
+ 2: @{
+ 3:   GOOD,
+ 4:   BETTER,
+ 5:   BEST
+ 6: @};
+@end example
+
+@ssindex enum-open
+@ssindex enum-intro
+@ssindex enum-close
+@ssindex enum-entry
+Line 2 is assigned @code{enum-open} syntax, and line 6
+@code{enum-close}.  The first enum element on line 3 is assigned
+@code{enum-intro} syntax, and the remaining elements, on lines 4 and 5
+are assigned @code{enum-entry}.
+
+When the first enum element follows the @samp{@{} of the @code{enum},
+all on the opening line of the construct, the parsing is a little more
+involved.
+
+@example
+ 1: enum test @{ GOOD,
+ 2:   BETTER,
+ 3:   BEST
+ 4: @};
+@end example
+
+Here, line 2 is assigned a syntactic context with two elements:
+@code{enum-intro} anchored on the beginning of indentation of line 1,
+and @code{enum-entry} anchored on the first element @code{GOOD} on
+line 1.  Line 3 is @code{enum-entry} and line 4 @code{enum-close} as
+you'd expect.
+
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+@node    External Scope Symbols
 @subsection External Scope Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4804,8 +4986,7 @@ that isn't the case for historical reasons.}
 @end table
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Paren List Symbols, Literal Symbols, External Scope Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Paren List Symbols
 @subsection Parenthesis (Argument) List Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4864,8 +5045,7 @@ parenthesis that opens an argument list, appearing on a separate line,
 is assigned the @code{statement-cont} syntax instead.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Literal Symbols, Multiline Macro Symbols, Paren List Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Literal Symbols
 @subsection Comment String Label and Macro Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4953,8 +5133,7 @@ Line 17 is assigned @code{stream-op} syntax.
 @end itemize
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Multiline Macro Symbols, Objective-C Method Symbols, Literal Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Multiline Macro Symbols
 @subsection Multiline Macro Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -4994,8 +5173,7 @@ macros.}.
 @xref{Custom Macros}, for more info about the treatment of macros.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Objective-C Method Symbols, Java Symbols, Multiline Macro Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Objective-C Method Symbols
 @subsection Objective-C Method Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5021,8 +5199,7 @@ assigned @code{objc-method-args-cont} syntax.  Lines 5 and 6 are both
 assigned @code{objc-method-call-cont} syntax.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Java Symbols, Statement Block Symbols, Objective-C Method Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Java Symbols
 @subsection Java Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5059,8 +5236,40 @@ syntax due to it being a continuation of a variable declaration where preceding
 the declaration is an annotation.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Statement Block Symbols, K&R Symbols, Java Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    Constraint Symbols
+@subsection C++ Constraint Symbols
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+The C++20 standard introduced the notion of @dfn{concepts} and
+@dfn{requirements}, a typical instance of which looks something like
+this:
+
+@example
+ 1: template <typename T>
+ 2: requires
+ 3:   requires (T t) @{
+ 4:     @{ ++t; @}
+ 5:   @}
+ 6:   && std::is_integral<T>
+ 7:   int foo();
+@end example
+
+@ssindex constraint-cont
+Line 1 is assigned the familiar @code{topmost-intro}.  Line 2 gets
+@code{topmost-intro-cont}, being the keyword which introduces a
+@dfn{requires clause}.  Lines 3, 6, and 7 are assigned the syntax
+@code{constraint-cont}, being continuations of the requires clause
+started on line 2.  Lines 4 and 5 get the syntaxes
+@code{defun-block-intro} and @code{defun-close}, being analyzed as
+though part of a function.
+
+Note that the @code{requires} on Line 3 begins a @dfn{requires
+expression}, not a requires clause, hence its components are not
+assigned @code{constraint-cont}.  See
+@url{https://en.cppreference.com/w/cpp/language/requires}.
+
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+@node    Statement Block Symbols
 @subsection Statement Block Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5138,8 +5347,7 @@ example above.  The other similar special function, @code{gauge}, is
 handled like this too.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    K&R Symbols,  , Statement Block Symbols, Syntactic Symbols
-@comment node-name, next, previous, up
+@node    K&R Symbols
 @subsection K&R Symbols
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5165,8 +5373,7 @@ syntax.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Indentation Calculation,  , Syntactic Symbols, Indentation Engine Basics
-@comment node-name, next, previous, up
+@node    Indentation Calculation
 @section Indentation Calculation
 @cindex indentation
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -5264,8 +5471,7 @@ minibuffer when you hit @kbd{TAB}.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Customizing Indentation, Custom Macros, Indentation Engine Basics, Top
-@comment node-name, next, previous, up
+@node    Customizing Indentation
 @chapter Customizing Indentation
 @cindex customization, indentation
 @cindex indentation
@@ -5286,7 +5492,7 @@ The simplest and most used kind of ``offset'' setting in
 @defopt c-basic-offset
 @vindex basic-offset @r{(c-)}
 This style variable holds the basic offset between indentation levels.
-It's factory default is 4, but all the built-in styles set it
+Its factory default is 4, but all the built-in styles set it
 themselves, to some value between 2 (for @code{gnu} style) and 8 (for
 @code{bsd}, @code{linux}, and @code{python} styles).
 @end defopt
@@ -5311,8 +5517,7 @@ indentation.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    c-offsets-alist, Interactive Customization, Customizing Indentation, Customizing Indentation
-@comment node-name, next, previous, up
+@node    c-offsets-alist
 @section c-offsets-alist
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5335,9 +5540,10 @@ only a few entries.  @xref{Style Variables}.
 
 The offset specification associated with any particular syntactic
 symbol can be an integer, a variable name, a vector, a function or
-lambda expression, a list, or one of the following special symbols:
-@code{+}, @code{-}, @code{++}, @code{--}, @code{*}, or @code{/}.  The
-meanings of these values are described in detail below.
+lambda expression, another syntactic symbol, a list, or one of the
+following special symbols: @code{+}, @code{-}, @code{++}, @code{--},
+@code{*}, or @code{/}.  The meanings of these values are described in
+detail below.
 
 Here is an example fragment of a @code{c-offsets-alist}, showing some
 of these kinds of offsets:
@@ -5430,6 +5636,12 @@ context than just the syntactic symbol is needed to get the desired
 indentation.  @xref{Line-Up Functions}, and @ref{Custom Line-Up}, for
 details about them.
 
+@item Another syntactic symbol
+The offset of that other syntactic symbol will be used.  This is
+useful for making sure that two distinct syntactic symbols cause the
+same indentation.  By default, @code{enum-open} has the value
+@code{class-open}.
+
 @item A symbol with a variable binding
 If the symbol also has a function binding, the function takes
 precedence over the variable.  Otherwise the value of the variable is
@@ -5480,8 +5692,7 @@ it doesn't work well with some of the alignment functions that return
 @code{c-strict-syntax-p} set to @code{nil}.}.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Interactive Customization, Line-Up Functions, c-offsets-alist, Customizing Indentation
-@comment node-name, next, previous, up
+@node    Interactive Customization
 @section Interactive Customization
 @cindex customization, interactive
 @cindex interactive customization
@@ -5588,8 +5799,7 @@ for that syntactic element.
 @c End of MOVE THIS BIT.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Line-Up Functions, Custom Line-Up, Interactive Customization, Customizing Indentation
-@comment node-name, next, previous, up
+@node    Line-Up Functions
 @section Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5614,9 +5824,9 @@ any problems writing custom line-up functions for AWK mode.
 
 The calling convention for line-up functions is described fully in
 @ref{Custom Line-Up}.  Roughly speaking, the return value is either an
-offset itself (such as @code{+} or @code{[0]}) or it's @code{nil},
-meaning ``this function is inappropriate in this case; try a
-different one''.  @xref{c-offsets-alist}.
+offset itself (such as @code{+} or @code{[0]}), another line-up
+function, or it's @code{nil}, meaning ``this function is inappropriate
+in this case - try a different one''.  @xref{c-offsets-alist}.
 
 The subsections below describe all the standard line-up functions,
 categorized by the sort of token the lining-up centers around.  For
@@ -5662,8 +5872,7 @@ Works with:
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Brace/Paren Line-Up, List Line-Up, Line-Up Functions, Line-Up Functions
-@comment node-name, next, previous, up
+@node    Brace/Paren Line-Up
 @subsection Brace and Parenthesis Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5720,7 +5929,8 @@ open parenthesis of the argument list, the indentation is
 discussion of this ``DWIM'' measure.
 
 @workswith Almost all symbols, but are typically most useful on
-@code{arglist-close}, @code{brace-list-close}, @code{arglist-cont} and
+@code{arglist-close}, @code{brace-list-close},
+@code{enum-close}, @code{arglist-cont} and
 @code{arglist-cont-nonempty}.
 @end defun
 
@@ -5876,7 +6086,7 @@ indents relative to the surrounding block just like
 @code{c-lineup-whitesmith-in-block}.
 
 @workswith @code{brace-list-entry}, @code{brace-entry-open},
-@code{statement}, @code{arglist-cont}.
+@code{enum-entry}, @code{statement}, @code{arglist-cont}.
 @end defun
 
 @comment ------------------------------------------------------------
@@ -5912,15 +6122,15 @@ In the first case the indentation is kept unchanged, in the second
 
 @workswith @code{defun-close}, @code{defun-block-intro},
 @code{inline-close}, @code{block-close}, @code{brace-list-close},
-@code{brace-list-intro}, @code{statement-block-intro},
+@code{brace-list-intro},
+@code{enum-close}, @code{enum-intro}, @code{statement-block-intro},
 @code{arglist-intro}, @code{arglist-cont-nonempty},
 @code{arglist-close}, and all @code{in*} symbols, e.g., @code{inclass}
 and @code{inextern-lang}.
 @end defun
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    List Line-Up, Operator Line-Up, Brace/Paren Line-Up, Line-Up Functions
-@comment node-name, next, previous, up
+@node    List Line-Up
 @subsection List Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -5965,8 +6175,154 @@ Line up a line to just after the open paren of the surrounding paren or
 brace block.
 
 @workswith @code{defun-block-intro}, @code{brace-list-intro},
-@code{statement-block-intro}, @code{statement-case-intro},
-@code{arglist-intro}.
+@code{enum-intro}, @code{statement-block-intro},
+@code{statement-case-intro}, @code{arglist-intro}.
+@end defun
+
+@comment ------------------------------------------------------------
+
+@defun c-lineup-2nd-brace-entry-in-arglist
+@findex lineup-2nd-brace-entry-in-arglist (c-)
+Line up the second entry of a brace block under the first, when the
+first line is also contained in an arglist or an enclosing brace
+@emph{on that line}.
+
+In other words, handle something like the following:
+
+@example
+@group
+set_line (line_t @{point_t@{0.4, 0.2@},
+                  point_t@{0.2, 0.5@},       @hereFn{brace-list-intro}
+                  .....@});
+         ^ enclosing parenthesis.
+@end group
+@end example
+
+
+The middle line of that example will have a syntactic context with
+three syntactic symbols, @code{arglist-cont-nonempty},
+@code{brace-list-intro}, and @code{brace-list-entry} (@pxref{Brace
+List Symbols}).
+
+This function is intended for use in a list.  If the construct being
+analyzed isn't like the preceding, the function returns @code{nil}.
+Otherwise it returns the function
+@code{c-lineup-arglist-intro-after-paren}, which the caller then uses
+to perform indentation.
+
+@workswith{} @code{brace-list-intro}.
+@end defun
+
+@comment ------------------------------------------------------------
+
+@defun c-lineup-item-after-paren-at-boi
+@findex lineup-item-after-paren-at-boi (c-)
+Line up under the first entry on the same line as an open parenthesis
+when that parenthesis is the leftmost non-space character in its line.
+For example:
+
+@example
+@group
+template <typename T>
+requires
+    ( requires (T t) @{ ++t; @}
+      && Baz<T>)      @hereFn{constraint-cont}
+int foo();
+@end group
+@end example
+
+
+This function is intended for use in a list.  If the construct being
+analyzed doesn't conform to the above description, the function
+returns nil.  Otherwise it returns a vector containing the indentation.
+
+@workswith{} @code{brace-list-intro}, @code{enum-intro},
+@code{constraint-cont}.
+@end defun
+
+@comment ------------------------------------------------------------
+
+@defun c-lineup-class-decl-init-+
+@findex lineup-class-decl-init-+ (c-)
+Line up the second entry of a class (etc.) initializer
+@code{c-basic-offset} characters in from the identifier when:
+@enumerate
+@item
+The type is a class, struct, union, etc.@: (but not an enum);
+@item
+There is a brace block in the type declaration, specifying it; and
+@item
+The first element of the initializer is on the same line as its
+opening brace.
+@end enumerate
+
+In other words, we have a construct like this:
+
+@example
+@group
+struct STR @{
+    int i; float f;
+@} str_1 = @{1, 1.7@},
+    str_2 = @{2,
+         3.1          @hereFn{brace-list-intro}
+    @};
+    @sssTBasicOffset{}
+@end group
+@end example
+
+
+Note that the syntactic context of the @code{brace-list-intro} line
+also has a syntactic element with the symbol @code{brace-list-entry}
+(@pxref{Brace List Symbols}).
+
+This function is intended for use in a list.  If the above structure
+isn't present, the function returns @code{nil}, allowing a different
+offset specification to indent the line.
+
+@workswith{} @code{brace-list-intro}.
+@end defun
+
+@comment ------------------------------------------------------------
+
+@defun c-lineup-class-decl-init-after-brace
+@findex lineup-class-decl-init-after-brace (c-)
+Line up the second entry of a class (etc.) initializer after its
+opening brace when:
+@enumerate
+@item
+The type is a class, struct, union, etc.@: (but not an enum);
+@item
+There is a brace block in the type declaration, specifying it; and
+@item
+The first element of the initializer is on the same line as its
+opening brace.
+@end enumerate
+
+In other words, we have a construct like this:
+
+@example
+@group
+struct STR @{
+    int i; float f;
+@} str_1 = @{1, 1.7@},
+    str_2 = @{2,
+             3.1      @hereFn{brace-list-intro}
+    @};
+@end group
+@end example
+
+
+Note that the syntactic context of the @code{brace-list-intro} line
+also has a syntactic element with the symbol @code{brace-list-entry}
+(@pxref{Brace List Symbols}).  Also note that this function works by
+returning the symbol @code{c-lineup-arglist-intro-after-paren}, which
+the caller then uses to perform the indentation.
+
+This function is intended for use in a list.  If the above structure
+isn't present, the function returns @code{nil}, allowing a different
+offset specification to indent the line.
+
+@workswith{} @code{brace-list-intro}.
 @end defun
 
 @comment ------------------------------------------------------------
@@ -6092,6 +6448,16 @@ returned if there's no template argument on the first line.
 
 @comment ------------------------------------------------------------
 
+@defun c-lineup-template-args-indented-from-margin
+@findex lineup-template-args-indented-from-margin (c-)
+Indent a template argument line @code{c-basic-offset} from the
+left-hand margin of the line with the containing <.
+
+@workswith @code{template-args-cont}.
+@end defun
+
+@comment ------------------------------------------------------------
+
 @defun c-lineup-ObjC-method-call
 @findex lineup-ObjC-method-call @r{(c-)}
 For Objective-C code, line up selector args as Emacs Lisp mode does
@@ -6125,8 +6491,7 @@ the current line with the colon on the previous line.
 @end defun
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Operator Line-Up, Comment Line-Up, List Line-Up, Line-Up Functions
-@comment node-name, next, previous, up
+@node    Operator Line-Up
 @subsection Operator Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -6147,6 +6512,32 @@ foo (xyz, aaa + bbb + ccc
 
 Only continuation lines like this are touched, @code{nil} is returned on
 lines which are the start of an argument.
+
+Within a gcc @code{asm} block, @code{:} is recognized as an argument
+separator, but of course only between operand specifications, not in the
+expressions for the operands.
+
+@workswith @code{arglist-cont}, @code{arglist-cont-nonempty}.
+@end defun
+
+@comment ------------------------------------------------------------
+
+@defun c-lineup-argcont-+
+@findex lineup-argcont-+ (c-)
+Indent a continued argument @code{c-basic-offset} spaces from the
+start of the first argument at the current level of nesting on a
+previous line.
+
+@example
+@group
+foo (xyz, uvw, aaa + bbb + ccc
+         + ddd + eee + fff);    <- c-lineup-argcont-+
+     <-->                          c-basic-offset
+@end group
+@end example
+
+Only continuation lines like this are touched, @code{nil} being
+returned on lines which are the start of an argument.
 
 Within a gcc @code{asm} block, @code{:} is recognized as an argument
 separator, but of course only between operand specifications, not in the
@@ -6218,6 +6609,26 @@ function is the same as specifying a list @code{(c-lineup-assignments
 
 @comment ------------------------------------------------------------
 
+@defun c-lineup-ternary-bodies
+@findex lineup-ternary-bodies @r{(c-)}
+Line up true and false branches of a ternary operator
+(i.e., @code{?:}).  More precisely, if the line starts with a colon
+which is a part of a said operator, align it with corresponding
+question mark.  For example:
+
+@example
+@group
+return arg % 2 == 0 ? arg / 2
+                    : (3 * arg + 1);    @hereFn{c-lineup-ternary-bodies}
+@end group
+@end example
+
+@workswith @code{arglist-cont}, @code{arglist-cont-nonempty} and
+@code{statement-cont}.
+@end defun
+
+@comment ------------------------------------------------------------
+
 @defun c-lineup-cascaded-calls
 @findex lineup-cascaded-calls @r{(c-)}
 Line up ``cascaded calls'' under each other.  If the line begins with
@@ -6273,8 +6684,7 @@ lineup functions.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Comment Line-Up, Misc Line-Up, Operator Line-Up, Line-Up Functions
-@comment node-name, next, previous, up
+@node    Comment Line-Up
 @subsection Comment Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -6383,8 +6793,7 @@ expressions.
 @end defun
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Misc Line-Up,  , Comment Line-Up, Line-Up Functions
-@comment node-name, next, previous, up
+@node    Misc Line-Up
 @subsection Miscellaneous Line-Up Functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -6584,9 +6993,20 @@ the_larch,            @hereFn{c-lineup-topmost-intro-cont}
 @workswith @code{topmost-intro-cont}.
 @end defun
 
+@comment ------------------------------------------------------------
+
+@defun c-lineup-class-field-cont
+@findex lineup-class-field-cont (c-)
+Indent continuation lines zero or one @code{c-basic-offset} steps.
+This is intended for continuation lines within a class/struct
+etc. construct.  For a declaration following a template specification,
+zero steps are used.  Other constructs are indented one step.
+
+@workswith @code{class-field-cont}.
+@end defun
+
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Custom Line-Up, Other Indentation, Line-Up Functions, Customizing Indentation
-@comment node-name, next, previous, up
+@node    Custom Line-Up
 @section Custom Line-Up Functions
 @cindex customization, indentation functions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -6701,13 +7121,12 @@ any syntactic symbol that appears in @code{c-offsets-alist} can have a
 custom line-up function associated with it.
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Other Indentation,  , Custom Line-Up, Customizing Indentation
-@comment node-name, next, previous, up
+@node    Other Indentation
 @section Other Special Indentations
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 To configure macros which you invoke without a terminating @samp{;},
-see @xref{Macros with ;}.
+@pxref{Macros with ;}.
 
 Here are the remaining odds and ends regarding indentation:
 
@@ -6753,8 +7172,7 @@ functions to this hook, not remove them.  @xref{Style Variables}.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Custom Macros, Odds and Ends, Customizing Indentation, Top
-@comment node-name, next, previous, up
+@node    Custom Macros
 @chapter Customizing Macros
 @cindex macros
 @cindex preprocessor directives
@@ -6778,10 +7196,14 @@ is @code{nil}, all lines inside macro definitions are analyzed as
 @code{cpp-macro-cont}.
 @end defopt
 
+Sometimes you may want to indent particular directives
+(e.g., @code{#pragma}) as though they were statements.  To do this, see
+@ref{Indenting Directives}.
+
 Because a macro can expand into anything at all, near where one is
 invoked @ccmode{} can only indent and fontify code heuristically.
 Sometimes it gets it wrong.  Usually you should try to design your
-macros so that they ''look like ordinary code'' when you invoke them.
+macros so that they ``look like ordinary code'' when you invoke them.
 However, two situations are so common that @ccmode{} handles them
 specially: that is when certain macros needn't (or mustn't) be
 followed by a @samp{;}, and when certain macros (or compiler
@@ -6794,10 +7216,11 @@ Macros}.
 * Macro Backslashes::
 * Macros with ;::
 * Noise Macros::
+* Indenting Directives::
 @end menu
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node     Macro Backslashes, Macros with ;, Custom Macros, Custom Macros
+@node     Macro Backslashes
 @comment  node-name,  next,  previous,  up
 @section Customizing Macro Backslashes
 @cindex @code{#define}
@@ -6845,7 +7268,7 @@ get aligned only when you explicitly invoke the command
 @end defopt
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node Macros with ;, Noise Macros, Macro Backslashes, Custom Macros
+@node Macros with ;
 @comment  node-name,  next,  previous,  up
 @section Macros with semicolons
 @cindex macros with semicolons
@@ -6903,8 +7326,7 @@ initialization code, after the mode hooks have run.
 @end defun
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Noise Macros,  , Macros with ;, Custom Macros
-@comment node-name, next, previous, up
+@node    Noise Macros
 @section Noise Macros
 @cindex noise macros
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -6924,22 +7346,24 @@ constitute noise macros.
 @vindex noise-macro-names @r{(c-)}
 This variable is a list of names of noise macros which never have
 parenthesized arguments.  Each element is a string, and must be a
-valid identifier.  An element in @code{c-noise-macro-names} must not
-also be in @code{c-noise-macro-with-parens-names}.  Such an element is
-treated as whitespace by @ccmode{}.
+valid identifier.  Alternatively, the variable may be a regular
+expression which matches the names of such macros.  Such a noise macro
+is treated as whitespace by @ccmode{}.  It must not also be in, or be
+matched by @code{c-noise-macro-with-parens-names}.
 @end defopt
 
 @defopt c-noise-macro-with-parens-names
 @vindex noise-macro-with-parens-names @r{(c-)}
 This variable is a list of names of noise macros which optionally have
 arguments in parentheses.  Each element of the list is a string, and
-must be a valid identifier.  An element in
-@code{c-noise-macro-with-parens-names} must not also be in
-@code{c-noise-macro-names}.  For performance reasons, such an element,
-together with the optional parenthesized arguments, is specially
-handled, but it is only handled when used in declaration
-contexts@footnote{If this restriction causes your project
-difficulties, please get in touch with @email{bug-cc-mode@@gnu.org}.}.
+must be a valid identifier.  Alternatively, the variable may be a
+regular expression which matches the names of such macros.  Such a
+noise macro must not also be in, or be matched by
+@code{c-noise-macro-names}.  For performance reasons, such a noise
+macro, including any parenthesized arguments, is specially handled,
+but it is only handled when used in declaration contexts@footnote{If
+this restriction causes your project difficulties, please get in touch
+with @email{bug-cc-mode@@gnu.org}.}.
 
 The two compiler directives @code{__attribute__} and @code{__declspec}
 have traditionally been handled specially in @ccmode{}; for example
@@ -6958,8 +7382,48 @@ after the mode hooks have run.
 @end defun
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Odds and Ends, Sample Init File, Custom Macros, Top
-@comment node-name, next, previous, up
+@node    Indenting Directives
+@section Indenting Directives
+@cindex Indenting Directives
+@cindex Indenting #pragma
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Sometimes you may want to indent particular preprocessor directives
+(e.g., @code{#pragma}) as though they were statements.  To do this,
+first set up @code{c-cpp-indent-to-body-directives} to include the
+directive name(s), then enable the ``indent to body'' feature with
+@code{c-toggle-cpp-indent-to-body}.
+
+@defopt c-cpp-indent-to-body-directives
+@vindex cpp-indent-to-body-directives (c-)
+This variable is a list of names of CPP directives (not including the
+introducing @samp{#}) which will be indented as though statements.
+Each element is a string, and must be a valid identifier.  The default
+value is @code{("pragma")}.
+
+If you add more directives to this variable, or remove directives from
+it, whilst ``indent to body'' is active, you need to re-enable the
+feature by calling @code{c-toggle-cpp-indent-to-body} for these
+changes to take effect@footnote{Note that the removal of directives
+doesn't work satisfactorily on XEmacs or on very old versions of
+Emacs}.
+@end defopt
+
+@defun c-toggle-cpp-indent-to-body
+@findex toggle-cpp-indent-to-body (c-)
+With @kbd{M-x c-toggle-cpp-indent-to-body}, you enable or disable the
+``indent to body'' feature.  When called programmatically, it takes an
+optional numerical argument.  A positive value will enable the
+feature, a zero or negative value will disable it.
+
+You should set up @code{c-cpp-indent-to-body-directives} before
+calling this function, since the function sets internal state which
+depends on that variable.
+@end defun
+
+
+@comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+@node    Odds and Ends
 @chapter Odds and Ends
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7002,8 +7466,7 @@ anchoring position to indent the line in that case.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Sample Init File, Performance Issues, Odds and Ends, Top
-@comment node-name, next, previous, up
+@node    Sample Init File
 @appendix Sample Init File
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7061,8 +7524,7 @@ to change some of the actual values.
 @end verbatim
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Performance Issues, Limitations and Known Bugs, Sample Init File, Top
-@comment node-name, next, previous, up
+@node    Performance Issues
 @appendix Performance Issues
 @cindex performance
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -7104,7 +7566,7 @@ caches syntactic information much better, so that the delay caused by
 searching for such a brace when it's not in column 0 is minimal,
 except perhaps when you've just moved a long way inside the file.
 
-@findex defun-prompt-regexp
+@vindex defun-prompt-regexp
 @vindex c-Java-defun-prompt-regexp
 @vindex Java-defun-prompt-regexp @r{(c-)}
 A special note about @code{defun-prompt-regexp} in Java mode: The common
@@ -7170,8 +7632,7 @@ more info.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Limitations and Known Bugs, FAQ, Performance Issues, Top
-@comment node-name, next, previous, up
+@node    Limitations and Known Bugs
 @appendix Limitations and Known Bugs
 @cindex limitations
 @cindex bugs
@@ -7236,8 +7697,7 @@ early on:
 @end itemize
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    FAQ, Updating CC Mode, Limitations and Known Bugs, Top
-@comment node-name, next, previous, up
+@node    FAQ
 @appendix Frequently Asked Questions
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7285,13 +7745,15 @@ could amend your C++ Mode hook like this:
 @emph{How do I stop my C++ lambda expressions being indented way over
 to the right?}
 
-Change the offset associated with @code{inlambda} from its default,
-the function @code{c-lineup-inexpr-block}, to 0.  For example, if you
-are setting offsets in a hook function you might include the following
-line:
+This is now the default, so you don't need to do anything.  To restore
+the previous default, indenting lambda expressions to the right of the
+constructs which introduce them, change the offset associated with
+@code{inlambda} from 0 to @code{c-lineup-inexpr-block}.  For example,
+if you are setting offsets in a hook function you might include the
+following line:
 
 @example
-(c-set-offset 'inlambda 0)
+(c-set-offset 'inlambda 'c-lineup-inexpr-block)
 @end example
 
 For details of the different ways you can make this setting,
@@ -7308,7 +7770,7 @@ Started}.
 @kindex C-M-\
 @emph{How do I reindent the whole file?}
 
-Visit the file and hit @kbd{C-x h} to mark the whole buffer. Then hit
+Visit the file and hit @kbd{C-x h} to mark the whole buffer.  Then hit
 @kbd{C-M-\}.  @xref{Indentation Commands}.
 
 @item
@@ -7363,8 +7825,7 @@ there since it's got its own system to keep track of blocks.
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Updating CC Mode, Mailing Lists and Bug Reports, FAQ, Top
-@comment node-name, next, previous, up
+@node    Updating CC Mode
 @appendix Getting the Latest CC Mode Release
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7378,13 +7839,12 @@ have old versions of @ccmode{} and so should be upgraded.  Access to the
 compatibility, etc.@: are all available on the web site:
 
 @quotation
-@uref{http://cc-mode.sourceforge.net/}
+@uref{https://www.nongnu.org/cc-mode/}
 @end quotation
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Mailing Lists and Bug Reports, GNU Free Documentation License, Updating CC Mode, Top
-@comment node-name, next, previous, up
+@node    Mailing Lists and Bug Reports
 @appendix Mailing Lists and Submitting Bug Reports
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7413,7 +7873,7 @@ the GNU Bug Tracker at @url{https://debbugs.gnu.org}, then sends it on
 to @email{bug-cc-mode@@gnu.org}.  You can also send reports, other
 questions, and suggestions (kudos?@: @t{;-)} to that address.  It's a
 mailing list which you can join or browse an archive of; see the web site at
-@uref{http://cc-mode.sourceforge.net/} for further details.
+@uref{https://www.nongnu.org/cc-mode/} for further details.
 
 @cindex announcement mailing list
 If you want to get announcements of new @ccmode{} releases, send the
@@ -7427,15 +7887,14 @@ to the Usenet newsgroups @code{gnu.emacs.sources}, @code{comp.emacs},
 @c There is no newsgroup for Pike.  :-(
 
 
-@node GNU Free Documentation License, Command and Function Index, Mailing Lists and Bug Reports, Top
+@node GNU Free Documentation License
 @appendix GNU Free Documentation License
 @include doclicense.texi
 
 
 @c Removed the tentative node "Mode Initialization" from here, 2005/8/27.
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Command and Function Index, Variable Index, GNU Free Documentation License, Top
-@comment node-name, next, previous, up
+@node    Command and Function Index
 @unnumbered Command and Function Index
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7449,8 +7908,7 @@ Since most @ccmode{} commands are prepended with the string
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Variable Index, Concept and Key Index, Command and Function Index, Top
-@comment node-name, next, previous, up
+@node    Variable Index
 @unnumbered Variable Index
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -7464,8 +7922,7 @@ Since most @ccmode{} variables are prepended with the string
 
 
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-@node    Concept and Key Index,  , Variable Index, Top
-@comment node-name, next, previous, up
+@node    Concept and Key Index
 @unnumbered Concept and Key Index
 @comment !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 

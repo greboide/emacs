@@ -1,6 +1,6 @@
 ;;; text-property-search.el --- search for text properties  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2018 Free Software Foundation, Inc.
+;; Copyright (C) 2018-2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
 ;; Keywords: convenience
@@ -30,29 +30,42 @@
   beginning end value)
 
 (defun text-property-search-forward (property &optional value predicate
-                                              not-immediate)
-  "Search for the next region that has text property PROPERTY set to VALUE.
-If not found, the return value is nil.  If found, point will be
-placed at the end of the region and an object describing the
-match is returned.
+                                              not-current)
+  "Search for next region of text where PREDICATE returns non-nil for PROPERTY.
+PREDICATE is used to decide whether the value of PROPERTY at a given
+buffer position should be considered as a match for VALUE.
+VALUE defaults to nil if omitted.
 
-PREDICATE is called with two values.  The first is the VALUE
-parameter.  The second is the value of PROPERTY.  This predicate
-should return non-nil if there is a match.
+If PREDICATE is a function, it will be called with two arguments:
+VALUE and the value of PROPERTY at some buffer position.  The function
+should return non-nil if these two values are to be considered a match.
 
-Some convenience values for PREDICATE can also be used.  `t'
-means the same as `equal'.  `nil' means almost the same as \"not
-equal\", but will also end the match if the value of PROPERTY
-changes.  See the manual for extensive examples.
+Two special values of PREDICATE can also be used:
+If PREDICATE is t, that means the value of PROPERTY must `equal' VALUE
+to be considered a match.
+If PREDICATE is nil (which is the default), the value of PROPERTY will
+match if it is not `equal' to VALUE.  Furthermore, a nil PREDICATE
+means that the match region ends where the value changes.  For
+instance, this means that if you loop with
 
-If `not-immediate', if the match is under point, it will not be
-returned, but instead the next instance is returned, if any.
+  (while (setq prop (text-property-search-forward \\='face))
+    ...)
 
-The return value (if a match is made) is a `prop-match'
-structure.  The accessors available are
-`prop-match-beginning'/`prop-match-end' (the region in the buffer
-that's matching), and `prop-match-value' (the value of PROPERTY
-at the start of the region)."
+you will get all the distinct regions with non-nil `face' values in
+the buffer, and the `prop' object will have the details about the
+match.  See the manual for more details and examples about how
+VALUE and PREDICATE interact.
+
+If NOT-CURRENT is non-nil, current buffer position is not examined for
+matches: the function will search for the first region that doesn't
+include point and has a value of PROPERTY that matches VALUE.
+
+If no matches can be found, return nil and don't move point.
+If found, move point to the end of the region and return a
+`prop-match' object describing the match.  To access the details
+of the match, use `prop-match-beginning' and `prop-match-end' for
+the buffer positions that limit the region, and `prop-match-value'
+for the value of PROPERTY in the region."
   (interactive
    (list
     (let ((string (completing-read "Search for property: " obarray)))
@@ -66,13 +79,13 @@ at the start of the region)."
    ;; end.
    ((and (text-property--match-p value (get-text-property (point) property)
                                  predicate)
-         (not not-immediate))
+         (not not-current))
     (text-property--find-end-forward (point) property value predicate))
    (t
     (let ((origin (point))
           (ended nil)
           pos)
-      ;; Fix the next candidate.
+      ;; Find the next candidate.
       (while (not ended)
         (setq pos (next-single-property-change (point) property))
         (if (not pos)
@@ -121,9 +134,11 @@ at the start of the region)."
 
 
 (defun text-property-search-backward (property &optional value predicate
-                                               not-immediate)
-  "Search for the previous region that has text property PROPERTY set to VALUE.
-See `text-property-search-forward' for further documentation."
+                                               not-current)
+  "Search for previous region of text where PREDICATE returns non-nil for PROPERTY.
+
+Like `text-property-search-forward', which see, but searches backward,
+and if a matching region is found, place point at the start of the region."
   (interactive
    (list
     (let ((string (completing-read "Search for property: " obarray)))
@@ -135,29 +150,36 @@ See `text-property-search-forward' for further documentation."
     nil)
    ;; We're standing in the property we're looking for, so find the
    ;; end.
-   ((and (text-property--match-p
-          value (get-text-property (1- (point)) property)
-          predicate)
-         (not not-immediate))
-    (text-property--find-end-backward (1- (point)) property value predicate))
+   ((text-property--match-p
+     value (get-text-property (1- (point)) property)
+     predicate)
+    (let ((origin (point))
+          (match (text-property--find-end-backward
+                  (1- (point)) property value predicate)))
+      ;; When we want to ignore the current element, then repeat the
+      ;; search if we haven't moved out of it yet.
+      (if (and not-current
+               (equal (get-text-property (point) property)
+                      (get-text-property origin property)))
+          (text-property-search-backward property value predicate)
+        match)))
    (t
     (let ((origin (point))
           (ended nil)
           pos)
-      (forward-char -1)
-      ;; Fix the next candidate.
+      ;; Find the previous candidate.
       (while (not ended)
         (setq pos (previous-single-property-change (point) property))
         (if (not pos)
             (progn
               (goto-char origin)
               (setq ended t))
-          (goto-char (1- pos))
-          (if (text-property--match-p value (get-text-property (point) property)
+          (goto-char pos)
+          (if (text-property--match-p value (get-text-property (1- (point)) property)
                                       predicate)
               (setq ended
                     (text-property--find-end-backward
-                     (point) property value predicate))
+                     (1- (point)) property value predicate))
             ;; Skip past this section of non-matches.
             (setq pos (previous-single-property-change (point) property))
             (unless pos
@@ -181,14 +203,20 @@ See `text-property-search-forward' for further documentation."
                   (goto-char (point-min))
                   (setq end (point)
                         ended t))
-              (goto-char (1- end))
+              (goto-char end)
               (unless (text-property--match-p
-                       value (get-text-property (point) property) predicate)
+                       value (get-text-property (1- (point)) property) predicate)
                 (goto-char end)
                 (setq ended t)))))
       ;; End this at the first place the property changes value.
-      (setq end (previous-single-property-change
-                 (point) property nil (point-min)))
+      (setq end
+            (if (and (> (point) (point-min))
+                     (text-property--match-p
+                      value (get-text-property (1- (point)) property)
+                      predicate))
+                (previous-single-property-change (point)
+                                                 property nil (point-min))
+              (point)))
       (goto-char end))
     (make-prop-match :beginning end
                      :end (1+ start)
@@ -204,3 +232,5 @@ See `text-property-search-forward' for further documentation."
   (funcall predicate value prop-value))
 
 (provide 'text-property-search)
+
+;;; text-property-search.el ends here

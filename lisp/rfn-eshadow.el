@@ -1,6 +1,6 @@
-;;; rfn-eshadow.el --- Highlight `shadowed' part of read-file-name input text
+;;; rfn-eshadow.el --- Highlight `shadowed' part of read-file-name input text  -*- lexical-binding: t; -*-
 ;;
-;; Copyright (C) 2000-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2000-2026 Free Software Foundation, Inc.
 ;;
 ;; Author: Miles Bader <miles@gnu.org>
 ;; Keywords: convenience minibuffer
@@ -92,7 +92,6 @@
 		  (sexp :tag "Value")))))
 
 (defcustom file-name-shadow-properties
-  ;; FIXME: should we purecopy this?
 '(face file-name-shadow field shadow)
   "Properties given to the `shadowed' part of a filename in the minibuffer.
 Only used when `file-name-shadow-mode' is active.
@@ -103,7 +102,7 @@ If Emacs is not running under a window system,
   :version "22.1")
 
 (defcustom file-name-shadow-tty-properties
-  (purecopy '(before-string "{" after-string "} " field shadow))
+  '(before-string "{" after-string "} " field shadow)
   "Properties given to the `shadowed' part of a filename in the minibuffer.
 Only used when `file-name-shadow-mode' is active and Emacs
 is not running under a window-system; if Emacs is running under a window
@@ -122,7 +121,7 @@ system, `file-name-shadow-properties' is used instead."
   "Minibuffer setup functions from other packages.")
 
 (defvar rfn-eshadow-update-overlay-hook nil
-  "Customer overlay functions from other packages")
+  "Customer overlay functions from other packages.")
 
 
 ;;; Internal variables
@@ -132,9 +131,7 @@ system, `file-name-shadow-properties' is used instead."
 
 ;; An overlay covering the shadowed part of the filename (local to the
 ;; minibuffer).
-(defvar rfn-eshadow-overlay)
-(make-variable-buffer-local 'rfn-eshadow-overlay)
-
+(defvar-local rfn-eshadow-overlay nil)
 
 ;;; Hook functions
 
@@ -209,9 +206,6 @@ been set up by `rfn-eshadow-setup-minibuffer'."
 
 (define-minor-mode file-name-shadow-mode
   "Toggle file-name shadowing in minibuffers (File-Name Shadow mode).
-With a prefix argument ARG, enable File-Name Shadow mode if ARG
-is positive, and disable it otherwise.  If called from Lisp,
-enable the mode if ARG is omitted or nil.
 
 File-Name Shadow mode is a global minor mode.  When enabled, any
 part of a filename being read in the minibuffer that would be
@@ -220,11 +214,10 @@ ignored (because the result is passed through
 `file-name-shadow-properties', which can be used to make that
 portion dim, invisible, or otherwise less visually noticeable."
   :global t
-  ;; We'd like to use custom-initialize-set here so the setup is done
-  ;; before dumping, but at the point where the defcustom is evaluated,
+  ;; At the point where the defcustom is evaluated,
   ;; the corresponding function isn't defined yet, so
   ;; custom-initialize-set signals an error.
-  :initialize 'custom-initialize-delay
+  :initialize #'custom-initialize-after-file-load
   :init-value t
   :group 'minibuffer
   :version "22.1"

@@ -985,7 +985,7 @@ Emacs также может создавать множество "фреймо�
 представить все это здесь не представляется возможным.  Однако, возможно вы
 захотите узнать больше о возможностях Emacs.  Emacs предоставляет команды
 для чтения документации о командах Emacs. Все команды "справки" (help)
-начинаются с сочетания CONTROL-h, который является "символом справки".
+начинаются с сочетания CONTROL-h, которое является "символом справки".
 
 Чтобы использовать справку, нажмите C-h, а затем -- символ, который
 расскажет, какой именно вид справки вы хотите получить. Если вы
@@ -1105,7 +1105,7 @@ Dired позволяет вам отображать список файлов �
 (copyrighted) и приходит с ограничениями распространения копий со
 следующими соглашениями:
 
-Copyright (C) 1985, 1996, 1998, 2001-2018 Free Software Foundation, Inc.
+Copyright (C) 1985, 1996, 1998, 2001-2026 Free Software Foundation, Inc.
 
    Permission is granted to anyone to make or distribute verbatim copies
    of this document as received, in any medium, provided that the
@@ -1130,5 +1130,6 @@ Copyright (C) 1985, 1996, 1998, 2001-2018 Free Software Foundation, Inc.
 ;;; Local Variables:
 ;;; coding: utf-8
 ;;; sentence-end-double-space: nil
+;;; mode: fundamental
 ;;; fill-column: 76
 ;;; End:

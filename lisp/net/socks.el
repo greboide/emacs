@@ -1,6 +1,6 @@
 ;;; socks.el --- A Socks v5 Client for Emacs  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1996-2000, 2002, 2007-2018 Free Software Foundation,
+;; Copyright (C) 1996-2000, 2002, 2007-2026 Free Software Foundation,
 ;; Inc.
 
 ;; Author: William M. Perry <wmperry@gnu.org>
@@ -154,7 +154,7 @@
 
 (defcustom socks-server
   (list "Default server" "socks" 1080 5)
-  ""
+  "Socks server."
   :type '(list
 	  (string :format "" :value "Default server")
 	  (string :tag "Server")
@@ -162,6 +162,7 @@
 	  (radio-button-choice :tag "SOCKS Version"
 			       :format "%t: %v"
 			       (const :tag "SOCKS v4  " :format "%t" :value 4)
+                               (const :tag "SOCKS v4a"  :format "%t" :value 4a)
 			       (const :tag "SOCKS v5"   :format "%t" :value 5))))
 
 
@@ -202,6 +203,12 @@
     "Command not supported"
     "Address type not supported"))
 
+(defconst socks--errors-4
+  '("Granted"
+    "Rejected or failed"
+    "Cannot connect to identd on the client"
+    "Client and identd report differing user IDs"))
+
 ;; The socks v5 address types
 (defconst socks-address-type-v4   1)
 (defconst socks-address-type-name 3)
@@ -235,11 +242,10 @@
   (let ((num 0)
 	(retval ""))
     (mapc
-     (function
-      (lambda (x)
-	(if (fboundp (cdr (cdr x)))
-	    (setq retval (format "%s%c" retval (car x))
-		  num (1+ num)))))
+     (lambda (x)
+       (if (fboundp (cdr (cdr x)))
+           (setq retval (format "%s%c" retval (car x))
+                 num (1+ num))))
      (reverse socks-authentication-methods))
     (format "%c%s" num retval)))
 
@@ -261,7 +267,7 @@
     (setq state (process-get proc 'socks-state))
     (cond
      ((= state socks-state-waiting-for-auth)
-      (cl-callf (lambda (s) (setq string (concat string s)))
+      (cl-callf (lambda (s) (setq string (concat s string)))
           (process-get proc 'socks-scratch))
       (if (< (length string) 2)
 	  nil				; We need to spin some more
@@ -273,12 +279,12 @@
      ((= state socks-state-authenticated)
       )
      ((= state socks-state-waiting)
-      (cl-callf (lambda (s) (setq string (concat string s)))
+      (cl-callf (lambda (s) (setq string (concat s string)))
           (process-get proc 'socks-scratch))
       (setq version (process-get proc 'socks-server-protocol))
       (cond
        ((equal version 'http)
-	(if (not (string-match "\r\n\r\n" string))
+	(if (not (string-search "\r\n\r\n" string))
 	    nil			; Need to spin some more
 	  (process-put proc 'socks-state socks-state-connected)
 	  (process-put proc 'socks-reply 0)
@@ -310,7 +316,8 @@
 		     ((pred (= socks-address-type-name))
 		      (if (< (length string) 5)
 			  255
-		        (+ 1 (aref string 4)))))))
+                        (+ 1 (aref string 4))))
+                     (0 0))))
 	  (if (< (length string) desired-len)
 	      nil			; Need to spin some more
 	    (process-put proc 'socks-state socks-state-connected)
@@ -329,7 +336,6 @@
   (advice-add 'open-network-stream :around #'socks--open-network-stream))
 
 (defun socks-open-connection (server-info)
-  (interactive)
   (save-excursion
     (let ((proc
            (let ((socks-override-functions nil))
@@ -386,10 +392,13 @@
 	  )
 	 )
 	(process-put proc 'socks-state socks-state-authenticated)
+	(process-put proc 'socks-scratch "")
 	(set-process-filter proc #'socks-filter)))
       proc)))
 
 (defun socks-send-command (proc command atype address port)
+  "Send COMMAND to SOCKS service PROC for proxying ADDRESS and PORT.
+When ATYPE indicates an IP, param ADDRESS must be given as raw bytes."
   (let ((addr (cond
 	       ((or (= atype socks-address-type-v4)
 		    (= atype socks-address-type-v6))
@@ -398,6 +407,7 @@
 		(format "%c%s" (length address) address))
 	       (t
 		(error "Unknown address type: %d" atype))))
+        trailing
 	request version)
     (or (process-get proc 'socks)
         (error "socks-send-command called on non-SOCKS connection %S" proc))
@@ -405,26 +415,32 @@
     (setq version (process-get proc 'socks-server-protocol))
     (cond
      ((equal version 'http)
-      (setq request (format (eval-when-compile
-			      (concat
-			       "CONNECT %s:%d HTTP/1.0\r\n"
-			       "User-Agent: Emacs/SOCKS v1.0\r\n"
-			       "\r\n"))
+      (setq request (format (concat
+			     "CONNECT %s:%d HTTP/1.0\r\n"
+			     "User-Agent: Emacs/SOCKS v1.0\r\n"
+			     "\r\n")
 			    (cond
 			     ((equal atype socks-address-type-name) address)
 			     (t
 			      (error "Unsupported address type for HTTP: %d" atype)))
 			    port)))
+     ((and (eq version '4a)
+           (setf addr "\0\0\0\1"
+                 trailing (concat address "\0")
+                 version 4 ; become version 4
+                 (process-get proc 'socks-server-protocol) 4)
+           nil)) ; fall through
      ((equal version 4)
       (setq request (concat
 		     (unibyte-string
 		      version             ; version
 		      command             ; command
-		      (lsh port -8)       ; port, high byte
+		      (ash port -8)       ; port, high byte
 		      (logand port #xff)) ; port, low byte
 		     addr                 ; address
-		     (user-full-name)     ; username
-		     "\0")))              ; terminate username
+                     socks-username       ; username
+                     "\0"                 ; terminate username
+                     trailing)))          ; optional host to look up
      ((equal version 5)
       (setq request (concat
 		     (unibyte-string
@@ -434,7 +450,7 @@
 		      atype)		; address type
 		     addr		; address
 		     (unibyte-string
-                      (lsh port -8)          ; port, high byte
+                      (ash port -8)          ; port, high byte
 		      (logand port #xff))))) ; port, low byte
      (t
       (error "Unknown protocol version: %d" version)))
@@ -445,13 +461,19 @@
 	nil				; Sweet sweet success!
       (delete-process proc)
       (error "SOCKS: %s"
-             (nth (or (process-get proc 'socks-reply) 1) socks-errors)))
+             (let ((err (process-get proc 'socks-reply)))
+               (if (eql version 5)
+                   (nth (or err 1) socks-errors)
+                 ;; The defined error codes for v4 range from
+                 ;; 90-93, but we store them in a simple list.
+                 (nth (pcase err (90 0) (92 2) (93 3) (_ 1))
+                      socks--errors-4)))))
     proc))
 
 
 ;; Replacement functions for open-network-stream, etc.
 (defvar socks-noproxy nil
-  "List of regexps matching hosts that we should not socksify connections to")
+  "List of regexps matching hosts that we should not socksify connections to.")
 
 (defun socks-find-route (host _service)
   (let ((route socks-server)
@@ -528,7 +550,7 @@
 	        (setq host (socks-nslookup-host host))
 	        (if (not (listp host))
 	            (error "Could not get IP address for: %s" host))
-	        (setq host (apply #'format "%c%c%c%c" host))
+		(setq host (apply #'unibyte-string host))
                 socks-address-type-v4)
                (t
                 socks-address-type-name))))
@@ -543,7 +565,7 @@
 			      service))
         (process-put proc 'socks-buffer buffer)
         (process-put proc 'socks-host host)
-        (process-put proc 'socks-service host)
+        (process-put proc 'socks-service service)
         (set-process-filter proc nil)
         (set-process-buffer proc (if buffer (get-buffer-create buffer)))
         proc))))

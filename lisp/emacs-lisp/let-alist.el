@@ -1,16 +1,16 @@
 ;;; let-alist.el --- Easily let-bind values of an assoc-list by their names -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2014-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2014-2026 Free Software Foundation, Inc.
 
 ;; Author: Artur Malabarba <emacs@endlessparentheses.com>
 ;; Package-Requires: ((emacs "24.1"))
-;; Version: 1.0.5
+;; Version: 1.0.6
 ;; Keywords: extensions lisp
 ;; Prefix: let-alist
 ;; Separator: -
 
-;; This is an Elpa :core package. Don't use functionality that is not
-;; compatible with Emacs 24.1.
+;; This is a GNU ELPA :core package.  Avoid functionality that is not
+;; compatible with the version of Emacs recorded above.
 
 ;; This file is part of GNU Emacs.
 
@@ -36,31 +36,32 @@
 ;; symbol inside body is let-bound to their cdrs in the alist.  Dotted
 ;; symbol is any symbol starting with a `.'.  Only those present in
 ;; the body are let-bound and this search is done at compile time.
+;; A number will result in a list index.
 ;;
 ;; For instance, the following code
 ;;
 ;;   (let-alist alist
-;;     (if (and .title .body)
+;;     (if (and .title.0 .body)
 ;;         .body
 ;;       .site
 ;;       .site.contents))
 ;;
 ;; essentially expands to
 ;;
-;;   (let ((.title (cdr (assq 'title alist)))
+;;   (let ((.title.0 (elt (cdr (assq 'title alist)) 0))
 ;;         (.body  (cdr (assq 'body alist)))
 ;;         (.site  (cdr (assq 'site alist)))
 ;;         (.site.contents (cdr (assq 'contents (cdr (assq 'site alist))))))
-;;     (if (and .title .body)
+;;     (if (and .title.0 .body)
 ;;         .body
 ;;       .site
 ;;       .site.contents))
 ;;
 ;; If you nest `let-alist' invocations, the inner one can't access
-;; the variables of the outer one. You can, however, access alists
+;; the variables of the outer one.  You can, however, access alists
 ;; inside the original alist by using dots inside the symbol, as
 ;; displayed in the example above by the `.site.contents'.
-;;
+
 ;;; Code:
 
 
@@ -75,6 +76,8 @@ symbol, and each cdr is the same symbol without the `.'."
         ;; Return the cons cell inside a list, so it can be appended
         ;; with other results in the clause below.
         (list (cons data (intern (replace-match "" nil nil name)))))))
+   ((vectorp data)
+    (apply #'nconc (mapcar #'let-alist--deep-dot-search data)))
    ((not (consp data)) nil)
    ((eq (car data) 'let-alist)
     ;; For nested ‘let-alist’ forms, ignore symbols appearing in the
@@ -91,14 +94,17 @@ symbol, and each cdr is the same symbol without the `.'."
     (if (string-match "\\`\\." name)
         clean
       (let-alist--list-to-sexp
-       (mapcar #'intern (nreverse (split-string name "\\.")))
+       (mapcar #'read (nreverse (split-string name "\\.")))
        variable))))
 
 (defun let-alist--list-to-sexp (list var)
   "Turn symbols LIST into recursive calls to `cdr' `assq' on VAR."
-  `(cdr (assq ',(car list)
-              ,(if (cdr list) (let-alist--list-to-sexp (cdr list) var)
-                 var))))
+  (let ((sym (car list))
+        (rest (if (cdr list) (let-alist--list-to-sexp (cdr list) var)
+                 var)))
+    (cond
+     ((numberp sym) `(elt ,rest ,sym))
+     (t `(cdr (assq ',sym ,rest))))))
 
 (defun let-alist--remove-dot (symbol)
   "Return SYMBOL, sans an initial dot."
@@ -112,32 +118,50 @@ symbol, and each cdr is the same symbol without the `.'."
 ;;;###autoload
 (defmacro let-alist (alist &rest body)
   "Let-bind dotted symbols to their cdrs in ALIST and execute BODY.
-Dotted symbol is any symbol starting with a `.'.  Only those present
-in BODY are let-bound and this search is done at compile time.
+Dotted symbol is any symbol starting with a `.'.  This macro creates
+let-bindings for dotted symbols that appear literally in BODY (whether
+or not they are actually used).  It does not create bindings for dotted
+symbols that are introduced by macro-expansion in BODY.
+
+A symbol of the form `.foo.N' where N is a natural number refers to the
+Nth element of the value that ALIST associates to key `foo'.
 
 For instance, the following code
 
   (let-alist alist
-    (if (and .title .body)
+    (if (and .title.0 .body)
         .body
       .site
       .site.contents))
 
 essentially expands to
 
-  (let ((.title (cdr (assq \\='title alist)))
+  (let ((.title.0 (elt (cdr (assq \\='title alist)) 0))
         (.body  (cdr (assq \\='body alist)))
         (.site  (cdr (assq \\='site alist)))
         (.site.contents (cdr (assq \\='contents (cdr (assq \\='site alist))))))
-    (if (and .title .body)
+    (if (and .title.0 .body)
         .body
       .site
       .site.contents))
 
 If you nest `let-alist' invocations, the inner one can't access
-the variables of the outer one. You can, however, access alists
+the variables of the outer one.  You can, however, access alists
 inside the original alist by using dots inside the symbol, as
-displayed in the example above."
+displayed in the example above.
+
+To refer to a non-`let-alist' variable starting with a dot in BODY, use
+two dots instead of one.  For example, in the following form `..foo'
+refers to the variable `.foo' bound outside of the `let-alist':
+
+    (let ((.foo 42)) (let-alist \\='((foo . nil)) ..foo))
+
+Note that there is no way to differentiate the case where a key
+is missing from when it is present, but its value is nil.  Thus,
+the following form evaluates to nil:
+
+    (let-alist \\='((some-key . nil))
+      .some-key)"
   (declare (indent 1) (debug t))
   (let ((var (make-symbol "alist")))
     `(let ((,var ,alist))

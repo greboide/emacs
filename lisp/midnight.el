@@ -1,9 +1,8 @@
 ;;; midnight.el --- run something every midnight, e.g., kill old buffers  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1998, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1998-2026 Free Software Foundation, Inc.
 
 ;; Author: Sam Steingold <sds@gnu.org>
-;; Maintainer: Sam Steingold <sds@gnu.org>
 ;; Created: 1998-05-18
 ;; Keywords: utilities
 
@@ -24,10 +23,10 @@
 
 ;;; Commentary:
 
-;; To use the file, put (require 'midnight) into your .emacs.  Then, at
+;; To use the file, put (midnight-mode) into your .emacs.  Then, at
 ;; midnight, Emacs will run the normal hook `midnight-hook'.  You can
 ;; put whatever you like there, say, `calendar'; by default there is
-;; only one function there - `clean-buffer-list'. It will kill the
+;; only one function there - `clean-buffer-list'.  It will kill the
 ;; buffers matching `clean-buffer-list-kill-buffer-names' and
 ;; `clean-buffer-list-kill-regexps' and the buffers which where last
 ;; displayed more than `clean-buffer-list-delay-general' days ago,
@@ -53,35 +52,35 @@ the time when it is run.")
   "Non-nil means run `midnight-hook' at midnight."
   :global t
   :initialize #'custom-initialize-default
-  ;; Disable first, since the ':initialize' function above already
-  ;; starts the timer when the mode is turned on for the first time,
-  ;; via setting 'midnight-delay', which calls 'midnight-delay-set',
-  ;; which starts the timer.
-  (when (timerp midnight-timer) (cancel-timer midnight-timer))
-  (if midnight-mode (timer-activate midnight-timer)))
+  ;; Call `midnight-delay-set' again because it takes care of starting
+  ;; the timer if the mode is on.  The ':initialize' function above
+  ;; (which ends up calling `midnight-delay-set') did not know yet if
+  ;; the mode was on or not.
+  (defvar midnight-delay)
+  (midnight-delay-set 'midnight-delay midnight-delay))
 
 ;;; clean-buffer-list stuff
 
 (defcustom clean-buffer-list-delay-general 3
   "The number of days before any buffer becomes eligible for autokilling.
-The autokilling is done by `clean-buffer-list' when is it in `midnight-hook'.
+The autokilling is done by `clean-buffer-list' when it is in `midnight-hook'.
 Currently displayed and/or modified (unsaved) buffers, as well as buffers
 matching `clean-buffer-list-kill-never-buffer-names' and
 `clean-buffer-list-kill-never-regexps' are excluded."
-  :type 'integer)
+  :type 'natnum)
 
 (defcustom clean-buffer-list-delay-special 3600
   "The number of seconds before some buffers become eligible for autokilling.
 Buffers matched by `clean-buffer-list-kill-regexps' and
 `clean-buffer-list-kill-buffer-names' are killed if they were last
 displayed more than this many seconds ago."
-  :type 'integer)
+  :type 'natnum)
 
 (defcustom clean-buffer-list-kill-regexps '("\\`\\*Man ")
   "List of regexps saying which buffers will be killed at midnight.
 If buffer name matches a regexp in the list and the buffer was not displayed
 in the last `clean-buffer-list-delay-special' seconds, it is killed by
-`clean-buffer-list' when is it in `midnight-hook'.
+`clean-buffer-list' when it is in `midnight-hook'.
 If a member of the list is a cons, its `car' is the regexp and its `cdr' is
 the number of seconds to use instead of `clean-buffer-list-delay-special'.
 See also `clean-buffer-list-kill-buffer-names',
@@ -101,7 +100,7 @@ if the buffer should be killed by `clean-buffer-list'."
   "List of strings saying which buffers will be killed at midnight.
 Buffers with names in this list, which were not displayed in the last
 `clean-buffer-list-delay-special' seconds, are killed by `clean-buffer-list'
-when is it in `midnight-hook'.
+when it is in `midnight-hook'.
 If a member of the list is a cons, its `car' is the name and its `cdr' is
 the number of seconds to use instead of `clean-buffer-list-delay-special'.
 See also `clean-buffer-list-kill-regexps',
@@ -160,7 +159,7 @@ the current date/time, buffer name, how many seconds ago it was
 displayed (can be nil if the buffer was never displayed) and its
 lifetime, i.e., its \"age\" when it will be purged."
   (interactive)
-  (let ((tm (current-time)) bts (ts (format-time-string "%Y-%m-%d %T"))
+  (let* ((tm (current-time)) bts (ts (format-time-string "%Y-%m-%d %T" tm))
         delay cbld bn)
     (dolist (buf (buffer-list))
       (when (buffer-live-p buf)
@@ -168,7 +167,7 @@ lifetime, i.e., its \"age\" when it will be purged."
               bn (buffer-name buf)
               delay (if bts (round (float-time (time-subtract tm bts))) 0)
               cbld (clean-buffer-list-delay bn))
-        (message "[%s] `%s' [%s %d]" ts bn delay cbld)
+        (message "[%s] `%s' [%d %d]" ts bn delay cbld)
         (unless (or (cl-find bn clean-buffer-list-kill-never-regexps
                              :test (lambda (bn re)
                                      (if (functionp re)
@@ -180,7 +179,8 @@ lifetime, i.e., its \"age\" when it will be purged."
                     (and (buffer-file-name buf) (buffer-modified-p buf))
                     (get-buffer-window buf 'visible)
                     (< delay cbld))
-          (message "[%s] killing `%s'" ts bn)
+          (message "[%s] killing `%s' (last displayed %s ago)" ts bn
+                   (format-seconds "%Y, %D, %H, %M, %z%S" delay))
           (kill-buffer buf))))))
 
 ;;; midnight hook
@@ -194,8 +194,8 @@ The default value is `clean-buffer-list'."
   :type 'hook)
 
 (defun midnight-next ()
-  "Return the number of seconds till the next midnight."
-  (pcase-let ((`(,sec ,min ,hrs) (decode-time)))
+  "Return the number of whole or partial seconds till the next midnight."
+  (pcase-let ((`(,sec ,min ,hrs) (decode-time nil nil 'integer)))
     (- (* 24 60 60) (* 60 60 hrs) (* 60 min) sec)))
 
 ;;;###autoload
@@ -207,9 +207,11 @@ to its second argument TM."
              "Invalid argument to `midnight-delay-set': `%s'")
   (set symb tm)
   (when (timerp midnight-timer) (cancel-timer midnight-timer))
-  (setq midnight-timer
-        (run-at-time (if (numberp tm) (+ (midnight-next) tm) tm)
-                     midnight-period #'run-hooks 'midnight-hook)))
+  ;; Only start the timer if the mode is turned on.
+  (when midnight-mode
+    (setq midnight-timer
+          (run-at-time (if (numberp tm) (+ (midnight-next) tm) tm)
+                       midnight-period #'run-hooks 'midnight-hook))))
 
 (defcustom midnight-delay 3600
   "The number of seconds after the midnight when the `midnight-timer' is run.

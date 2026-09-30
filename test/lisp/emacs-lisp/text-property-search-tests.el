@@ -1,22 +1,24 @@
-;;; text-property-search-tests.el --- Testing text-property-search
+;;; text-property-search-tests.el --- Testing text-property-search  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2018 Free Software Foundation, Inc.
+;; Copyright (C) 2018-2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Ingebrigtsen <larsi@gnus.org>
 ;; Keywords:
 
-;; This program is free software; you can redistribute it and/or modify
+;; This file is part of GNU Emacs.
+
+;; GNU Emacs is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 
-;; This program is distributed in the hope that it will be useful,
+;; GNU Emacs is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 ;; GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public License
-;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+;; along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -34,7 +36,7 @@
           " and this is "
           (propertize "italic1" 'face 'italic)
           (propertize "bold2" 'face 'bold)
-          (propertize "italic2" 'face 'italic)
+          (propertize "i" 'face 'italic) ; One char long to test bug#81539.
           " at the end")
   (goto-char (point-min)))
 
@@ -57,7 +59,7 @@
 
 (ert-deftest text-property-search-forward-bold-nil ()
   (with-test (text-property-search-forward 'face 'bold nil)
-             '("This is " " and this is italic1" "italic2 at the end")))
+             '("This is " " and this is italic1" "i at the end")))
 
 (ert-deftest text-property-search-forward-nil-t ()
   (with-test (text-property-search-forward 'face nil t)
@@ -65,7 +67,7 @@
 
 (ert-deftest text-property-search-forward-nil-nil ()
   (with-test (text-property-search-forward 'face nil nil)
-             '("bold1" "italic1" "bold2" "italic2")))
+             '("bold1" "italic1" "bold2" "i")))
 
 (ert-deftest text-property-search-forward-partial-bold-t ()
   (with-test (text-property-search-forward 'face 'bold t)
@@ -85,7 +87,7 @@
 
 (ert-deftest text-property-search-backward-bold-nil ()
   (with-test (text-property-search-backward 'face 'bold nil)
-             '( "italic2 at the end" " and this is italic1" "This is ")
+             '("i at the end" " and this is italic1" "This is ")
              (point-max)))
 
 (ert-deftest text-property-search-backward-nil-t ()
@@ -95,7 +97,7 @@
 
 (ert-deftest text-property-search-backward-nil-nil ()
   (with-test (text-property-search-backward 'face nil nil)
-             '("italic2" "bold2" "italic1" "bold1")
+             '("i" "bold2" "italic1" "bold1")
              (point-max)))
 
 (ert-deftest text-property-search-backward-partial-bold-t ()
@@ -107,6 +109,66 @@
   (with-test (text-property-search-backward 'face 'bold t t)
              '("bold1")
              35))
+
+(defmacro with-match-test (form beginning end value &optional point)
+  `(with-temp-buffer
+     (text-property-setup)
+     (when ,point
+       (goto-char ,point))
+     (should (equal ,form
+                    (make-prop-match :beginning ,beginning
+                                     :end ,end
+                                     :value ,value)))))
+
+(ert-deftest text-property-search-forward-prop-match-match-face-nil-nil ()
+  (with-match-test
+   (text-property-search-forward 'face nil nil)
+   9 14 'bold))
+
+(ert-deftest text-property-search-forward-prop-match-match-face-bold-t ()
+  (with-match-test
+   (text-property-search-forward 'face 'bold t)
+   9 14 'bold))
+
+(ert-deftest text-property-search-forward-prop-match-match-face-bold-nil ()
+  (with-match-test
+   (text-property-search-forward 'face 'bold nil)
+   1 9 nil))
+
+(ert-deftest text-property-search-backward-prop-match-match-face-nil-nil ()
+  (with-match-test
+   (text-property-search-backward 'face nil nil)
+   39 40 'italic
+   (point-max)))
+
+(ert-deftest text-property-search-backward-prop-match-match-face-italic-t ()
+  (with-match-test
+   (text-property-search-backward 'face 'italic t)
+   39 40 'italic
+   (point-max)))
+
+(ert-deftest text-property-search-backward-prop-match-match-face-italic-nil ()
+  (with-match-test
+   (text-property-search-backward 'face 'italic nil)
+   40 51 nil
+   (point-max)))
+
+
+;;;; Position after search.
+
+(ert-deftest text-property-search-forward/point-at-beginning ()
+  (with-temp-buffer
+    (insert (concat "1234" (propertize "567" 'x t) "890"))
+    (goto-char (point-min))
+    (text-property-search-forward 'x t)
+    (should (= (point) 5))))
+
+(ert-deftest text-property-search-backward/point-at-end ()
+  (with-temp-buffer
+    (insert (concat "1234" (propertize "567" 'x t) "890"))
+    (goto-char (point-max))
+    (text-property-search-backward 'x t)
+    (should (= (point) 8))))
 
 (provide 'text-property-search-tests)
 

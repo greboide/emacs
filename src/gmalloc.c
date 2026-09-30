@@ -1,5 +1,5 @@
 /* Declarations for `malloc' and friends.
-   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2018 Free
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
    Software Foundation, Inc.
 		  Written May 1989 by Mike Haertel.
 
@@ -21,7 +21,17 @@ License along with this library.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <config.h>
 
-#if defined HAVE_PTHREAD && !defined HYBRID_MALLOC
+#ifdef HAVE_MALLOC_H
+# if GNUC_PREREQ (4, 2, 0)
+#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+# endif
+# include <malloc.h>
+#endif
+#ifndef __MALLOC_HOOK_VOLATILE
+# define __MALLOC_HOOK_VOLATILE volatile
+#endif
+
+#if defined HAVE_PTHREAD
 #define USE_PTHREAD
 #endif
 
@@ -36,34 +46,18 @@ License along with this library.  If not, see <https://www.gnu.org/licenses/>.
 #include <pthread.h>
 #endif
 
-#ifdef emacs
-# include "lisp.h"
-#endif
-
-#include "ptr-bounds.h"
-
-#ifdef HAVE_MALLOC_H
-# if GNUC_PREREQ (4, 2, 0)
-#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-# endif
-# include <malloc.h>
-#endif
-#ifndef __MALLOC_HOOK_VOLATILE
-# define __MALLOC_HOOK_VOLATILE volatile
-#endif
-#ifndef HAVE_MALLOC_H
+#if !defined HAVE_MALLOC_H						\
+  || (__GLIBC__ > 2 || __GLIBC_MINOR__ >= 34)
 extern void (*__MALLOC_HOOK_VOLATILE __after_morecore_hook) (void);
-extern void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook) (void);
 extern void *(*__morecore) (ptrdiff_t);
-#endif
+#endif /* !defined HAVE_MALLOC_H || glibc >= 2.34 */
+#if !defined HAVE_MALLOC_H						\
+  || (__GLIBC__ > 2 || __GLIBC_MINOR__ >= 24)
+extern void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook) (void);
+#endif /* !defined HAVE_MALLOC_H || glibc >= 2.24 */
 
-/* If HYBRID_MALLOC is defined, then temacs will use malloc,
-   realloc... as defined in this file (and renamed gmalloc,
-   grealloc... via the macros that follow).  The dumped emacs,
-   however, will use the system malloc, realloc....  In other source
-   files, malloc, realloc... are renamed hybrid_malloc,
-   hybrid_realloc... via macros in conf_post.h.  hybrid_malloc and
-   friends are wrapper functions defined later in this file.  */
+#include "lisp.h"
+
 #undef malloc
 #undef realloc
 #undef calloc
@@ -76,18 +70,9 @@ extern void *(*__morecore) (ptrdiff_t);
 #define free gfree
 #define malloc_info gmalloc_info
 
-#ifdef HYBRID_MALLOC
-# include "sheap.h"
-# define DUMPED bss_sbrk_did_unexec
-#endif
-
 #ifdef	__cplusplus
 extern "C"
 {
-#endif
-
-#ifdef HYBRID_MALLOC
-#define extern static
 #endif
 
 /* Allocate SIZE bytes of memory.  */
@@ -184,7 +169,7 @@ struct list
   };
 
 /* Free list headers for each fragment size.  */
-extern struct list _fraghead[];
+static struct list _fraghead[BLOCKLOG];
 
 /* List of blocks allocated with aligned_alloc and friends.  */
 struct alignlist
@@ -203,8 +188,7 @@ extern size_t _bytes_free;
 
 /* Internal versions of `malloc', `realloc', and `free'
    used when these functions need to call each other.
-   They are the same but don't call the hooks
-   and don't bound the resulting pointers.  */
+   They are the same but don't call the hooks.  */
 extern void *_malloc_internal (size_t);
 extern void *_realloc_internal (void *, size_t);
 extern void _free_internal (void *);
@@ -297,7 +281,8 @@ extern struct mstats mstats (void);
 #endif
 
 /* Memory allocator `malloc'.
-   Copyright 1990, 1991, 1992, 1993, 1994, 1995 Free Software Foundation, Inc.
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
+   Software Foundation, Inc.
 		  Written May 1989 by Mike Haertel.
 
 This library is free software; you can redistribute it and/or
@@ -328,8 +313,6 @@ void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook) (void);
 void (*__MALLOC_HOOK_VOLATILE __after_morecore_hook) (void);
 void *(*__morecore) (ptrdiff_t);
 
-#ifndef HYBRID_MALLOC
-
 /* Pointer to the base of the first block.  */
 char *_heapbase;
 
@@ -342,9 +325,6 @@ size_t _heapindex;
 /* Limit of valid info table indices.  */
 size_t _heaplimit;
 
-/* Free lists for each fragment size.  */
-struct list _fraghead[BLOCKLOG];
-
 /* Instrumentation.  */
 size_t _chunks_used;
 size_t _bytes_used;
@@ -354,15 +334,9 @@ size_t _bytes_free;
 /* Are you experienced?  */
 int __malloc_initialized;
 
-#else
-
-static struct list _fraghead[BLOCKLOG];
-
-#endif /* HYBRID_MALLOC */
-
 /* Number of extra blocks to get each time we ask for more core.
    This reduces the frequency of calling `(*__morecore)'.  */
-#if defined DOUG_LEA_MALLOC || defined HYBRID_MALLOC || defined SYSTEM_MALLOC
+#if defined DOUG_LEA_MALLOC || defined SYSTEM_MALLOC
 static
 #endif
 size_t __malloc_extra_blocks;
@@ -561,7 +535,7 @@ malloc_initialize_1 (void)
   _heapinfo[0].free.size = 0;
   _heapinfo[0].free.next = _heapinfo[0].free.prev = 0;
   _heapindex = 0;
-  _heapbase = (char *) ptr_bounds_init (_heapinfo);
+  _heapbase = (char *) _heapinfo;
   _heaplimit = BLOCK (_heapbase + heapsize * sizeof (malloc_info));
 
   register_heapinfo ();
@@ -922,11 +896,10 @@ malloc (size_t size)
      among multiple threads.  We just leave it for compatibility with
      glibc malloc (i.e., assignments to gmalloc_hook) for now.  */
   hook = gmalloc_hook;
-  void *result = (hook ? hook : _malloc_internal) (size);
-  return ptr_bounds_clip (result, size);
+  return (hook ? hook : _malloc_internal) (size);
 }
 
-#if !(defined (_LIBC) || defined (HYBRID_MALLOC))
+#if !(defined (_LIBC))
 
 /* On some ANSI C systems, some libc functions call _malloc, _free
    and _realloc.  Make them use the GNU functions.  */
@@ -955,7 +928,8 @@ _realloc (void *ptr, size_t size)
 
 #endif
 /* Free a block of memory allocated by `malloc'.
-   Copyright 1990, 1991, 1992, 1994, 1995 Free Software Foundation, Inc.
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
+   Software Foundation, Inc.
 		  Written May 1989 by Mike Haertel.
 
 This library is free software; you can redistribute it and/or
@@ -977,11 +951,8 @@ License along with this library.  If not, see <https://www.gnu.org/licenses/>.
 /* Debugging hook for free.  */
 static void (*__MALLOC_HOOK_VOLATILE gfree_hook) (void *);
 
-#ifndef HYBRID_MALLOC
-
 /* List of blocks allocated by aligned_alloc.  */
 struct alignlist *_aligned_blocks = NULL;
-#endif
 
 /* Return memory to the heap.
    Like `_free_internal' but don't lock mutex.  */
@@ -1001,7 +972,6 @@ _free_internal_nolock (void *ptr)
 
   if (ptr == NULL)
     return;
-  ptr = ptr_bounds_init (ptr);
 
   PROTECT_MALLOC_STATE (0);
 
@@ -1253,7 +1223,6 @@ free (void *ptr)
     _free_internal (ptr);
 }
 
-#ifndef HYBRID_MALLOC
 /* Define the `cfree' alias for `free'.  */
 #ifdef weak_alias
 weak_alias (free, cfree)
@@ -1264,9 +1233,9 @@ cfree (void *ptr)
   free (ptr);
 }
 #endif
-#endif
 /* Change the size of a block allocated by `malloc'.
-   Copyright 1990, 1991, 1992, 1993, 1994, 1995 Free Software Foundation, Inc.
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
+   Software Foundation, Inc.
 		     Written May 1989 by Mike Haertel.
 
 This library is free software; you can redistribute it and/or
@@ -1284,10 +1253,6 @@ License along with this library.  If not, see <https://www.gnu.org/licenses/>.
 
    The author may be reached (Email) at the address mike@ai.mit.edu,
    or (US mail) as Mike Haertel c/o Free Software Foundation.  */
-
-#ifndef min
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#endif
 
 /* Debugging hook for realloc.  */
 static void *(*grealloc_hook) (void *, size_t);
@@ -1313,7 +1278,6 @@ _realloc_internal_nolock (void *ptr, size_t size)
   else if (ptr == NULL)
     return _malloc_internal_nolock (size);
 
-  ptr = ptr_bounds_init (ptr);
   block = BLOCK (ptr);
 
   PROTECT_MALLOC_STATE (0);
@@ -1436,10 +1400,10 @@ realloc (void *ptr, size_t size)
     return NULL;
 
   hook = grealloc_hook;
-  void *result = (hook ? hook : _realloc_internal) (ptr, size);
-  return ptr_bounds_clip (result, size);
+  return (hook ? hook : _realloc_internal) (ptr, size);
 }
-/* Copyright (C) 1991, 1992, 1994 Free Software Foundation, Inc.
+/* Copyright (C) 1991-1992, 1994, 2025-2026 Free Software Foundation,
+ * Inc.
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License as
@@ -1476,7 +1440,8 @@ calloc (size_t nmemb, size_t size)
     return memset (result, 0, bytes);
   return result;
 }
-/* Copyright (C) 1991, 1992, 1993, 1994, 1995 Free Software Foundation, Inc.
+/* Copyright (C) 1991-1992, 1994, 2025-2026 Free Software Foundation,
+ * Inc.
 This file is part of the GNU C Library.
 
 The GNU C Library is free software; you can redistribute it and/or modify
@@ -1509,12 +1474,6 @@ extern void *__sbrk (ptrdiff_t increment);
 static void *
 gdefault_morecore (ptrdiff_t increment)
 {
-#ifdef HYBRID_MALLOC
-  if (!DUMPED)
-    {
-      return bss_sbrk (increment);
-    }
-#endif
 #ifdef HAVE_SBRK
   void *result = (void *) __sbrk (increment);
   if (result != (void *) -1)
@@ -1525,7 +1484,8 @@ gdefault_morecore (ptrdiff_t increment)
 
 void *(*__morecore) (ptrdiff_t) = gdefault_morecore;
 
-/* Copyright (C) 1991, 92, 93, 94, 95, 96 Free Software Foundation, Inc.
+/* Copyright (C) 1991-1992, 1994, 2025-2026 Free Software Foundation,
+ * Inc.
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License as
@@ -1611,7 +1571,6 @@ aligned_alloc (size_t alignment, size_t size)
 	{
 	  l->exact = result;
 	  result = l->aligned = (char *) result + adj;
-	  result = ptr_bounds_clip (result, size);
 	}
       UNLOCK_ALIGNED_BLOCKS ();
       if (l == NULL)
@@ -1625,7 +1584,6 @@ aligned_alloc (size_t alignment, size_t size)
 }
 
 /* Note that memalign and posix_memalign are not used in Emacs.  */
-#ifndef HYBRID_MALLOC
 /* An obsolete alias for aligned_alloc, for any old libraries that use
    this alias.  */
 
@@ -1635,8 +1593,6 @@ memalign (size_t alignment, size_t size)
   return aligned_alloc (alignment, size);
 }
 
-/* If HYBRID_MALLOC is defined, we may want to use the system
-   posix_memalign below.  */
 int
 posix_memalign (void **memptr, size_t alignment, size_t size)
 {
@@ -1655,10 +1611,10 @@ posix_memalign (void **memptr, size_t alignment, size_t size)
 
   return 0;
 }
-#endif
 
 /* Allocate memory on a page boundary.
-   Copyright (C) 1991, 92, 93, 94, 96 Free Software Foundation, Inc.
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
+   Software Foundation, Inc.
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License as
@@ -1676,18 +1632,16 @@ License along with this library.  If not, see <https://www.gnu.org/licenses/>.
    The author may be reached (Email) at the address mike@ai.mit.edu,
    or (US mail) as Mike Haertel c/o Free Software Foundation.  */
 
-#ifndef HYBRID_MALLOC
-
-# ifndef HAVE_MALLOC_H
+#ifndef HAVE_MALLOC_H
 /* Allocate SIZE bytes on a page boundary.  */
 extern void *valloc (size_t);
-# endif
+#endif
 
-# if defined _SC_PAGESIZE || !defined HAVE_GETPAGESIZE
-#  include "getpagesize.h"
-# elif !defined getpagesize
+#if defined _SC_PAGESIZE || !defined HAVE_GETPAGESIZE
+# include "getpagesize.h"
+#elif !defined getpagesize
 extern int getpagesize (void);
-# endif
+#endif
 
 static size_t pagesize;
 
@@ -1699,113 +1653,12 @@ valloc (size_t size)
 
   return aligned_alloc (pagesize, size);
 }
-#endif /* HYBRID_MALLOC */
 
 #undef malloc
 #undef realloc
 #undef calloc
 #undef aligned_alloc
 #undef free
-
-#ifdef HYBRID_MALLOC
-/* Declare system malloc and friends.  */
-extern void *malloc (size_t size);
-extern void *realloc (void *ptr, size_t size);
-extern void *calloc (size_t nmemb, size_t size);
-extern void free (void *ptr);
-#ifdef HAVE_ALIGNED_ALLOC
-extern void *aligned_alloc (size_t alignment, size_t size);
-#elif defined HAVE_POSIX_MEMALIGN
-extern int posix_memalign (void **memptr, size_t alignment, size_t size);
-#endif
-
-/* Assuming PTR was allocated via the hybrid malloc, return true if
-   PTR was allocated via gmalloc, not the system malloc.  Also, return
-   true if _heaplimit is zero; this can happen temporarily when
-   gmalloc calls itself for internal use, and in that case PTR is
-   already known to be allocated via gmalloc.  */
-
-static bool
-allocated_via_gmalloc (void *ptr)
-{
-  size_t block = BLOCK (ptr);
-  size_t blockmax = _heaplimit - 1;
-  return block <= blockmax && _heapinfo[block].busy.type != 0;
-}
-
-/* See the comments near the beginning of this file for explanations
-   of the following functions. */
-
-void *
-hybrid_malloc (size_t size)
-{
-  if (DUMPED)
-    return malloc (size);
-  return gmalloc (size);
-}
-
-void *
-hybrid_calloc (size_t nmemb, size_t size)
-{
-  if (DUMPED)
-    return calloc (nmemb, size);
-  return gcalloc (nmemb, size);
-}
-
-void
-hybrid_free (void *ptr)
-{
-  if (allocated_via_gmalloc (ptr))
-    gfree (ptr);
-  else
-    free (ptr);
-}
-
-#if defined HAVE_ALIGNED_ALLOC || defined HAVE_POSIX_MEMALIGN
-void *
-hybrid_aligned_alloc (size_t alignment, size_t size)
-{
-  if (!DUMPED)
-    return galigned_alloc (alignment, size);
-  /* The following is copied from alloc.c */
-#ifdef HAVE_ALIGNED_ALLOC
-  return aligned_alloc (alignment, size);
-#else  /* HAVE_POSIX_MEMALIGN */
-  void *p;
-  return posix_memalign (&p, alignment, size) == 0 ? p : 0;
-#endif
-}
-#endif
-
-void *
-hybrid_realloc (void *ptr, size_t size)
-{
-  void *result;
-  int type;
-  size_t block, oldsize;
-
-  if (!ptr)
-    return hybrid_malloc (size);
-  if (!allocated_via_gmalloc (ptr))
-    return realloc (ptr, size);
-  if (!DUMPED)
-    return grealloc (ptr, size);
-
-  /* The dumped emacs is trying to realloc storage allocated before
-     dumping via gmalloc.  Allocate new space and copy the data.  Do
-     not bother with gfree (ptr), as that would just waste time.  */
-  block = BLOCK (ptr);
-  type = _heapinfo[block].busy.type;
-  oldsize =
-    type < 0 ? _heapinfo[block].busy.info.size * BLOCKSIZE
-    : (size_t) 1 << type;
-  result = malloc (size);
-  if (result)
-    return memcpy (result, ptr, min (oldsize, size));
-  return result;
-}
-
-#else	/* ! HYBRID_MALLOC */
 
 void *
 malloc (size_t size)
@@ -1837,12 +1690,11 @@ realloc (void *ptr, size_t size)
   return grealloc (ptr, size);
 }
 
-#endif	/* HYBRID_MALLOC */
-
 #ifdef GC_MCHECK
 
 /* Standard debugging hooks for `malloc'.
-   Copyright 1990, 1991, 1992, 1993, 1994 Free Software Foundation, Inc.
+   Copyright (C) 1990-1993, 1995-1996, 1999, 2002-2007, 2013-2026 Free
+   Software Foundation, Inc.
    Written May 1989 by Mike Haertel.
 
 This library is free software; you can redistribute it and/or
@@ -2021,12 +1873,7 @@ mabort (enum mcheck_status status)
   __libc_fatal (msg);
 #else
   fprintf (stderr, "mcheck: %s\n", msg);
-  fflush (stderr);
-# ifdef emacs
   emacs_abort ();
-# else
-  abort ();
-# endif
 #endif
 }
 

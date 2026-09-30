@@ -1,6 +1,6 @@
 -*- coding: utf-8; mode: text; -*-
 
-Copyright (C) 2007-2018 Free Software Foundation, Inc.
+Copyright (C) 2007-2026 Free Software Foundation, Inc.
 See the end of the file for license conditions.
 
 From README.multi-tty in the multi-tty branch.
@@ -117,7 +117,7 @@ with
 
 (Make sure both emacs and emacsclient are multi-tty versions.)
 You'll hopefully have two fully working, independent frames on
-separate terminals. The new frame is closed automatically when you
+separate terminals.  The new frame is closed automatically when you
 finish editing the specified files (C-x #), but delete-frame (C-x 5 0)
 also works.  Of course, you can create frames on more than two tty
 devices.
@@ -171,7 +171,11 @@ preload-emacs "$name" wait
 name="$1"
 waitp="$2"
 screendir="/var/run/screen/S-$USER"
-serverdir="/tmp/emacs$UID"
+if [ "${XDG_RUNTIME_DIR+set}" ]; then
+  serverdir="$XDG_RUNTIME_DIR/emacs"
+else
+  serverdir="${TMPDIR-/tmp}/emacs$UID"
+fi
 emacs=/usr/bin/emacs-multi-tty # Or wherever you installed your multi-tty Emacs
 
 if [ -z "$name" ]; then
@@ -321,7 +325,7 @@ THINGS TO DO
    example, custom's buttons are broken on non-initial device types.
 
 ** Possibly turn off the double C-g feature when there is an X frame.
-   C.f. (emacs)Emergency Escape.
+   Cf. (emacs)Emergency Escape.
 
 ** frames-on-display-list should also accept frames.
 
@@ -398,28 +402,17 @@ THINGS TO DO
 
 ** The single-keyboard mode of MULTI_KBOARD is extremely confusing
    sometimes; Emacs does not respond to stimuli from other keyboards.
-   At least a beep or a message would be important, if the single-mode
-   is still required to prevent interference.  (Reported by Dan
-   Nicolaescu.)
+   (Reported by Dan Nicolaescu.)
 
    Update: selecting a region with the mouse enables single_kboard
    under X.  This is very confusing.
 
    Update: After discussions with Richard Stallman, this will be
-   resolved by having locked displays warn the user to wait, and
-   introducing a complex protocol to remotely bail out of
+   resolved introducing a complex protocol to remotely bail out of
    single-kboard mode by pressing C-g.
 
-   Update: Warning the user is not trivial to implement, as Emacs has
-   only one echo area, shared by all frames.  Ideally the warning
-   should not be displayed on the display that is locking the others.
-   Perhaps the high probability of user confusion caused by
-   single_kboard mode deserves a special case in the display code.
-   Alternatively, it might be good enough to signal single_kboard mode
-   by changing the modelines or some other frame-local display element
-   on the locked out displays.
-
-   Update: In fact struct kboard does have an echo_string slot.
+   Update (from spwhitton): We have instead added the new
+   'multiple-terminals-merge-keyboards' user option (bug#79892).
 
 ** The session management module is prone to crashes when the X
    connection is closed and then later I try to connect to a new X
@@ -470,13 +463,11 @@ THINGS TO DO
    definition.
 
    Exceptions found so far: x-select-text and
-   x-cut-buffer-or-selection-value.
+   x-selection-value.
 
 ** Have a look at fatal_error_hook.
 
 ** Have a look at set_frame_matrix_frame.
-
-** Check if we got term-setup-hook right.
 
 ** I think tip_frame should be display-local.
 
@@ -516,6 +507,8 @@ THINGS TO DO
 ** flow-ctrl.el must be updated.
 
 ** Fix stuff_char for multi-tty.  Doesn't seem to be of high priority.
+   For security reasons stuff_char does not work by default on many
+   platforms, which makes such a fix even lower priority.
 
 DIARY OF CHANGES
 ----------------
@@ -771,7 +764,7 @@ DIARY OF CHANGES
    with it.
 
    (Done, there was a stupid mistake in
-   Ftty_supports_face_attributes_p. Colors are broken, though.)
+   Ftty_supports_face_attributes_p.  Colors are broken, though.)
 
 -- C-x 5 2, C-x 5 o, C-x 5 0 on an emacsclient frame unexpectedly
    exits emacsclient.  This is a result of trying to be clever with
@@ -1078,7 +1071,7 @@ DIARY OF CHANGES
    fine.  Sometimes faces on these screens become garbled.
 
    This only seems to affect displays that are of the same terminfo
-   type as the selected one. Interestingly, in screen Emacs normally
+   type as the selected one.  Interestingly, in screen Emacs normally
    reports the up arrow key as 'M-o A', but after the above SNAFU, it
    complains about 'M-[ a'.  UNIX ttys are a complete mystery to me,
    but it seems the reset-reinitialize cycle somehow leaves the
@@ -1230,7 +1223,7 @@ DIARY OF CHANGES
 -- Understand Emacs's low-level input system (it's black magic) :-)
    What exactly does interrupt_input do?  I tried to disable it for
    raw secondary tty support, but it does not seem to do anything
-   useful.  (Update: Look again. X unconditionally enables this, maybe
+   useful.  (Update: Look again.  X unconditionally enables this, maybe
    that's why raw terminal support is broken again.  I really do need
    to understand input.)
    (Update: I am starting to understand the read_key_sequence->read-char

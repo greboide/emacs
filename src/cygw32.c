@@ -1,5 +1,5 @@
 /* Cygwin support routines.
-   Copyright (C) 2011-2018 Free Software Foundation, Inc.
+   Copyright (C) 2011-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -37,7 +37,7 @@ chdir_to_default_directory (void)
   int old_cwd_fd = emacs_open (".", O_RDONLY | O_DIRECTORY, 0);
 
   if (old_cwd_fd == -1)
-    error ("could not open current directory: %s", strerror (errno));
+    error ("Could not open current directory: %s", strerror (errno));
 
   record_unwind_protect_int (fchdir_unwind, old_cwd_fd);
 
@@ -47,7 +47,7 @@ chdir_to_default_directory (void)
     new_cwd = build_string ("/");
 
   if (chdir (SSDATA (ENCODE_FILE (new_cwd))))
-    error ("could not chdir: %s", strerror (errno));
+    error ("Could not chdir: %s", strerror (errno));
 }
 
 static Lisp_Object
@@ -56,7 +56,7 @@ conv_filename_to_w32_unicode (Lisp_Object in, int absolute_p)
   ssize_t converted_len;
   Lisp_Object converted;
   unsigned flags;
-  int count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
 
   chdir_to_default_directory ();
 
@@ -85,7 +85,7 @@ conv_filename_from_w32_unicode (const wchar_t* in, int absolute_p)
   ssize_t converted_len;
   Lisp_Object converted;
   unsigned flags;
-  int count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
 
   chdir_to_default_directory ();
 
@@ -115,7 +115,7 @@ For the reverse operation, see `cygwin-convert-file-name-from-windows'.  */)
   (Lisp_Object file, Lisp_Object absolute_p)
 {
   return from_unicode (
-    conv_filename_to_w32_unicode (file, EQ (absolute_p, Qnil) ? 0 : 1));
+    conv_filename_to_w32_unicode (file, NILP (absolute_p) ? 0 : 1));
 }
 
 DEFUN ("cygwin-convert-file-name-from-windows",
@@ -128,7 +128,7 @@ For the reverse operation, see `cygwin-convert-file-name-to-windows'.  */)
   (Lisp_Object file, Lisp_Object absolute_p)
 {
   return conv_filename_from_w32_unicode (to_unicode (file, &file),
-                                         EQ (absolute_p, Qnil) ? 0 : 1);
+					 NILP (absolute_p) ? 0 : 1);
 }
 
 void

@@ -1,10 +1,11 @@
-;;; webjump.el --- programmable Web hotlist
+;;; webjump.el --- programmable Web hotlist  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1996-1997, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996-1997, 2001-2026 Free Software Foundation, Inc.
 
-;; Author:    Neil W. Van Dyke <nwv@acm.org>
-;; Created:   09-Aug-1996
-;; Keywords:  comm www
+;; Author:     Neil W. Van Dyke <nwv@acm.org>
+;; Maintainer: emacs-devel@gnu.org
+;; Created:    09-Aug-1996
+;; Keywords:   comm www
 
 ;; This file is part of GNU Emacs.
 
@@ -40,14 +41,13 @@
 
 ;; You may wish to add something like the following to your init file:
 ;;
-;;   (require 'webjump)
-;;   (global-set-key "\C-cj" 'webjump)
-;;   (setq webjump-sites
-;;         (append '(
-;;                   ("My Home Page" . "www.someisp.net/users/joebobjr/")
-;;                   ("Pop's Site"   . "www.joebob-and-son.com/")
-;;                   )
-;;                 webjump-sample-sites))
+;;   (keymap-global-set "C-c j" #'webjump)
+;;   (setopt webjump-sites
+;;           (append '(
+;;                     ("My Home Page" . "www.someisp.net/users/joebobjr/")
+;;                     ("Pop's Site"   . "www.joebob-and-son.com/")
+;;                     )
+;;                   webjump-sample-sites))
 ;;
 ;; The above loads this package, binds `C-c j' to invoke WebJump, and adds your
 ;; personal favorite sites to the hotlist.
@@ -61,6 +61,13 @@
 
 ;;; Code:
 
+;; TODO:
+;; - Add a menu bar and tool bar for this library.
+;; - Add commands to create/delete link from the hotlist.
+;; - Add something like a bookmark folder in modern browsers.
+;;    - Add a command that can open/follow all links in a folder.
+;; - Add tags for Web sites in the hotlist.
+
 ;;-------------------------------------------------------- Package Dependencies
 
 (require 'browse-url)
@@ -72,6 +79,14 @@
   :prefix "webjump-"
   :group 'browse-url)
 
+(defcustom webjump-use-internal-browser nil
+  "Whether or not to force the use of an internal browser.
+If non-nil, WebJump will always use an internal browser (such as
+EWW or xwidget-webkit) to open web pages, as opposed to an
+external browser like IceCat."
+  :version "29.1"
+  :type 'boolean)
+
 (defconst webjump-sample-sites
   '(
     ;; FSF, not including Emacs-specific.
@@ -79,56 +94,35 @@
      ;; GNU FTP Mirror List from https://www.gnu.org/order/ftp.html
      [mirrors "https://ftp.gnu.org/pub/gnu/"
               "https://ftpmirror.gnu.org"])
-    ("GNU Project Home Page" . "www.gnu.org")
+    ("GNU Project Website" . "https://www.gnu.org")
 
     ;; Emacs.
-    ("Emacs Home Page" .
-     "www.gnu.org/software/emacs/emacs.html")
+    ("Emacs Website" .
+     "https://www.gnu.org/software/emacs/emacs.html")
     ("Savannah Emacs page" .
-     "savannah.gnu.org/projects/emacs")
-    ("Emacs Lisp List" .
-     "www.damtp.cam.ac.uk/user/eglen/emacs/ell.html")
+     "https://savannah.gnu.org/projects/emacs")
     ("Emacs Wiki" .
-     [simple-query "www.emacswiki.org"
-		   "www.emacswiki.org/cgi-bin/wiki/" ""])
+     [simple-query "https://www.emacswiki.org"
+		   "https://www.emacswiki.org/cgi-bin/wiki/" ""])
 
     ;; Internet search engines.
     ("DuckDuckGo" .
-     [simple-query "duckduckgo.com"
-		   "duckduckgo.com/?q=" ""])
-    ("Google" .
-     [simple-query "www.google.com"
-		   "www.google.com/search?q=" ""])
-    ("Google Groups" .
-     [simple-query "groups.google.com"
-		   "groups.google.com/groups?q=" ""])
-    ("Yahoo" .
-     [simple-query "www.yahoo.com" "search.yahoo.com/search?p=" ""])
-    ("Yahoo: Reference" . "www.yahoo.com/Reference/")
+     [simple-query "https://duckduckgo.com"
+		   "https://duckduckgo.com/?q=" ""])
     ("Wikipedia" .
-     [simple-query "wikipedia.org" "wikipedia.org/wiki/" ""])
-
-    ;; Misc. general interest.
-    ("National Weather Service" . webjump-to-iwin)
-    ("Usenet FAQs" .
-     "www.faqs.org/faqs/")
-    ("RTFM Usenet FAQs by Group" .
-     "ftp://rtfm.mit.edu/pub/usenet-by-group/")
-    ("RTFM Usenet FAQs by Hierarchy" .
-     "ftp://rtfm.mit.edu/pub/usenet-by-hierarchy/")
-    ("X Consortium Archive" . "ftp.x.org")
+     [simple-query "https://wikipedia.org"
+                   "https://wikipedia.org/w/?search=" ""])
 
     ;; Computer social issues, privacy, professionalism.
-    ("Association for Computing Machinery" . "www.acm.org")
-    ("Computer Professionals for Social Responsibility" . "www.cpsr.org")
-    ("Electronic Frontier Foundation" . "www.eff.org")
-    ("IEEE Computer Society" . "www.computer.org")
+    ("Association for Computing Machinery" . "https://www.acm.org")
+    ("Computer Professionals for Social Responsibility" . "http://www.cpsr.org")
+    ("Electronic Frontier Foundation" . "https://www.eff.org")
+    ("IEEE Computer Society" . "https://www.computer.org")
     ("Risks Digest" . webjump-to-risks)
 
     ;; More.
     ("Supplemental Web site list for webjump" .
-     "www.neilvandyke.org/webjump/")
-
+     "https://www.neilvandyke.org/webjump/")
     )
   "Sample hotlist for WebJump.
 See the documentation for `webjump' and `webjump-sites'.")
@@ -150,6 +144,7 @@ See the documentation for `webjump' and `webjump-sites'.")
     ("Utah" . "ut") ("Vermont" . "vt") ("Virginia" . "va")
     ("Washington" . "wa") ("West Virginia" . "wv") ("Wisconsin" . "wi")
     ("Wyoming" . "wy")))
+(make-obsolete-variable 'webjump-state-to-postal-alist nil "31.1")
 
 ;;------------------------------------------------------------ Option Variables
 
@@ -182,7 +177,7 @@ If the symbol of a function is given, then the function will be called with the
 Web site name (the one you specified in the CAR of the alist cell) as a
 parameter.  This might come in handy for various kludges.
 
-For convenience, if the `http://', `ftp://', or `file://' prefix is missing
+For convenience, if the `https://', `ftp://', or `file://' prefix is missing
 from a URL, WebJump will make a guess at what you wanted and prepend it before
 submitting the URL."
   :type '(alist :key-type (string :tag "Name")
@@ -198,6 +193,7 @@ submitting the URL."
 ;;------------------------------------------------------- Sample Site Functions
 
 (defun webjump-to-iwin (name)
+  (declare (obsolete nil "31.1"))
   (let* ((prefix "http://www.nws.noaa.gov/view/")
          (state (webjump-read-choice name "state"
                                      (append '(("Puerto Rico" . "pr")
@@ -250,19 +246,22 @@ Please submit bug reports and other feedback to the author, Neil W. Van Dyke
 		(completing-read "WebJump to site: " webjump-sites nil t)
 		webjump-sites t))
 	 (name (car item))
-	 (expr (cdr item)))
-    (browse-url (webjump-url-fix
-		 (cond ((not expr) "")
-		       ((stringp expr) expr)
-		       ((vectorp expr) (webjump-builtin expr name))
-		       ((listp expr) (eval expr))
-		       ((symbolp expr)
-			(if (fboundp expr)
-			    (funcall expr name)
-			  (error "WebJump URL function \"%s\" undefined"
-				 expr)))
-		       (t (error "WebJump URL expression for \"%s\" invalid"
-				 name)))))))
+         (expr (cdr item))
+         (fun (if webjump-use-internal-browser
+                  (apply-partially #'browse-url-with-browser-kind 'internal)
+                #'browse-url)))
+    (funcall fun (webjump-url-fix
+                  (cond ((not expr) "")
+                        ((stringp expr) expr)
+                        ((vectorp expr) (webjump-builtin expr name))
+                        ((listp expr) (eval expr t))
+                        ((symbolp expr)
+                         (if (fboundp expr)
+                             (funcall expr name)
+                           (error "WebJump URL function \"%s\" undefined"
+                                  expr)))
+                        (t (error "WebJump URL expression for \"%s\" invalid"
+                                  name)))))))
 
 (defun webjump-builtin (expr name)
   (if (< (length expr) 1)
@@ -323,8 +322,7 @@ Please submit bug reports and other feedback to the author, Neil W. Van Dyke
 
 (defun webjump-read-url-choice (what urls &optional default)
   ;; Note: Convert this to use `webjump-read-choice' someday.
-  (let* ((completions (mapcar (function (lambda (n) (cons n n)))
-                              urls))
+  (let* ((completions (mapcar (lambda (n) (cons n n)) urls))
 	 (input (completing-read (concat what
                                          ;;(if default " (RET for default)" "")
                                          ": ")
@@ -342,10 +340,9 @@ Please submit bug reports and other feedback to the author, Neil W. Van Dyke
   (mapconcat (lambda (c)
                (let ((s (char-to-string c)))
                  (cond ((string= s " ") "+")
-                       ((string-match "[a-zA-Z_.-/]" s) s)
+		       ((string-match "[a-zA-Z_./~-]" s) s)
                        (t (upcase (format "%%%02x" c))))))
-             (encode-coding-string str 'utf-8)
-             ""))
+             (encode-coding-string str 'utf-8)))
 
 (defun webjump-url-fix (url)
   (if (webjump-null-or-blank-string-p url)
@@ -355,9 +352,11 @@ Please submit bug reports and other feedback to the author, Neil W. Van Dyke
       ((string-match "^[a-zA-Z]+:" url) url)
       ((string-match "^/" url) (concat "file://" url))
       ((string-match "^\\([^\\./]+\\)" url)
+       ;; FIXME: ftp.gnu.org and many others now prefer HTTPS instead
+       ;;        of FTP.  Does this heuristic make sense these days?
        (concat (if (string= (downcase (match-string 1 url)) "ftp")
 		   "ftp"
-		 "http")
+                 "https")
 	       "://"
 	       url))
       (t url)))))

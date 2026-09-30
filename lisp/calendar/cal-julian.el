@@ -1,9 +1,9 @@
-;;; cal-julian.el --- calendar functions for the Julian calendar
+;;; cal-julian.el --- calendar functions for the Julian calendar  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1995, 1997, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1995, 1997, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Edward M. Reingold <reingold@cs.uiuc.edu>
-;; Maintainer: Glenn Morris <rgm@gnu.org>
+;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: calendar
 ;; Human-Keywords: Julian calendar, Julian day number, calendar, diary
 ;; Package: calendar
@@ -95,32 +95,32 @@ Driven by the variable `calendar-date-display-form'."
   "Move cursor to Julian DATE; echo Julian date unless NOECHO is non-nil."
   (interactive
    (let* ((today (calendar-current-date))
-          (year (calendar-read
-                 "Julian calendar year (>0): "
+          (year (calendar-read-sexp
+                 "Julian calendar year (>0)"
                  (lambda (x) (> x 0))
-                 (number-to-string
-                  (calendar-extract-year
-                   (calendar-julian-from-absolute
-                    (calendar-absolute-from-gregorian
-                     today))))))
+                 (calendar-extract-year
+                  (calendar-julian-from-absolute
+                   (calendar-absolute-from-gregorian
+                    today)))))
           (month-array calendar-month-name-array)
           (completion-ignore-case t)
           (month (cdr (assoc-string
                        (completing-read
                         "Julian calendar month name: "
-                        (mapcar 'list (append month-array nil))
+                        (append month-array nil)
                         nil t)
                        (calendar-make-alist month-array 1) t)))
           (last
            (if (and (zerop (% year 4)) (= month 2))
                29
              (aref [31 28 31 30 31 30 31 31 30 31 30 31] (1- month))))
-          (day (calendar-read
-                (format "Julian calendar day (%d-%d): "
-                        (if (and (= year 1) (= month 1)) 3 1) last)
+          (day (calendar-read-sexp
+                "Julian calendar day (%d-%d)"
                 (lambda (x)
                   (and (< (if (and (= year 1) (= month 1)) 2 0) x)
-                       (<= x last))))))
+                       (<= x last)))
+                (if (and (= year 1) (= month 1)) 3 1)
+                (if (and (= year 1) (= month 1)) 3 1) last)))
      (list (list month day year))))
   (calendar-goto-date (calendar-gregorian-from-absolute
                        (calendar-julian-to-absolute date)))
@@ -132,15 +132,10 @@ Driven by the variable `calendar-date-display-form'."
 If MONTH, DAY (Julian) is visible, the value returned is corresponding
 Gregorian date in the form of the list (((month day year) STRING)).  Returns
 nil if it is not visible in the current calendar window."
-  (let ((gdate (calendar-nongregorian-visible-p
+  (let ((dates (calendar-nongregorian-date-visible-p
                 month day 'calendar-julian-to-absolute
-                'calendar-julian-from-absolute
-                ;; In the Gregorian case, we'd use the lower year when
-                ;; month >= 11. In the Julian case, there is an offset
-                ;; of two weeks (ie 1 Nov Greg = 19 Oct Julian). So we
-                ;; use month >= 10, since it can't cause any problems.
-                (lambda (m) (< m 10)))))
-    (if gdate (list (list gdate string)))))
+                'calendar-julian-from-absolute)))
+    (mapcar (lambda (d) (list d string)) dates)))
 
 ;;;###cal-autoload
 (defun calendar-astro-to-absolute (d)
@@ -173,28 +168,37 @@ Defaults to today's date if DATE is not given."
 (defun calendar-astro-goto-day-number (daynumber &optional noecho)
   "Move cursor to astronomical (Julian) DAYNUMBER.
 Echo astronomical (Julian) day number unless NOECHO is non-nil."
-  (interactive (list (calendar-read
-                      "Astronomical (Julian) day number (>1721425): "
-                      (lambda (x) (> x 1721425)))))
+  (interactive (list (calendar-read-sexp
+                      "Astronomical (Julian) day number (>1721425)"
+                      (lambda (x) (> x 1721425))
+                      1721426)))
   (calendar-goto-date
    (calendar-gregorian-from-absolute
     (floor
      (calendar-astro-to-absolute daynumber))))
   (or noecho (calendar-astro-print-day-number)))
 
-
-(defvar date)
-
-;; To be called from diary-list-sexp-entries, where DATE is bound.
 ;;;###diary-autoload
 (defun diary-julian-date ()
   "Julian calendar equivalent of date diary entry."
+  ;; This function is designed to be used in sexp diary entries, and
+  ;; may be present in users' diary files, so suppress the warning
+  ;; about this prefix-less dynamic variable.  It's called from
+  ;; `diary-list-sexp-entries', which binds the variable.
+  (with-suppressed-warnings ((lexical date))
+    (defvar date))
   (format "Julian date: %s" (calendar-julian-date-string date)))
 
 ;; To be called from diary-list-sexp-entries, where DATE is bound.
 ;;;###diary-autoload
 (defun diary-astro-day-number ()
   "Astronomical (Julian) day number diary entry."
+  ;; This function is designed to be used in sexp diary entries, and
+  ;; may be present in users' diary files, so suppress the warning
+  ;; about this prefix-less dynamic variable.  It's called from
+  ;; `diary-list-sexp-entries', which binds the variable.
+  (with-suppressed-warnings ((lexical date))
+    (defvar date))
   (format "Astronomical (Julian) day number at noon UTC: %s.0"
           (calendar-astro-date-string date)))
 

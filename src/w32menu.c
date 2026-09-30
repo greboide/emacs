@@ -1,5 +1,5 @@
 /* Menu support for GNU Emacs on the Microsoft Windows API.
-   Copyright (C) 1986, 1988, 1993-1994, 1996, 1998-1999, 2001-2018 Free
+   Copyright (C) 1986, 1988, 1993-1994, 1996, 1998-1999, 2001-2026 Free
    Software Foundation, Inc.
 
 This file is part of GNU Emacs.
@@ -30,6 +30,7 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "buffer.h"
 #include "coding.h"	/* for ENCODE_SYSTEM */
 #include "menu.h"
+#include "pdumper.h"
 
 /* This may include sys/types.h, and that somehow loses
    if this is not done before the other system files.  */
@@ -51,6 +52,9 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 
 #include "w32common.h"	/* for osinfo_cache */
 
+#include "commctrl.h"
+
+/* This only applies to OS versions prior to Vista.  */
 #undef HAVE_DIALOGS /* TODO: Implement native dialogs.  */
 
 #ifndef TRUE
@@ -76,17 +80,81 @@ typedef int (WINAPI * MessageBoxW_Proc) (
     IN const WCHAR *caption,
     IN UINT type);
 
+#ifndef MINGW_W64
+/* mingw.org's MinGW doesn't have this in its header files.  */
+  typedef int TASKDIALOG_COMMON_BUTTON_FLAGS;
+
+  typedef int TASKDIALOG_FLAGS;
+
+  typedef HRESULT (CALLBACK *PFTASKDIALOGCALLBACK) (
+    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, LONG_PTR lpRefData);
+
+  typedef struct _TASKDIALOG_BUTTON {
+    int nButtonID;
+    PCWSTR pszButtonText;
+  } TASKDIALOG_BUTTON;
+
+  typedef struct _TASKDIALOGCONFIG {
+    UINT cbSize;
+    HWND hwndParent;
+    HINSTANCE hInstance;
+    TASKDIALOG_FLAGS dwFlags;
+    TASKDIALOG_COMMON_BUTTON_FLAGS dwCommonButtons;
+    PCWSTR pszWindowTitle;
+    union {
+      HICON hMainIcon;
+      PCWSTR pszMainIcon;
+    } DUMMYUNIONNAME;
+    PCWSTR pszMainInstruction;
+    PCWSTR pszContent;
+    UINT cButtons;
+    const TASKDIALOG_BUTTON *pButtons;
+    int nDefaultButton;
+    UINT cRadioButtons;
+    const TASKDIALOG_BUTTON *pRadioButtons;
+    int nDefaultRadioButton;
+    PCWSTR pszVerificationText;
+    PCWSTR pszExpandedInformation;
+    PCWSTR pszExpandedControlText;
+    PCWSTR pszCollapsedControlText;
+    union {
+      HICON hFooterIcon;
+      PCWSTR pszFooterIcon;
+    } DUMMYUNIONNAME2;
+    PCWSTR pszFooter;
+    PFTASKDIALOGCALLBACK pfCallback;
+    LONG_PTR lpCallbackData;
+    UINT cxWidth;
+  } TASKDIALOGCONFIG;
+
+# define TDN_CREATED 0
+# define TDM_ENABLE_BUTTON (WM_USER+111)
+# define TDF_ALLOW_DIALOG_CANCELLATION 0x8
+# define TD_INFORMATION_ICON MAKEINTRESOURCEW (-3)
+
+#endif
+
+typedef HRESULT (WINAPI *TaskDialogIndirect_Proc) (
+    IN const TASKDIALOGCONFIG *pTaskConfig,
+    OUT int *pnButton,
+    OUT int *pnRadioButton,
+    OUT BOOL *pfVerificationFlagChecked);
+
 #ifdef NTGUI_UNICODE
-GetMenuItemInfoA_Proc get_menu_item_info = GetMenuItemInfoA;
-SetMenuItemInfoA_Proc set_menu_item_info = SetMenuItemInfoA;
+static GetMenuItemInfoA_Proc get_menu_item_info = GetMenuItemInfoA;
+static SetMenuItemInfoA_Proc set_menu_item_info = SetMenuItemInfoA;
+extern AppendMenuW_Proc unicode_append_menu;
 AppendMenuW_Proc unicode_append_menu = AppendMenuW;
-MessageBoxW_Proc unicode_message_box = MessageBoxW;
+static MessageBoxW_Proc unicode_message_box = MessageBoxW;
 #else /* !NTGUI_UNICODE */
-GetMenuItemInfoA_Proc get_menu_item_info = NULL;
-SetMenuItemInfoA_Proc set_menu_item_info = NULL;
+static GetMenuItemInfoA_Proc get_menu_item_info = NULL;
+static SetMenuItemInfoA_Proc set_menu_item_info = NULL;
+extern AppendMenuW_Proc unicode_append_menu;
 AppendMenuW_Proc unicode_append_menu = NULL;
-MessageBoxW_Proc unicode_message_box = NULL;
+static MessageBoxW_Proc unicode_message_box = NULL;
 #endif /* NTGUI_UNICODE */
+
+static TaskDialogIndirect_Proc task_dialog_indirect;
 
 #ifdef HAVE_DIALOGS
 static Lisp_Object w32_dialog_show (struct frame *, Lisp_Object, Lisp_Object, char **);
@@ -100,14 +168,160 @@ static int fill_in_menu (HMENU, widget_value *);
 
 void w32_free_menu_strings (HWND);
 
+#define TASK_DIALOG_MAX_BUTTONS 10
+
+static HRESULT CALLBACK
+task_dialog_callback (HWND hwnd, UINT msg, WPARAM wParam,
+		      LPARAM lParam, LONG_PTR callback_data)
+{
+  switch (msg)
+    {
+    case TDN_CREATED:
+      /* Disable all buttons with ID >= 2000  */
+      for (int i = 0; i < TASK_DIALOG_MAX_BUTTONS; i++)
+        SendMessage (hwnd, TDM_ENABLE_BUTTON, 2000 + i, FALSE);
+      break;
+    }
+  return S_OK;
+}
+
 Lisp_Object
 w32_popup_dialog (struct frame *f, Lisp_Object header, Lisp_Object contents)
 {
-
+#ifdef NTGUI_UNICODE
+  typedef int (WINAPI *MultiByteToWideChar_Proc)(UINT,DWORD,LPCSTR,int,
+						 LPWSTR, int);
+  static MultiByteToWideChar_Proc pMultiByteToWideChar = MultiByteToWideChar;
+#endif /* NTGUI_UNICODE */
   check_window_system (f);
 
-#ifndef HAVE_DIALOGS
+  if (task_dialog_indirect)
+    {
+      int wide_len;
 
+      CHECK_CONS (contents);
+
+      /* Get the title as an UTF-16 string.  */
+      char *title = SSDATA (ENCODE_UTF_8 (XCAR (contents)));
+      wide_len = (sizeof (WCHAR)
+		  * pMultiByteToWideChar (CP_UTF8, 0, title, -1, NULL, 0));
+      WCHAR *title_w = alloca (wide_len);
+      pMultiByteToWideChar (CP_UTF8, 0, title, -1, title_w, wide_len);
+
+      /* Prepare the arrays with the dialog's buttons and return values.  */
+      TASKDIALOG_BUTTON buttons[TASK_DIALOG_MAX_BUTTONS];
+      Lisp_Object button_values[TASK_DIALOG_MAX_BUTTONS];
+      int button_count = 0;
+      Lisp_Object b = XCDR (contents);
+
+      while (!NILP (b))
+	{
+	  if (button_count >= TASK_DIALOG_MAX_BUTTONS)
+	    {
+	      /* We have too many buttons.  We ignore the rest.  */
+	      break;
+	    }
+
+	  Lisp_Object item = XCAR (b);
+
+	  if (CONSP (item))
+	    {
+	      /* A normal item (text . value)  */
+	      Lisp_Object item_name = XCAR (item);
+	      Lisp_Object item_value = XCDR (item);
+
+	      CHECK_STRING (item_name);
+
+	      item_name = ENCODE_UTF_8 (item_name);
+	      wide_len = (sizeof (WCHAR)
+			  * pMultiByteToWideChar (CP_UTF8, 0, SSDATA (item_name),
+						  -1, NULL, 0));
+	      buttons[button_count].pszButtonText = alloca (wide_len);
+	      pMultiByteToWideChar (CP_UTF8, 0, SSDATA (item_name), -1,
+				    (LPWSTR)
+				    buttons[button_count].pszButtonText,
+				    wide_len);
+	      buttons[button_count].nButtonID = 1000 + button_count;
+	      button_values[button_count++] = item_value;
+	    }
+	  else if (NILP (item))
+	    {
+	      /* A nil item means to put all following items on the
+		 right.  We ignore this.  */
+	    }
+	  else if (STRINGP (item))
+	    {
+	      /* A string item means an unselectable button.  We add a
+	       button, and then need to disable it on the callback.  We
+	       use ids based on 2000 to mark these buttons.  */
+	      Lisp_Object item_name = ENCODE_UTF_8 (item);
+	      wide_len = (sizeof (WCHAR)
+			  * pMultiByteToWideChar (CP_UTF8, 0,
+						  SSDATA (item_name),
+						  -1, NULL, 0));
+	      buttons[button_count].pszButtonText = alloca (wide_len);
+	      pMultiByteToWideChar (CP_UTF8, 0, SSDATA (item_name), -1,
+				    (LPWSTR)
+				    buttons[button_count].pszButtonText,
+				    wide_len);
+	      buttons[button_count].nButtonID = 2000 + button_count;
+	      button_values[button_count++] = Qnil;
+	    }
+	  else
+	    {
+	      error ("Incorrect dialog button specification");
+	      return Qnil;
+	    }
+
+	  b = XCDR (b);
+	}
+
+      int pressed_button = 0;
+
+      TASKDIALOGCONFIG config = { 0 };
+      config.hwndParent = FRAME_W32_WINDOW (f);
+      config.cbSize = sizeof (config);
+      config.hInstance = hinst;
+      config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
+      config.pfCallback = task_dialog_callback;
+      config.pszWindowTitle = L"Question";
+      if (!NILP (header))
+	{
+	  config.pszWindowTitle = L"Information";
+	  config.pszMainIcon = TD_INFORMATION_ICON;
+	}
+
+      config.pszMainInstruction = title_w;
+      config.pButtons = buttons;
+      config.cButtons = button_count;
+
+      if (!SUCCEEDED (task_dialog_indirect (&config, &pressed_button,
+					    NULL, NULL)))
+	quit ();
+
+      int button_index;
+      switch (pressed_button)
+	{
+	case IDOK:
+	  /* This can only happen if no buttons were provided.  The OK
+	     button is automatically added by TaskDialogIndirect in that
+	     case.  */
+	  return Qt;
+	case IDCANCEL:
+	  /* The user closed the dialog without using the buttons.  */
+	  return quit ();
+	default:
+	  /* One of the specified buttons.  */
+	  button_index = pressed_button - 1000;
+	  if (button_index >= 0 && button_index < button_count)
+	    return button_values[button_index];
+	  return quit ();
+	}
+    }
+
+  /* If we get here, TaskDialog is not supported.  Use MessageBox/Menu.  */
+
+#ifndef HAVE_DIALOGS
   /* Handle simple Yes/No choices as MessageBox popups.  */
   if (is_simple_dialog (contents))
     return simple_dialog_show (f, contents, header);
@@ -152,9 +366,9 @@ w32_popup_dialog (struct frame *f, Lisp_Object header, Lisp_Object contents)
    This way we can safely execute Lisp code.  */
 
 void
-x_activate_menubar (struct frame *f)
+w32_activate_menubar (struct frame *f)
 {
-  set_frame_menubar (f, false, true);
+  set_frame_menubar (f, true);
 
   /* Lock out further menubar changes while active.  */
   f->output_data.w32->menubar_active = 1;
@@ -187,7 +401,7 @@ menubar_selection_callback (struct frame *f, void * client_data)
   i = 0;
   while (i < f->menu_bar_items_used)
     {
-      if (EQ (AREF (vector, i), Qnil))
+      if (NILP (AREF (vector, i)))
 	{
 	  subprefix_stack[submenu_depth++] = prefix;
 	  prefix = entry;
@@ -257,12 +471,10 @@ menubar_selection_callback (struct frame *f, void * client_data)
 }
 
 
-/* Set the contents of the menubar widgets of frame F.
-   The argument FIRST_TIME is currently ignored;
-   it is set the first time this is called, from initialize_frame_menubar.  */
+/* Set the contents of the menubar widgets of frame F.  */
 
 void
-set_frame_menubar (struct frame *f, bool first_time, bool deep_p)
+set_frame_menubar (struct frame *f, bool deep_p)
 {
   HMENU menubar_widget = f->output_data.w32->menubar_widget;
   Lisp_Object items;
@@ -286,7 +498,7 @@ set_frame_menubar (struct frame *f, bool first_time, bool deep_p)
 
       struct buffer *prev = current_buffer;
       Lisp_Object buffer;
-      ptrdiff_t specpdl_count = SPECPDL_INDEX ();
+      specpdl_ref specpdl_count = SPECPDL_INDEX ();
       int previous_menu_items_used = f->menu_bar_items_used;
       Lisp_Object *previous_items
 	= (Lisp_Object *) alloca (previous_menu_items_used
@@ -510,7 +722,7 @@ initialize_frame_menubar (struct frame *f)
   /* This function is called before the first chance to redisplay
      the frame.  It has to be, so the frame will have the right size.  */
   fset_menu_bar_items (f, menu_bar_items (FRAME_MENU_BAR_ITEMS (f)));
-  set_frame_menubar (f, true, true);
+  set_frame_menubar (f, true);
 }
 
 /* Get rid of the menu bar of frame F, and free its storage.
@@ -557,10 +769,8 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
   HMENU menu;
   POINT pos;
   widget_value *wv, *save_wv = 0, *first_wv = 0, *prev_wv = 0;
-  widget_value **submenu_stack
-    = (widget_value **) alloca (menu_items_used * sizeof (widget_value *));
-  Lisp_Object *subprefix_stack
-    = (Lisp_Object *) alloca (menu_items_used * word_size);
+  widget_value **submenu_stack;
+  Lisp_Object *subprefix_stack;
   int submenu_depth = 0;
   bool first_pane;
 
@@ -575,6 +785,11 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
       return Qnil;
     }
 
+  USE_SAFE_ALLOCA;
+
+  submenu_stack = SAFE_ALLOCA (menu_items_used * sizeof (widget_value *));
+  subprefix_stack = SAFE_ALLOCA (menu_items_used * word_size);
+
   block_input ();
 
   /* Create a tree of widget_value objects
@@ -588,7 +803,7 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
   i = 0;
   while (i < menu_items_used)
     {
-      if (EQ (AREF (menu_items, i), Qnil))
+      if (NILP (AREF (menu_items, i)))
 	{
 	  submenu_stack[submenu_depth++] = save_wv;
 	  save_wv = prev_wv;
@@ -780,7 +995,7 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
       i = 0;
       while (i < menu_items_used)
 	{
-	  if (EQ (AREF (menu_items, i), Qnil))
+	  if (NILP (AREF (menu_items, i)))
 	    {
 	      subprefix_stack[submenu_depth++] = prefix;
 	      prefix = entry;
@@ -817,6 +1032,7 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
 			  entry = Fcons (subprefix_stack[j], entry);
 		    }
 		  unblock_input ();
+		  SAFE_FREE ();
 		  return entry;
 		}
 	      i += MENU_ITEMS_ITEM_LENGTH;
@@ -831,6 +1047,7 @@ w32_menu_show (struct frame *f, int x, int y, int menuflags,
     }
 
   unblock_input ();
+  SAFE_FREE ();
   return Qnil;
 }
 
@@ -1069,7 +1286,10 @@ is_simple_dialog (Lisp_Object contents)
   if (NILP (Fstring_equal (name, other)))
     return false;
 
-  /* Check there are no more options.  */
+  /* Check there are no more options.
+
+     (FIXME: Since we use MB_YESNOCANCEL, we could also consider
+     dialogs with 3 options: Yes/No/Cancel as "simple".  */
   options = XCDR (options);
   return !(CONSP (options));
 }
@@ -1081,7 +1301,13 @@ simple_dialog_show (struct frame *f, Lisp_Object contents, Lisp_Object header)
   UINT type;
   Lisp_Object lispy_answer = Qnil, temp = XCAR (contents);
 
-  type = MB_YESNO;
+  /* We use MB_YESNOCANCEL to allow the user the equivalent of C-g
+     when the Yes/No question is asked vya y-or-n-p or
+     yes-or-no-p.  */
+  if (w32_yes_no_dialog_show_cancel)
+    type = MB_YESNOCANCEL;
+  else
+    type = MB_YESNO;
 
   /* Since we only handle Yes/No dialogs, and we already checked
      is_simple_dialog, we don't need to worry about checking contents
@@ -1250,7 +1476,7 @@ add_menu_item (HMENU menu, widget_value *wv, HMENU item)
 	  strcpy (p, wv->key);
 	}
       else
-	out_string = (char *)wv->name;
+	out_string = wv->name;
 
       /* Quote any special characters within the menu item's text and
 	 key binding.  */
@@ -1468,7 +1694,7 @@ w32_menu_display_help (HWND owner, HMENU menu, UINT item, UINT flags)
 {
   if (get_menu_item_info)
     {
-      struct frame *f = x_window_to_frame (&one_w32_display_info, owner);
+      struct frame *f = w32_window_to_frame (&one_w32_display_info, owner);
       Lisp_Object frame, help;
 
       /* No help echo on owner-draw menu items, or when the keyboard
@@ -1484,7 +1710,7 @@ w32_menu_display_help (HWND owner, HMENU menu, UINT item, UINT flags)
 	     crash Emacs when we try to display those "strings".  It
 	     is unclear why we get these dwItemData, or what they are:
 	     sometimes they point to a wchar_t string that is the menu
-	     title, sometimes to someting that doesn't look like text
+	     title, sometimes to something that doesn't look like text
 	     at all.  (The problematic data also comes with the 0x0800
 	     bit set, but this bit is not documented, so we don't want
 	     to depend on it.)  */
@@ -1586,6 +1812,7 @@ syms_of_w32menu (void)
   globals_of_w32menu ();
 
   current_popup_menu = NULL;
+  PDUMPER_IGNORE (current_popup_menu);
 
   DEFSYM (Qdebug_on_next_call, "debug-on-next-call");
   DEFSYM (Qunsupported__w32_dialog, "unsupported--w32-dialog");
@@ -1604,12 +1831,20 @@ syms_of_w32menu (void)
 void
 globals_of_w32menu (void)
 {
+  HMODULE comctrl32 = GetModuleHandle ("comctl32.dll");
+  task_dialog_indirect = (TaskDialogIndirect_Proc)
+    get_proc_addr (comctrl32, "TaskDialogIndirect");
+
 #ifndef NTGUI_UNICODE
   /* See if Get/SetMenuItemInfo functions are available.  */
   HMODULE user32 = GetModuleHandle ("user32.dll");
-  get_menu_item_info = (GetMenuItemInfoA_Proc) GetProcAddress (user32, "GetMenuItemInfoA");
-  set_menu_item_info = (SetMenuItemInfoA_Proc) GetProcAddress (user32, "SetMenuItemInfoA");
-  unicode_append_menu = (AppendMenuW_Proc) GetProcAddress (user32, "AppendMenuW");
-  unicode_message_box = (MessageBoxW_Proc) GetProcAddress (user32, "MessageBoxW");
+  get_menu_item_info = (GetMenuItemInfoA_Proc)
+    get_proc_addr (user32, "GetMenuItemInfoA");
+  set_menu_item_info = (SetMenuItemInfoA_Proc)
+    get_proc_addr (user32, "SetMenuItemInfoA");
+  unicode_append_menu = (AppendMenuW_Proc)
+    get_proc_addr (user32, "AppendMenuW");
+  unicode_message_box = (MessageBoxW_Proc)
+    get_proc_addr (user32, "MessageBoxW");
 #endif /* !NTGUI_UNICODE */
 }

@@ -1,6 +1,6 @@
 ;;; frameset.el --- save and restore frame and window setup -*- lexical-binding: t -*-
 
-;; Copyright (C) 2013-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2013-2026 Free Software Foundation, Inc.
 
 ;; Author: Juanma Barranquero <lekktu@gmail.com>
 ;; Keywords: convenience
@@ -179,7 +179,7 @@ Properties can be set with
 
 ;; What's the deal with these "filter alists"?
 ;;
-;; Let's say that Emacs' frame parameters were never designed as a tool to
+;; Let's say that Emacs's frame parameters were never designed as a tool to
 ;; precisely record (or restore) a frame's state.  They grew organically,
 ;; and their uses and behaviors reflect their history.  In using them to
 ;; implement framesets, the unwary implementer, or the prospective package
@@ -200,7 +200,7 @@ Properties can be set with
 ;; - can be ignored by window managers (most positional args, like `height',
 ;;   `width', `left' and `top', and others, like `auto-raise', `auto-lower')
 ;; - can be set externally in X resources or Window registry (again, most
-;;   positional parameters, and also `toolbar-lines', `menu-bar-lines' etc.)
+;;   positional parameters, and also `tool-bar-lines', `menu-bar-lines' etc.)
 ;, - can contain references to live objects (`buffer-list', `minibuffer') or
 ;;   code (`buffer-predicate')
 ;; - are set automatically, and cannot be changed (`window-id', `parent-id'),
@@ -277,7 +277,7 @@ Properties can be set with
 ;;   display they do no harm, but they clutter the parameter alist.
 ;;
 ;; - `minibuffer': It can contain a reference to a live window, which cannot
-;;   be serialized.  Because of Emacs' idiosyncratic treatment of this
+;;   be serialized.  Because of Emacs's idiosyncratic treatment of this
 ;;   parameter, frames created with (minibuffer . t) have a parameter
 ;;   (minibuffer . #<window...>), while frames created with
 ;;   (minibuffer . #<window...>) have (minibuffer . nil), which is madness
@@ -396,17 +396,17 @@ Properties can be set with
 ;; or, if you're only changing a few items,
 ;;
 ;;   (defvar my-filter-alist
-;;     (nconc '((my-param1 . :never)
-;;              (my-param2 . my-filtering-function))
-;;            frameset-filter-alist)
+;;     (append '((my-param1 . :never)
+;;		 (my-param2 . my-filtering-function))
+;;	       frameset-filter-alist)
 ;;     "My brief customized parameter filter alist.")
 ;;
 ;; and pass it to the FILTER arg of the save/restore functions,
 ;; ALWAYS taking care of not modifying the original lists; if you're
 ;; going to do any modifying of my-filter-alist, please use
 ;;
-;;   (nconc '((my-param1 . :never) ...)
-;;          (copy-sequence frameset-filter-alist))
+;;   (append '((my-param1 . :never) ...)
+;;	     (copy-sequence frameset-filter-alist))
 ;;
 ;; One thing you shouldn't forget is that they are alists, so searching
 ;; in them is sequential.  If you just want to change the default of
@@ -436,17 +436,19 @@ Properties can be set with
 
 ;;;###autoload
 (defvar frameset-session-filter-alist
-  '((name            . :never)
-    (left            . frameset-filter-iconified)
-    (minibuffer      . frameset-filter-minibuffer)
-    (top             . frameset-filter-iconified))
+  (append
+   '((left            . frameset-filter-iconified)
+     (minibuffer      . frameset-filter-minibuffer)
+     (top             . frameset-filter-iconified))
+   (mapcar (lambda (p) (cons p :never)) frame-internal-parameters))
   "Minimum set of parameters to filter for live (on-session) framesets.
 DO NOT MODIFY.  See `frameset-filter-alist' for a full description.")
 
 ;;;###autoload
 (defvar frameset-persistent-filter-alist
-  (nconc
+  (append
    '((background-color            . frameset-filter-sanitize-color)
+     (bottom                      . frameset-filter-shelve-param)
      (buffer-list                 . :never)
      (buffer-predicate            . :never)
      (buried-buffer-list          . :never)
@@ -456,23 +458,30 @@ DO NOT MODIFY.  See `frameset-filter-alist' for a full description.")
      (client                      . :never)
      (delete-before               . :never)
      (font                        . frameset-filter-font-param)
+     ;; Don't save font-backend because we cannot guarantee the new
+     ;; session will support the saved backend anyway.  (Bug#38442)
+     (font-backend                . :never)
      (foreground-color            . frameset-filter-sanitize-color)
      (frameset--text-pixel-height . :save)
      (frameset--text-pixel-width  . :save)
      (fullscreen                  . frameset-filter-shelve-param)
+     (GUI:bottom                  . frameset-filter-unshelve-param)
      (GUI:font                    . frameset-filter-unshelve-param)
      (GUI:fullscreen              . frameset-filter-unshelve-param)
      (GUI:height                  . frameset-filter-unshelve-param)
+     (GUI:left                    . frameset-filter-unshelve-param)
+     (GUI:right                   . frameset-filter-unshelve-param)
+     (GUI:top                     . frameset-filter-unshelve-param)
      (GUI:width                   . frameset-filter-unshelve-param)
      (height                      . frameset-filter-shelve-param)
-     (outer-window-id             . :never)
+     (left                        . frameset-filter-shelve-param)
      (parent-frame                . :never)
-     (parent-id                   . :never)
      (mouse-wheel-frame           . :never)
+     (right                       . frameset-filter-shelve-param)
+     (top                         . frameset-filter-shelve-param)
      (tty                         . frameset-filter-tty-to-GUI)
      (tty-type                    . frameset-filter-tty-to-GUI)
      (width                       . frameset-filter-shelve-param)
-     (window-id                   . :never)
      (window-system               . :never))
    frameset-session-filter-alist)
   "Parameters to filter for persistent framesets.
@@ -633,7 +642,7 @@ see `frameset-filter-alist'."
       (not (frameset-switch-to-gui-p parameters))
       (let* ((prefix:p (symbol-name (car current)))
 	     (p (intern (substring prefix:p
-				   (1+ (string-match-p ":" prefix:p)))))
+				   (1+ (string-search ":" prefix:p)))))
 	     (val (cdr current))
 	     (found (assq p filtered)))
 	(if (not found)
@@ -675,7 +684,7 @@ nil while the filtering is done to restore it."
       ;; of a frameset, so we must copy parameters to avoid inadvertent
       ;; modifications.
       (pcase (cdr (assq (car current) filter-alist))
-	(`nil
+	('nil
 	 (push (if saving current (copy-tree current)) filtered))
 	(:never
 	 nil)
@@ -879,7 +888,7 @@ For the description of FORCE-ONSCREEN, see `frameset-restore'.
 When forced onscreen, frames wider than the monitor's workarea are converted
 to fullwidth, and frames taller than the workarea are converted to fullheight.
 NOTE: This only works for non-iconified frames."
-  (pcase-let* ((`(,left ,top ,width ,height) (cl-cdadr (frame-monitor-attributes frame)))
+  (pcase-let* ((`(,left ,top ,width ,height) (cdadr (frame-monitor-attributes frame)))
 	       (right (+ left width -1))
 	       (bottom (+ top height -1))
 	       (fr-left (frameset-compute-pos (frame-parameter frame 'left) left right))
@@ -903,7 +912,7 @@ NOTE: This only works for non-iconified frames."
 		      (< fr-right  left) (> fr-right  right)
 		      (< fr-top    top)  (> fr-top    bottom)))
 	    ;; Displaced to the left, right, above or below the screen.
-	    (`t   (or (> fr-left   right)
+	    ('t   (or (> fr-left   right)
 		      (< fr-right  left)
 		      (> fr-top    bottom)
 		      (< fr-bottom top)))
@@ -970,8 +979,7 @@ is the parameter alist of the frame being restored.  Internal use only."
 	   ;; that frame has already been loaded (which can happen after
 	   ;; M-x desktop-read).
 	   (setq frame (frameset--find-frame-if
-			(lambda (f id)
-			  (frameset-frame-id-equal-p f id))
+			#'frameset-frame-id-equal-p
 			display (frameset-cfg-id parameters)))
 	   ;; If it has not been loaded, and it is not a minibuffer-only frame,
 	   ;; let's look for an existing non-minibuffer-only frame to reuse.
@@ -1010,13 +1018,15 @@ not be changed once the frame has been created.  Internal use only."
   (cl-loop for param in '(left top width height border-width minibuffer)
 	   when (assq param parameters) collect it))
 
-(defun frameset--restore-frame (parameters window-state filters force-onscreen)
+(defun frameset--restore-frame (parameters window-state filters force-onscreen
+                                           &optional dx dy)
   "Set up and return a frame according to its saved state.
 That means either reusing an existing frame or creating one anew.
 PARAMETERS is the frame's parameter alist; WINDOW-STATE is its window state.
 For the meaning of FILTERS and FORCE-ONSCREEN, see `frameset-restore'.
 Internal use only."
   (let* ((fullscreen (cdr (assq 'fullscreen parameters)))
+         (tty-to-GUI (frameset-switch-to-gui-p parameters))
 	 (filtered-cfg (frameset-filter-params parameters filters nil))
 	 (display (cdr (assq 'display filtered-cfg))) ;; post-filtering
 	 alt-cfg frame)
@@ -1093,6 +1103,14 @@ Internal use only."
 	       (not (eq (frame-parameter frame 'visibility) 'icon)))
       (frameset-move-onscreen frame force-onscreen))
 
+    ;; Frames saved on TTY shall be all considered visible when
+    ;; restoring on GUI display.  Also, offset each new such frame
+    ;; relative to the previous one, to make it more visible.
+    (when tty-to-GUI
+      (push '(visibility . t) alt-cfg)
+      (when (and (numberp dx) (numberp dy))
+        (push (cons 'left (+ (frame-parameter frame 'left) dx)) alt-cfg)
+        (push (cons 'top  (+ (frame-parameter frame 'top)  dy)) alt-cfg)))
     ;; Let's give the finishing touches (visibility, maximization).
     (when alt-cfg (modify-frame-parameters frame alt-cfg))
     ;; Now restore window state.
@@ -1103,11 +1121,20 @@ Internal use only."
   "Predicate to sort frame states in an order suitable for creating frames.
 It sorts minibuffer-owning frames before minibufferless ones.
 Internal use only."
-  (pcase-let ((`(,hasmini1 ,id-def1) (assq 'frameset--mini (car state1)))
-	      (`(,hasmini2 ,id-def2) (assq 'frameset--mini (car state2))))
-    (cond ((eq id-def1 t) t)
+  (pcase-let ((`(,hasmini1 . ,id-def1) (cdr (assq 'frameset--mini (car state1))))
+	      (`(,hasmini2 . ,id-def2) (cdr (assq 'frameset--mini (car state2)))))
+    ;; hasmini1 is t when 1st frame has its own minibuffer
+    ;; hasmini2 is t when 2nd frame has its own minibuffer
+    ;; id-def1 is t when 1st minibuffer-owning frame is the default-minibuffer-frame
+    ;;         or frame-id of 1st frame if it's minibufferless
+    ;; id-def2 is t when 2nd minibuffer-owning frame is the default-minibuffer-frame
+    ;;         or frame-id of 2nd frame if it's minibufferless
+    (cond ;; Sort the minibuffer-owning default-minibuffer-frame first
+	  ((eq id-def1 t) t)
 	  ((eq id-def2 t) nil)
-	  ((not (eq hasmini1 hasmini2)) (eq hasmini1 t))
+	  ;; Sort non-default minibuffer-owning frames before minibufferless
+	  ((not (eq hasmini1 hasmini2)) (eq hasmini1 t)) ;; boolean xor
+	  ;; Sort minibufferless frames with frame-id before some remaining
 	  ((eq hasmini1 nil) (or id-def1 id-def2))
 	  (t t))))
 
@@ -1167,7 +1194,8 @@ FORCE-ONSCREEN can be:
 	   - a list (LEFT TOP WIDTH HEIGHT), describing the workarea.
 	   It must return non-nil to force the frame onscreen, nil otherwise.
 
-CLEANUP-FRAMES allows \"cleaning up\" the frame list after restoring a frameset:
+CLEANUP-FRAMES allows \"cleaning up\" the frame list after
+restoring a frameset:
   t        Delete all frames that were not created or restored upon.
   nil      Keep all frames.
   FUNC     A function called with two arguments:
@@ -1195,18 +1223,20 @@ All keyword parameters default to nil."
 	 ;; will decide which ones can be reused, and how to deal with any leftover.
 	 (frameset--reuse-list
 	  (pcase reuse-frames
-	    (`t
+	    ('t
 	     frames)
-	    (`nil
+	    ('nil
 	     nil)
-	    (`match
+	    ('match
 	     (cl-loop for (state) in (frameset-states frameset)
 		      when (frameset-frame-with-id (frameset-cfg-id state) frames)
 		      collect it))
 	    ((pred functionp)
 	     (cl-remove-if-not reuse-frames frames))
 	    (_
-	     (error "Invalid arg :reuse-frames %s" reuse-frames)))))
+	     (error "Invalid arg :reuse-frames %s" reuse-frames))))
+         (dx 0)
+         (dy 0))
 
     ;; Mark existing frames in the map; candidates to reuse are marked as :ignored;
     ;; they will be reassigned later, if chosen.
@@ -1279,11 +1309,21 @@ All keyword parameters default to nil."
 			    (setq mb-window nil)))
 			(when mb-window
 			  (push (cons 'minibuffer mb-window) frame-cfg))))))
+                  ;; Apply small offsets to each frame that came from
+                  ;; a TTY-saved desktop, so that they don't obscure
+                  ;; each other, but only if we don't have real frame
+                  ;; position info from a GUI session in some,
+                  ;; possibly distant, past.
+                  (when (and (frameset-switch-to-gui-p frame-cfg)
+                             (null (cdr (assq 'GUI:top frame-cfg)))
+                             (null (cdr (assq 'GUI:left frame-cfg))))
+                    (setq dx (+ dx 20)
+                          dy (+ dy 10)))
 		  ;; OK, we're ready at last to create (or reuse) a frame and
 		  ;; restore the window config.
 		  (setq frame (frameset--restore-frame frame-cfg window-cfg
 						       (or filters frameset-filter-alist)
-						       force-onscreen))
+						       force-onscreen dx dy))
 		  ;; Now reset any duplicate frameset--id
 		  (when (and duplicate (not (eq frame duplicate)))
 		    (set-frame-parameter duplicate 'frameset--id nil))
@@ -1322,11 +1362,18 @@ All keyword parameters default to nil."
     ;; Clean up the frame list
     (when cleanup-frames
       (let ((map nil)
-	    (cleanup (if (eq cleanup-frames t)
-			 (lambda (frame action)
-			   (when (memq action '(:rejected :ignored))
-			     (delete-frame frame)))
-		       cleanup-frames)))
+	    (cleanup
+             (if (eq cleanup-frames t)
+		 (lambda (frame action)
+		   (when (and (memq action '(:rejected :ignored))
+                              ;; Don't try deleting the daemon's initial
+                              ;; frame, as that would only trigger
+                              ;; warnings.
+                              (not
+                               (and (daemonp) ;; FIXME: Remove `daemonp'?
+                                    (frame-initial-p frame))))
+                     (delete-frame frame)))
+               cleanup-frames)))
 	(maphash (lambda (frame _action) (push frame map)) frameset--action-map)
 	(dolist (frame (sort map
 			     ;; Minibufferless frames must go first to avoid
@@ -1337,6 +1384,16 @@ All keyword parameters default to nil."
 	      (funcall cleanup frame (gethash frame frameset--action-map))
 	    (error
 	     (delay-warning 'frameset (error-message-string err) :warning))))))
+
+    ;; Make sure the frame with last-focus-update has focus.
+    (let ((last-focus-frame
+           (catch 'last-focus
+             (maphash (lambda (frame _)
+                        (when (frame-parameter frame 'last-focus-update)
+                          (throw 'last-focus frame)))
+                      frameset--action-map))))
+      (when last-focus-frame
+        (select-frame-set-input-focus last-focus-frame)))
 
     ;; Make sure there's at least one visible frame.
     (unless (or (daemonp)
@@ -1350,41 +1407,44 @@ All keyword parameters default to nil."
 
 ;; Register support
 
-;;;###autoload
-(defun frameset--jump-to-register (data)
-  "Restore frameset from DATA stored in register.
-Called from `jump-to-register'.  Internal use only."
+(cl-defstruct (frameset-register
+               (:constructor nil)
+               (:constructor frameset-make-register (frameset frame-id point)))
+  frameset frame-id point)
+
+(cl-defmethod register-val-jump-to ((data frameset-register) arg)
   (frameset-restore
-   (aref data 0)
+   (frameset-register-frameset data)
    :filters frameset-session-filter-alist
-   :reuse-frames (if current-prefix-arg t 'match)
-   :cleanup-frames (if current-prefix-arg
+   :reuse-frames (if arg t 'match)
+   :cleanup-frames (if arg
 		       ;; delete frames
-		       nil
+		       t
 		     ;; iconify frames
 		     (lambda (frame action)
 		       (pcase action
-			 (`rejected (iconify-frame frame))
+			 (:rejected (iconify-frame frame))
 			 ;; In the unexpected case that a frame was a candidate
 			 ;; (matching frame id) and yet not restored, remove it
 			 ;; because it is in fact a duplicate.
-			 (`ignored (delete-frame frame))))))
+			 (:ignored (delete-frame frame))))))
 
   ;; Restore selected frame, buffer and point.
-  (let ((frame (frameset-frame-with-id (aref data 1)))
+  (let ((frame (frameset-frame-with-id (frameset-register-frame-id data)))
+        (marker (frameset-register-point data))
 	buffer window)
     (when frame
       (select-frame-set-input-focus frame)
-      (when (and (buffer-live-p (setq buffer (marker-buffer (aref data 2))))
+      (when (and (buffer-live-p
+                  (setq buffer (marker-buffer marker)))
 		 (window-live-p (setq window (get-buffer-window buffer frame))))
 	(set-frame-selected-window frame window)
-	(with-current-buffer buffer (goto-char (aref data 2)))))))
+	(with-current-buffer buffer (goto-char marker))))))
 
-;;;###autoload
-(defun frameset--print-register (data)
+(cl-defmethod register-val-describe ((data frameset-register) _verbose)
   "Print basic info about frameset stored in DATA.
 Called from `list-registers' and `view-register'.  Internal use only."
-  (let* ((fs (aref data 0))
+  (let* ((fs (frameset-register-frameset data))
 	 (ns (length (frameset-states fs))))
     (princ (format "a frameset (%d frame%s, saved on %s)."
 		   ns
@@ -1400,16 +1460,14 @@ Argument is a character, naming the register.
 Interactively, reads the register using `register-read-with-preview'."
   (interactive (list (register-read-with-preview "Frameset to register: ")))
   (set-register register
-		(registerv-make
-		 (vector (frameset-save nil
-					:app 'register
-					:filters frameset-session-filter-alist)
-			 ;; frameset-save does not include the value of point
-			 ;; in the current buffer, so record that separately.
-			 (frameset-frame-id nil)
-			 (point-marker))
-		 :print-func #'frameset--print-register
-		 :jump-func #'frameset--jump-to-register)))
+		(frameset-make-register
+                 (frameset-save nil
+				:app 'register
+				:filters frameset-session-filter-alist)
+		 ;; frameset-save does not include the value of point
+		 ;; in the current buffer, so record that separately.
+		 (frameset-frame-id nil)
+		 (point-marker))))
 
 (provide 'frameset)
 

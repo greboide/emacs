@@ -1,5 +1,5 @@
 /* Interface to libxml2.
-   Copyright (C) 2010-2018 Free Software Foundation, Inc.
+   Copyright (C) 2010-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -31,6 +31,7 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #ifdef WINDOWSNT
 
 # include <windows.h>
+# include "w32common.h"
 # include "w32.h"
 
 DEF_DLL_FN (htmlDocPtr, htmlReadMemory,
@@ -164,7 +165,7 @@ make_dom (xmlNode *node)
   else if (node->type == XML_COMMENT_NODE)
     {
       if (node->content)
-	return list3 (intern ("comment"), Qnil,
+	return list3 (Qcomment, Qnil,
 		      build_string ((char *) node->content));
       else
 	return Qnil;
@@ -185,10 +186,16 @@ parse_region (Lisp_Object start, Lisp_Object end, Lisp_Object base_url,
 
   xmlCheckVersion (LIBXML_VERSION);
 
+  if (NILP (start))
+    start = Fpoint_min ();
+
+  if (NILP (end))
+    end = Fpoint_max ();
+
   validate_region (&start, &end);
 
-  istart = XINT (start);
-  iend = XINT (end);
+  istart = XFIXNUM (start);
+  iend = XFIXNUM (end);
   istart_byte = CHAR_TO_BYTE (istart);
   iend_byte = CHAR_TO_BYTE (iend);
 
@@ -268,9 +275,15 @@ xml_cleanup_parser (void)
 
 DEFUN ("libxml-parse-html-region", Flibxml_parse_html_region,
        Slibxml_parse_html_region,
-       2, 4, 0,
+       0, 4, 0,
        doc: /* Parse the region as an HTML document and return the parse tree.
-If BASE-URL is non-nil, it is used to expand relative URLs.
+If START is nil, it defaults to `point-min'.  If END is nil, it
+defaults to `point-max'.
+
+If BASE-URL is non-nil, it is used if and when reporting errors and
+warnings from the underlying libxml2 library.  Currently, errors and
+warnings from the library are suppressed, so this argument is largely
+ignored.
 
 If you want comments to be stripped, use the `xml-remove-comments'
 function to strip comments before calling this function.  */)
@@ -283,9 +296,15 @@ function to strip comments before calling this function.  */)
 
 DEFUN ("libxml-parse-xml-region", Flibxml_parse_xml_region,
        Slibxml_parse_xml_region,
-       2, 4, 0,
+       0, 4, 0,
        doc: /* Parse the region as an XML document and return the parse tree.
-If BASE-URL is non-nil, it is used to expand relative URLs.
+If START is nil, it defaults to `point-min'.  If END is nil, it
+defaults to `point-max'.
+
+If BASE-URL is non-nil, it is used if and when reporting errors and
+warnings from the underlying libxml2 library.  Currently, errors and
+warnings from the library are suppressed, so this argument is largely
+ignored.
 
 If you want comments to be stripped, use the `xml-remove-comments'
 function to strip comments before calling this function.  */)
@@ -334,4 +353,6 @@ syms_of_xml (void)
   defsubr (&Slibxml_parse_xml_region);
 #endif
   defsubr (&Slibxml_available_p);
+
+  DEFSYM (Qcomment, "comment");
 }

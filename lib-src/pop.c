@@ -1,6 +1,6 @@
 /* pop.c: client routines for talking to a POP3-protocol post-office server
 
-Copyright (C) 1991, 1993, 1996-1997, 1999, 2001-2018 Free Software
+Copyright (C) 1991, 1993, 1996-1997, 1999, 2001-2026 Free Software
 Foundation, Inc.
 
 Author: Jonathan Kamens <jik@security.ov.com>
@@ -30,8 +30,12 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "ntlib.h"
 #undef _WIN32_WINNT
 #define _WIN32_WINNT 0x0501	/* for getaddrinfo stuff */
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#if defined __MINGW32_VERSION && __MINGW32_VERSION >= 5000002L
+# include <windows.h>
+#else
+# include <winsock2.h>
+#endif
+# include <ws2tcpip.h>
 #undef getaddrinfo
 #define getaddrinfo  sys_getaddrinfo
 #undef freeaddrinfo
@@ -281,7 +285,7 @@ pop_open (char *host, char *username, char *password, int flags)
   /*
    * I really shouldn't use the pop_error variable like this, but....
    */
-  if (strlen (username) > ERROR_MAX - 6)
+  if (strnlen (username, ERROR_MAX - 6 + 1) == ERROR_MAX - 6 + 1)
     {
       pop_close (server);
       strcpy (pop_error,
@@ -295,7 +299,7 @@ pop_open (char *host, char *username, char *password, int flags)
       return (0);
     }
 
-  if (strlen (password) > ERROR_MAX - 6)
+  if (strnlen (password, ERROR_MAX - 6 + 1) == ERROR_MAX - 6 + 1)
     {
       pop_close (server);
       strcpy (pop_error,
@@ -971,10 +975,8 @@ static int
 socket_connection (char *host, int flags)
 {
   struct addrinfo *res, *it;
-  struct addrinfo hints;
   int ret;
   struct servent *servent;
-  struct sockaddr_in addr;
   char found_port = 0;
   const char *service;
   int sock;
@@ -1008,15 +1010,14 @@ socket_connection (char *host, int flags)
   }
 #endif
 
-  memset (&addr, 0, sizeof (addr));
-  addr.sin_family = AF_INET;
-
   /** "kpop" service is  never used: look for 20060515 to see why **/
 #ifdef KERBEROS
   service = (flags & POP_NO_KERBEROS) ? POP_SERVICE : KPOP_SERVICE;
 #else
   service = POP_SERVICE;
 #endif
+
+  struct sockaddr_in addr = {.sin_family = AF_INET};
 
 #ifdef HESIOD
   if (! (flags & POP_NO_HESIOD))
@@ -1059,10 +1060,12 @@ socket_connection (char *host, int flags)
 
     }
 
-  memset (&hints, 0, sizeof (hints));
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_CANONNAME;
-  hints.ai_family = AF_INET;
+  struct addrinfo hints =
+    {
+      .ai_socktype = SOCK_STREAM,
+      .ai_flags = AI_CANONNAME,
+      .ai_family = AF_INET,
+    };
   do
     {
       ret = getaddrinfo (host, service, &hints, &res);
@@ -1271,7 +1274,7 @@ pop_getline (popserver server, char **line)
       server->buffer_index = 0;
     }
 
-  while (1)
+  while (true)
     {
       /* There's a "- 1" here to leave room for the null that we put
          at the end of the read data below.  We put the null there so
@@ -1284,7 +1287,7 @@ pop_getline (popserver server, char **line)
 	    {
 	      strcpy (pop_error, "Out of memory in pop_getline");
 	      pop_trash (server);
-	      return (-1);
+	      break;
 	    }
 	}
       ret = RECV (server->file, server->buffer + server->data,
@@ -1294,13 +1297,13 @@ pop_getline (popserver server, char **line)
 	  snprintf (pop_error, ERROR_MAX, "%s%s",
 		    GETLINE_ERROR, strerror (errno));
 	  pop_trash (server);
-	  return (-1);
+	  break;
 	}
       else if (ret == 0)
 	{
 	  strcpy (pop_error, "Unexpected EOF from server in pop_getline");
 	  pop_trash (server);
-	  return (-1);
+	  break;
 	}
       else
 	{
@@ -1328,7 +1331,7 @@ pop_getline (popserver server, char **line)
 	}
     }
 
-  /* NOTREACHED */
+  return -1;
 }
 
 /*
@@ -1561,9 +1564,10 @@ find_crlf (char *in_string, int len)
 /* The following 2 functions are only available since XP, so we load
    them dynamically and provide fallbacks.  */
 
-int (WINAPI *pfn_getaddrinfo) (const char *, const char *,
-			       const struct addrinfo *, struct addrinfo **);
-void (WINAPI *pfn_freeaddrinfo) (struct addrinfo *);
+static int (WINAPI *pfn_getaddrinfo) (const char *, const char *,
+				      const struct addrinfo *,
+				      struct addrinfo **);
+static void (WINAPI *pfn_freeaddrinfo) (struct addrinfo *);
 
 static int
 load_ws2 (void)

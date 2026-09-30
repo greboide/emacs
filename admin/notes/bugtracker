@@ -11,6 +11,10 @@ Use M-x report-emacs-bug, or send mail to bug-gnu-emacs@gnu.org.
 If you want to Cc someone, use an "X-Debbugs-Cc" header (or
 pseudo-header, see below) instead.
 
+** How do I read a bug?
+Visit https://debbugs.gnu.org/123 in your web browser or try this in
+Emacs: M-x gnus-read-ephemeral-emacs-bug-group.
+
 ** How do I comment on a bug?
 Reply to a mail on the bug-gnu-emacs list in the normal way.
 Or send a mail to 123@debbugs.gnu.org.
@@ -29,13 +33,13 @@ By mailing commands to control@debbugs.gnu.org.  Place commands at the
 start of the message body, one per line.
 
 severity 123 serious|important|normal|minor|wishlist
-tags 123 moreinfo|unreproducible|wontfix|patch
+tags 123 moreinfo|unreproducible|wontfix|patch|notabug
 
 * More detailed information
 
 For a list of all bugs, see https://debbugs.gnu.org/db/pa/lemacs.html
 This is a static page, updated once a day.  There is also a dynamic
-list, generated on request. This accepts various options, eg to see
+list, generated on request.  This accepts various options, e.g., to see
 the most recent bugs:
 
 https://debbugs.gnu.org/cgi/pkgreport.cgi?newest=100
@@ -72,7 +76,7 @@ cc everyone on replies.)
 
 (Many people think the submitter SHOULD be automatically subscribed
 to subsequent discussion, but this does not seem to be implemented.
-See http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=37078
+See https://bugs.debian.org/37078
 See also https://debbugs.gnu.org/5439 )
 
 Do NOT send a separate copy to the bug list address, since this may
@@ -80,7 +84,7 @@ generate a new report.  The only time to send mail to the bug list
 address is to create a new report.
 
 Gnus users can add the following to message-dont-reply-to-names;
-similarly with Rmail and rmail-dont-reply-to-names:
+similarly with Rmail and mail-dont-reply-to-names:
 
 "\\(emacs-pretest-bug\\|bug-gnu-emacs\\|bug-\\(e\\|gnu\\)macs\\)@gnu\\.org\\|\
 \\(submit\\|control\\|owner\\)@debbugs\\.gnu\\.org"
@@ -94,7 +98,7 @@ you might want to have a dialog with the owner address, outside of
 normal bug reporting.)
 
 ** When reporting a new bug, to send a Cc to another address
-(e.g. bug-cc-mode@gnu.org), do NOT just use a Cc: header.
+(e.g., bug-cc-mode@gnu.org), do NOT just use a Cc: header.
 Instead, use "X-Debbugs-Cc:".  This ensures the Cc address(es) will get a
 mail with the bug report number in.  If you do not do this, each reply
 in the subsequent discussion might end up creating a new bug.
@@ -134,7 +138,8 @@ The "maintainer email address" is "bug-gnu-emacs@gnu.org" in most cases.
 
 ** To not get acknowledgment mail from the tracker,
 add an "X-Debbugs-No-Ack:" header (with any value).  If you use Gnus,
-you can add an element to gnus-posting-styles to do this automatically, eg:
+you can add an element to gnus-posting-styles to do this automatically,
+e.g.:
 
 ("gnu-emacs\\(-pretest\\)?-bug"
    ("X-Debbugs-No-Ack" "yes"))
@@ -151,7 +156,7 @@ Package: emacs
 Version: 23.0.60
 Severity: minor
 
-Remember to fix FOO, as discussed on emacs-devel at http://... .
+Remember to fix FOO, as discussed on emacs-devel at https://... .
 
 ** Not interested in tracker control messages (tags being set, etc)?
 Discard mails matching:
@@ -178,10 +183,10 @@ emacs-bug-tracker mailing list, just pick one or the other.
 ** How to avoid multiple copies of mails.
 If you reply to reports in the normal way, this should work fine.
 Basically, reply only to the numbered bug address (and any individual
-people's addresses). Do not send mail direct to bug-gnu-emacs or
+people's addresses).  Do not send mail direct to bug-gnu-emacs or
 emacs-pretest-bug unless you are reporting a new bug.
 
-** To close bug #123 (for example), send mail
+** To close bug#123 (for example), send mail
 
 To: 123-done@debbugs.gnu.org
 
@@ -207,7 +212,7 @@ that the bug has been closed.  This mail has a header:
 X-GNU-PR-Message: closed 123
 
 4) Send a copy of your mail to the bug-gnu-emacs list in exactly the
-same way as if you had sent mail to "123" (sans -done). This mail has
+same way as if you had sent mail to "123" (sans -done).  This mail has
 headers:
 
 X-GNU-PR-Message: cc-closed 123
@@ -218,14 +223,14 @@ Mail-Followup-To: 123@debbugs.gnu.org, person-who-closed
 ** Setting bug parameters.
 There are two ways to set the parameters of bugs in the database
 (tags, severity level, etc).  When you report a new bug, you can
-provide a "pseudo-header" at the start of the report, eg:
+provide a "pseudo-header" at the start of the report, e.g.:
 
 Package: emacs
 Version: 23.0.60
 Severity: minor
 
 This can also include tags, or any X-Debbugs- setting.
-Some things (e.g. submitter) don't seem to work here.
+Some things (e.g., submitter) don't seem to work here.
 
 Otherwise, send mail to the control server, control@debbugs.gnu.org.
 At the start of the message body, supply the desired commands, one per
@@ -241,21 +246,29 @@ report, and Bcc: the control server (note the commands have no effect
 if you just send them to the bug-report number).  Bcc: is better than Cc:
 in case people use Reply-To-All in response.
 
+For the full documentation of control commands, see
+https://debbugs.gnu.org/server-control.html
+
 Some useful control commands:
+
+*** To close a bug and indicate in what Emacs version it was fixed
+close 123 VERSION
+
+where VERSION is XX.YY numerical version number, like 42.1.
 
 *** To reopen a closed bug:
 reopen 123
 
-*** Bugs can be tagged in various ways (eg wontfix, patch, etc).
+*** Bugs can be tagged in various ways (e.g., wontfix, patch, etc).
 The available tags are:
-patch wontfix moreinfo unreproducible fixed notabug
+patch wontfix moreinfo unreproducible fixed notabug help security confirmed easy
 See https://debbugs.gnu.org/Developer#tags
 The list of tags can be prefixed with +, - or =, meaning to add (the
-default), remove, or reset the tags. E.g.:
+default), remove, or reset the tags.  E.g.:
 
 tags 123 + wontfix
 
-** URL shortcuts
+*** URL shortcuts
 
 https://debbugs.gnu.org/...
 
@@ -266,9 +279,9 @@ from:submitter@email.address
 severity:severity      # all bugs of given severity
 tag:tag                # all bugs with given tag
 
-** Usertags
+*** Usertags
 
-See <http://wiki.debian.org/bugs.debian.org/usertags>
+See <https://wiki.debian.org/bugs.debian.org/usertags>
 
 "Usertags" are very similar to tags: a set of labels that can be added
 to a bug.  There are two differences between normal tags and user tags:
@@ -278,10 +291,9 @@ limited, predefined set of normal tags are available (see above).
 
 2) A usertag is associated with a specific user.  This is normally
 an email address (with an "@" sign and least 4 characters after the "@"),
-but on debbugs.gnu.org, the definition is less strict - anything with
-5 or more alphanumeric characters will work.  For personal tags,
+but on debbugs.gnu.org, it can also be a package name.  For personal tags,
 using an email address is still recommended.  Please only use the
-"emacs" user, or other short users, for "official" tags.
+"emacs" user for "official" tags.
 
 You set usertags in the same way as tags, by talking to the control server.
 One difference is that you can also specify the associated user.
@@ -295,11 +307,11 @@ a) In a control message:
 user emacs      # or email@example.com
 usertags 1234 any-tag-you-like
 
-This will add a usertag "any-tag-you-like" to bug 1234.  The tag will
+This will add a usertag "any-tag-you-like" to bug#1234.  The tag will
 be associated with the user "emacs".  If you omit the first line,
 the tag will be associated with your email address.
 
-The syntax of the usertags command is the same as that of tags (eg wrt
+The syntax of the usertags command is the same as that of tags (e.g., wrt
 the optional [=+-] argument).
 
 b) In an initial submission, in the pseudo-header:
@@ -329,15 +341,15 @@ than one email address, but it does not seem to work for me.)
 **** To find bugs tagged with a specific usertag:
 
 This works just like a normal tags search, but with the addition of a
-"users" field.  Eg:
+"users" field.  E.g.:
 
 https://debbugs.gnu.org/cgi/pkgreport.cgi?users=emacs;tag=calendar
 
 *** To merge bugs:
-Eg when bad replies create a bunch of new bugs for the same report.
-Bugs must all be in the same state (e.g. same package(s) and severity
+e.g., when bad replies create a bunch of new bugs for the same report.
+Bugs must all be in the same state (e.g., same package(s) and severity
 -- see 'reassign' and 'severity' below), but need not have the same
-tags (tags are merged). E.g.:
+tags (tags are merged).  E.g.:
 
 merge 123 124 125 ...
 
@@ -373,7 +385,7 @@ will be assigned proper numbers).
 NB you cannot clone a merged bug.  You'd think that trying to do so
 would just give you an unmerged copy of the specified bug number, but no:
 
-http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=474742
+https://bugs.debian.org/474742
 
 You must unmerge, clone, then re-merge.
 
@@ -410,21 +422,21 @@ reassign 1234 emacs
 Note that reassigning clears the list of found versions, even if the
 new packages includes the original one.
 
-** To remove spam from the tracker, move it to the 'spam' pseudo-package:
+*** To remove spam from the tracker, move it to the 'spam' pseudo-package:
 reassign 123 spam
 
 (Should not be necessary any more, now that the input is moderated.)
 
-** To change the title of a bug:
+*** To change the title of a bug:
 retitle 123 Some New Title
 
-** To change the submitter address:
-submitter 123 none@example.com
+*** To change the submitter name and address:
+submitter 123 J. Hacker <none@example.com>
 
 Note that it does not seem to work to specify "Submitter:" in the
 pseudo-header when first reporting a bug.
 
-** How does archiving work?
+*** How does archiving work?
 You can still send mail to a bug after it is closed.  After 28 days with
 no activity, the bug is archived, at which point no more changes can
 be made.  If you try to send mail to the bug after that (or merge with
@@ -546,7 +558,7 @@ debbugs-submit.  Approved mail is passed on to the tracker.
 tracker, since mail from whitelisted senders goes straight through.)
 
 NOTE: An alternative to this would be to use listhelper AT nongnu.org
-as a moderator address.  Eg the emacs-bug-tracker list uses this.
+as a moderator address.  E.g., the emacs-bug-tracker list uses this.
 It does basic spam processing on the moderator requests and
 automatically rejects the obviously bogus ones.  Someone still has to
 accept the good ones though.  The advantage of this would not be having

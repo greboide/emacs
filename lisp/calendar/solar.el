@@ -1,11 +1,11 @@
 ;;; solar.el --- calendar functions for solar events  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1992-1993, 1995, 1997, 2001-2018 Free Software
+;; Copyright (C) 1992-1993, 1995, 1997, 2001-2026 Free Software
 ;; Foundation, Inc.
 
 ;; Author: Edward M. Reingold <reingold@cs.uiuc.edu>
 ;;         Denis B. Roegel <Denis.Roegel@loria.fr>
-;; Maintainer: Glenn Morris <rgm@gnu.org>
+;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: calendar
 ;; Human-Keywords: sunrise, sunset, equinox, solstice, calendar, diary, holidays
 ;; Package: calendar
@@ -209,7 +209,6 @@ Returns nil if nothing was entered."
 
 (defun solar-setup ()
   "Prompt for `calendar-longitude', `calendar-latitude', `calendar-time-zone'."
-  (beep)
   (or calendar-longitude
       (setq calendar-longitude
             (solar-get-number
@@ -491,8 +490,8 @@ Uses binary search."
          (utmin (+ ut (* direction 12.0)))
          (utmax ut)     ; the time searched is between utmin and utmax
          ;; utmin and utmax are in hours.
-         (utmoment-old 0.0)             ; rise or set approximation
-         (utmoment 1.0)                 ; rise or set approximation
+         (utmoment-old utmin)           ; rise or set approximation
+         (utmoment utmax)               ; rise or set approximation
          (hut 0)                        ; sun height at utmoment
          (t0 (car time))
          (hmin (cadr (solar-horizontal-coordinates (list t0 utmin)
@@ -553,13 +552,13 @@ degrees to find out if polar regions have 24 hours of sun or only night."
 Format used is given by `calendar-time-display-form'."
   (let* ((time (round (* 60 time)))
          (24-hours (/ time 60)))
-    (calendar-dlet*
+    (calendar-dlet
         ((time-zone time-zone)
          (minutes (format "%02d" (% time 60)))
          (12-hours (format "%d" (1+ (% (+ 24-hours 11) 12))))
          (am-pm (if (>= 24-hours 12) "pm" "am"))
          (24-hours (format "%02d" 24-hours)))
-      (mapconcat #'eval calendar-time-display-form ""))))
+      (mapconcat #'eval calendar-time-display-form))))
 
 (defun solar-daylight (time)
   "Printable form for TIME expressed in hours."
@@ -669,7 +668,7 @@ Optional NOLOCATION non-nil means do not print the location."
          (concat "sunset " (apply #'solar-time-string (cadr l)))
        "no sunset")
      (if nolocation ""
-       (format " at %s" (eval calendar-location-name)))
+       (format " at %s" (eval calendar-location-name t)))
      (nth 2 l))))
 
 (defconst solar-data-list
@@ -840,10 +839,10 @@ This function is suitable for execution in an init file."
                             "E" "W"))))))
          (calendar-standard-time-zone-name
           (if (< arg 16) calendar-standard-time-zone-name
-            (cond ((zerop calendar-time-zone) "UTC")
-                  ((< calendar-time-zone 0)
-                   (format "UTC%dmin" calendar-time-zone))
-                  (t  (format "UTC+%dmin" calendar-time-zone)))))
+	    (if (and (zerop calendar-time-zone)
+		     (not (eq calendar-time-zone-style 'numeric)))
+		"UTC"
+	      (format-time-string "%z" 0 (* 60 calendar-time-zone)))))
          (calendar-daylight-savings-starts
           (if (< arg 16) calendar-daylight-savings-starts))
          (calendar-daylight-savings-ends
@@ -882,7 +881,7 @@ Accurate to a few seconds."
          (last (calendar-last-day-of-month month year))
          (title (format "Sunrise/sunset times for %s %d at %s"
                         (calendar-month-name month) year
-                        (eval calendar-location-name))))
+                        (eval calendar-location-name t))))
     (calendar-in-read-only-buffer solar-sunrises-buffer
       (calendar-set-mode-line title)
       (insert title ":\n\n")
@@ -1003,17 +1002,23 @@ solstice.  These formulas are only to be used between 1000 BC and 3000 AD."
                         (* -0.00823 z z z)
                         (* 0.00032 z z z z)))))))
 
-(defvar displayed-month)                ; from calendar-generate
-(defvar displayed-year)
-
 ;;;###holiday-autoload
 (defun solar-equinoxes-solstices ()
   "Local date and time of equinoxes and solstices, if visible in the calendar.
 Requires floating point."
-  (let* ((m displayed-month)
-         (y displayed-year)
-         (calendar-standard-time-zone-name
-          (if calendar-time-zone calendar-standard-time-zone-name "UTC"))
+  (let (result)
+    (dolist (month '(3 6 9 12))
+      (when-let* ((y (calendar-month-visible-p month)))
+        (push (car (solar-equinoxes-solstices-1 month y)) result)))
+    result))
+
+(defun solar-equinoxes-solstices-1 (m y)
+  "Get nearest equinoxes and solstices around Year/Month."
+  (let* ((calendar-standard-time-zone-name
+          (cond
+           (calendar-time-zone calendar-standard-time-zone-name)
+           ((eq calendar-time-zone-style 'numeric) "+0000")
+           (t "UTC")))
          (calendar-daylight-savings-starts
           (if calendar-time-zone calendar-daylight-savings-starts))
          (calendar-daylight-savings-ends

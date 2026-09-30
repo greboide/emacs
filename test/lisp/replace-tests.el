@@ -1,6 +1,6 @@
-;;; replace-tests.el --- tests for replace.el.
+;;; replace-tests.el --- tests for replace.el.  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2010-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2010-2026 Free Software Foundation, Inc.
 
 ;; Author: Nicolas Richard <youngfrog@members.fsf.org>
 ;; Author: Juri Linkov <juri@jurta.org>
@@ -359,11 +359,159 @@ Each element has the format:
 (dotimes (i (length replace-occur-tests))
   (replace-occur-test-create i))
 
+(ert-deftest replace-occur-revert-bug32543 ()
+  "Test `occur-revert' with non-nil `list-matching-lines-jump-to-current-line'."
+  (let ((temp-buffer (get-buffer-create " *test-occur*")))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer temp-buffer
+            (erase-buffer)
+            (setq list-matching-lines-jump-to-current-line t)
+            (insert
+";; This buffer is for text that is not saved, and for Lisp evaluation.
+;; To create a file, visit it with C-x C-f and enter text in its buffer.
+
+")
+            (occur "and")
+            (with-current-buffer "*Occur*"
+              (revert-buffer)
+              (goto-char (point-min))
+              (should (string-match "\\`2 matches for \"and\" in buffer: "
+                                    (buffer-substring-no-properties
+                                     (point) (pos-eol)))))))
+      (and (buffer-name temp-buffer)
+           (kill-buffer temp-buffer)))))
+
+(ert-deftest replace-occur-revert-bug32987 ()
+  "Test `occur-revert' with non-nil `list-matching-lines-jump-to-current-line'."
+  (let ((temp-buffer (get-buffer-create " *test-occur*")))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer temp-buffer
+            (erase-buffer)
+            (setq list-matching-lines-jump-to-current-line nil)
+            (insert
+";; This buffer is for text that is not saved, and for Lisp evaluation.
+;; To create a file, visit it with C-x C-f and enter text in its buffer.
+
+")
+            (occur "and")
+            (with-current-buffer "*Occur*"
+              (revert-buffer)
+              (goto-char (point-min))
+              (should (string-match "\\`2 matches for \"and\" in buffer: "
+                                    (buffer-substring-no-properties
+                                     (point) (pos-eol)))))))
+      (and (buffer-name temp-buffer)
+           (kill-buffer temp-buffer)))))
+
+
+;;; General tests for `query-replace' and `query-replace-regexp'.
+
+(defconst query-replace-tests
+  '(
+    ;; query-replace
+    ("aaa" "M-% a RET 1 RET !" "111")
+    ("aaa" "M-% a RET 1 RET y n y" "1a1")
+    ;; Empty inputs
+    ("aaa" "M-% a RET RET !" "")
+    ("aaa" "M-% RET 1 RET !" "1a1a1a")
+    ("aaa" "M-% RET RET !" "aaa")
+    ;; Reuse the previous default
+    ("aaa" "M-% a RET 1 RET . M-% RET !" "111")
+
+    ;; query-replace-regexp
+    ("aaa" "C-M-% a* RET 1 RET !" "1")
+    ;; Empty inputs
+    ("aaa" "C-M-% a* RET RET !" "")
+    ("aaa" "C-M-% RET 1 RET !" "1a1a1a")
+    ("aaa" "C-M-% RET RET !" "aaa")
+    ;; Empty matches
+    ("aaa" "C-M-% b* RET 1 RET !" "1a1a1a")
+    ;; Complete matches
+    ("aaa" "C-M-% .* RET 1 RET !" "1")
+    ;; Adjacent non-empty matches
+    ("abaab" "C-M-% ab* RET 12 RET !" "121212")
+    ;; Adjacent non-empty and empty matches
+    ("abab" "C-M-% a* RET 1 RET !" "1b1b")
+    ("abab" "C-M-% b* RET 1 RET !" "1a1a1")
+    ;; Test case from commit 5632eb272c7
+    ("a a a " "C-M-% \\ba SPC RET c RET !" "ccc") ; not "ca c"
+    ;; Backup ('^') with calculated replacement ('\,') (bug#79811)
+    ("abc" "C-M-% \\([abc]\\) RET [\\1,\\#] RET y n ^ y y" "[a,0][b,1][c,2]")
+    ("abc" "C-M-% \\([abc]\\) RET [\\,\\1,\\#] RET y n ^ y y" "[a,0][b,1][c,2]")
+    ))
+
+(defun query-replace--run-tests (tests)
+  (with-temp-buffer
+    (save-window-excursion
+      ;; `execute-kbd-macro' is applied to window only
+      (set-window-buffer nil (current-buffer))
+      (dolist (case tests)
+        ;; Ensure empty input means empty string to replace:
+        (setq query-replace-defaults nil)
+        (delete-region (point-min) (point-max))
+        (insert (nth 0 case))
+        (goto-char (point-min))
+        (execute-kbd-macro (kbd (nth 1 case)))
+        (should (equal (buffer-string) (nth 2 case)))))))
+
+(ert-deftest query-replace-tests ()
+  (query-replace--run-tests query-replace-tests))
+
+(ert-deftest query-replace-search-function-tests ()
+  (let* ((replace-re-search-function #'re-search-forward))
+    (query-replace--run-tests query-replace-tests))
+
+  (let* ((pairs '((1 . 2) (3 . 4)))
+         (replace-re-search-function
+          (lambda (string &optional _bound noerror count)
+            (let (found)
+              (while (and (not found) pairs)
+                (goto-char (caar pairs))
+                (when (re-search-forward string (cdar pairs) noerror count)
+                  (setq found t))
+                (pop pairs))
+              found)))
+         (tests
+          '(
+            ;; FIXME: this test should pass after fixing bug#54733:
+            ;; ("aaaa" "C-M-% .* RET 1 RET !" "1a1a")
+            )))
+    (query-replace--run-tests tests)))
+
+
+;;; General tests for `perform-replace'.
+
+(defconst perform-replace-tests
+  '(
+    ;; Test case from commit 5632eb272c7
+    ("a a a " "\\ba " "c" nil t nil nil nil nil nil nil nil "ccc") ; not "ca c"
+    ;; The same with region inside the second match
+    ;; FIXME: this test should pass after fixing bug#54733:
+    ;; ("a a a " "\\ba " "c" nil t nil nil nil 1 4 nil nil "ca a ")
+    ))
+
+(defun perform-replace--run-tests (tests)
+  (with-temp-buffer
+    (dolist (case tests)
+      (delete-region (point-min) (point-max))
+      (insert (pop case))
+      (goto-char (point-min))
+      (apply 'perform-replace (butlast case))
+      (should (equal (buffer-string) (car (last case)))))))
+
+(ert-deftest perform-replace-tests ()
+  (perform-replace--run-tests perform-replace-tests))
+
 
 ;;; Tests for `query-replace' undo feature.
 
 (defvar replace-tests-bind-read-string nil
   "A string to bind `read-string' and avoid the prompt.")
+
+(defvar replace-tests-perform-replace-regexp-flag t
+  "Value for regexp-flag argument passed to `perform-replace' in undo tests.")
 
 (defmacro replace-tests-with-undo (input from to char-nums def-chr &rest body)
   "Helper to test `query-replace' undo feature.
@@ -383,8 +531,7 @@ then replace 3 matches of FROM with TO, and undo the last replacement.
 
 Return the last evalled form in BODY."
   (declare (indent 5) (debug (stringp stringp stringp form characterp body)))
-  (let ((text (gensym "text"))
-        (count (gensym "count")))
+  (cl-with-gensyms (text count)
     `(let* ((,text ,input)
             (,count 0)
             (inhibit-message t))
@@ -394,15 +541,15 @@ Return the last evalled form in BODY."
          ;; Bind `read-event' to simulate user input.
          ;; If `replace-tests-bind-read-string' is non-nil, then
          ;; bind `read-string' as well.
-         (cl-letf (((symbol-function 'read-event)
-                    (lambda (&rest args)
-                      (cl-incf ,count)
+         (cl-letf (((symbol-function 'read-key)
+                    (lambda (&rest _args)
+                      (incf ,count)
                       (pcase ,count ; Build the clauses from CHAR-NUMS
                         ,@(append
                            (delq nil
                                  (mapcar
                                   (lambda (chr)
-                                    (when-let (it (alist-get chr char-nums))
+                                    (when-let* ((it (alist-get chr char-nums)))
                                       (if (cdr it)
                                           `(,(cons 'or it) ,chr)
                                         `(,(car it) ,chr))))
@@ -410,9 +557,19 @@ Return the last evalled form in BODY."
                            `((_ ,def-chr))))))
                    ((symbol-function 'read-string)
                     (if replace-tests-bind-read-string
-                        (lambda (&rest args) replace-tests-bind-read-string)
-                      (symbol-function 'read-string))))
-           (perform-replace ,from ,to t t nil))
+                        (lambda (&rest _args) replace-tests-bind-read-string)
+                      (symbol-function 'read-string)))
+                   ;; Emulate replace-highlight clobbering match-data via
+                   ;; isearch-lazy-highlight-new-loop and sit-for (bug#36328)
+                   ((symbol-function 'replace-highlight)
+                    (lambda (&rest _args)
+                      (string-match "[A-Z ]" "ForestGreen")))
+                   ;; Override `sit-for' and `ding' so that we don't have
+                   ;; to wait and listen to bells when running the test.
+                   ((symbol-function 'sit-for)
+                    (lambda (&rest _args) (redisplay)))
+                   ((symbol-function 'ding) 'ignore))
+           (perform-replace ,from ,to t replace-tests-perform-replace-regexp-flag nil))
          ,@body))))
 
 (defun replace-tests--query-replace-undo (&optional comma)
@@ -454,5 +611,207 @@ Return the last evalled form in BODY."
       input "a" "B" ((?\s . (1 2 3)) (?E . (4)) (?U . (5))) ?q
       (string= input (buffer-string))))))
 
+(ert-deftest query-replace-undo-bug37073 ()
+  "Test for https://debbugs.gnu.org/37073 ."
+  (let ((input "theorem 1\ntheorem 2\ntheorem 3"))
+    (should
+     (replace-tests-with-undo
+         input "theorem \\([0-9]+\\)"
+         '(replace-eval-replacement
+           replace-quote
+           (format "theorem \\\\ref{theo_%d}" (1+ (string-to-number (match-string 1)))))
+         ((?\s . (1 2)) (?U . (3)))
+         ?q
+       (string= input (buffer-string)))))
+  ;; Now run a test with regexp-flag arg in `perform-replace' set to nil
+  (let ((input " ^theorem$ 1\n ^theorem$ 2\n ^theorem$ 3")
+        (replace-tests-perform-replace-regexp-flag nil)
+        (expected " theo 1\n ^theorem$ 2\n ^theorem$ 3"))
+    (should
+     (replace-tests-with-undo
+         input "^theorem$"
+         "theo"
+         ((?\s . (1 2 4)) (?U . (3)))
+         ?q
+       (string= expected (buffer-string))))))
+
+(ert-deftest query-replace-undo-bug37287 ()
+  "Test for https://debbugs.gnu.org/37287 ."
+  (let ((input "foo-1\nfoo-2\nfoo-3")
+        (expected "foo-2\nfoo-2\nfoo-3"))
+    (should
+     (replace-tests-with-undo
+      input "\\([0-9]\\)"
+      '(replace-eval-replacement
+        replace-quote
+        (format "%d" (1+ (string-to-number (match-string 1)))))
+      ((?\s . (1 2 4)) (?U . (3)))
+      ?q
+      (string= expected (buffer-string))))))
+
+(defmacro replace-tests-with-highlighted-occurrence (highlight-locus &rest body)
+  "Helper macro to test the highlight of matches when navigating occur buffer.
+
+Eval BODY with `next-error-highlight' and `next-error-highlight-no-select'
+bound to HIGHLIGHT-LOCUS."
+  (declare (indent 1) (debug (form body)))
+  `(let ((regexp "foo")
+         (next-error-highlight ,highlight-locus)
+         (next-error-highlight-no-select ,highlight-locus)
+         (buffer (generate-new-buffer "test"))
+         (inhibit-message t))
+     (unwind-protect
+         ;; Local bind to disable the deletion of `occur-highlight-overlay'
+         (cl-letf (((symbol-function 'occur-goto-locus-delete-o) (lambda ())))
+           (with-current-buffer buffer (dotimes (_ 3) (insert regexp ?\n)))
+           (pop-to-buffer buffer)
+           (occur regexp)
+           (pop-to-buffer "*Occur*")
+           (occur-next)
+           ,@body)
+       (kill-buffer buffer)
+       (kill-buffer "*Occur*"))))
+
+(ert-deftest occur-highlight-occurrence ()
+  "Test for https://debbugs.gnu.org/39121 ."
+  (let ((alist '((nil . nil) (0.5 . t) (t . t) (fringe-arrow . nil)))
+        (check-overlays
+         (lambda (has-ov)
+           (eq has-ov (not (null (overlays-in (point-min) (point-max))))))))
+    (pcase-dolist (`(,highlight-locus . ,has-overlay) alist)
+      ;; Visiting occurrences
+      (replace-tests-with-highlighted-occurrence highlight-locus
+        (occur-mode-goto-occurrence)
+        (should (funcall check-overlays has-overlay)))
+      ;; Displaying occurrences
+      (replace-tests-with-highlighted-occurrence highlight-locus
+        (occur-mode-display-occurrence)
+        (with-current-buffer (marker-buffer
+                              (caar (get-text-property (point) 'occur-target)))
+          (should (funcall check-overlays has-overlay)))))))
+
+(ert-deftest replace-regexp-bug45973 ()
+  "Test for https://debbugs.gnu.org/45973 ."
+  (let ((before "1RB 1LC 1RC 1RB 1RD 0LE 1LA 1LD 1RH 0LA")
+        (after  "1LB 1RC 1LC 1LB 1LD 0RE 1RA 1RD 1LH 0RA"))
+    (with-temp-buffer
+      (insert before)
+      (goto-char (point-min))
+      (with-suppressed-warnings ((interactive-only replace-regexp))
+        (replace-regexp
+         "\\(\\(L\\)\\|\\(R\\)\\)"
+         '(replace-eval-replacement
+           replace-quote
+           (if (match-string 2) "R" "L"))))
+      (should (equal (buffer-string) after)))))
+
+(defun replace-tests--preview (text from to regexp-flag &optional case-fold
+                                    start end)
+  "Return the previews of replacing FROM with TO in a buffer holding TEXT.
+Each preview is a list (BEG END STRING).  START and END limit the
+previewed portion of the buffer.
+Unless the caller binds `query-replace-show-preview' to something else,
+the previews are those of `replacement-only'."
+  (let ((query-replace-show-preview
+         (or query-replace-show-preview 'replacement-only)))
+    (with-temp-buffer
+      (insert text)
+      (set-window-buffer (selected-window) (current-buffer))
+      (unwind-protect
+          (progn
+            (replace-preview-update from to regexp-flag nil case-fold
+                                    start end)
+            (mapcar (lambda (ov)
+                      (list (overlay-start ov)
+                            (overlay-end ov)
+                            (substring-no-properties
+                             (or (overlay-get ov 'display)
+                                 (overlay-get ov 'before-string)))))
+                    (reverse replace-preview-overlays)))
+        (replace-preview-cleanup)))))
+
+(ert-deftest replace-tests-preview-update ()
+  ;; Back-references are expanded in the preview.
+  (should (equal (replace-tests--preview "foo1 foo2\n" "foo\\([0-9]\\)"
+                                         "bar-\\1" t)
+                 '((1 5 "bar-1") (6 10 "bar-2"))))
+  ;; So is the whole match.
+  (should (equal (replace-tests--preview "abc\n" "b" "[\\&]" t)
+                 '((2 3 "[b]"))))
+  ;; The preview adapts the case like the replacement itself does.
+  (should (equal (replace-tests--preview "Foo foo\n" "foo" "bar" nil t)
+                 '((1 4 "Bar") (5 8 "bar"))))
+  ;; An empty match is previewed with a zero-length overlay.
+  (should (equal (replace-tests--preview "ab\n" "x*" "Z" t)
+                 '((1 1 "Z") (2 2 "Z") (3 3 "Z")))))
+
+(ert-deftest replace-tests-preview-invisible-match ()
+  ;; An empty match with an empty replacement is marked with a bar.
+  (should (equal (replace-tests--preview "ab\n" "x*" "" t)
+                 '((1 1 " ") (2 2 " ") (3 3 " "))))
+  ;; So is a match that an empty replacement deletes.
+  (should (equal (replace-tests--preview "foo\n" "foo" "" nil)
+                 '((1 4 " ")))))
+
+(ert-deftest replace-tests-preview-bounds ()
+  ;; Only the matches that would be replaced are previewed.
+  (should (equal (replace-tests--preview "foo foo foo\n" "foo" "bar" nil nil 5)
+                 '((5 8 "bar") (9 12 "bar"))))
+  ;; When the replacement goes backward, the other side is the valid one.
+  (should (equal (replace-tests--preview "foo foo foo\n" "foo" "bar" nil nil
+                                         nil 8)
+                 '((1 4 "bar") (5 8 "bar")))))
+
+(ert-deftest replace-tests-preview-input ()
+  (let ((from-to (concat "foo" (propertize " \N{RIGHTWARDS ARROW} "
+                                           'separator t)
+                         "bar")))
+    ;; While only the replacement is read, FROM is fixed.
+    (should (equal (replace-preview--input "foo" "bar") '("foo" . "bar")))
+    ;; While both halves are read, they are split apart.
+    (should (equal (replace-preview--input nil from-to) '("foo" . "bar")))
+    ;; There is nothing to preview until the input has both of them.
+    (should-not (replace-preview--input nil "foo"))))
+
+(ert-deftest replace-tests-preview-both ()
+  (let ((query-replace-show-preview 'both)
+        (arrow (if (char-displayable-p ?→) "→" "->")))
+    (should (equal (replace-tests--preview "foo\n" "foo" "bar" nil)
+                   `((1 4 ,(concat "foo" arrow "bar")))))))
+
+(ert-deftest replace-tests-preview-function ()
+  (let ((query-replace-show-preview
+         (lambda (match replacement)
+           (and (equal match "foo") (concat "<" replacement ">")))))
+    (should (equal (replace-tests--preview "foo bar\n" "[a-z]+" "X" t)
+                   '((1 4 "<X>"))))))
+
+(ert-deftest replace-tests-preview-cleanup ()
+  (with-temp-buffer
+    (insert "foo foo\n")
+    (set-window-buffer (selected-window) (current-buffer))
+    (let ((query-replace-show-preview 'replacement-only))
+      (replace-preview-update "foo" "bar" nil nil nil))
+    (should replace-preview-overlays)
+    (replace-preview-cleanup)
+    (should-not replace-preview-overlays)
+    (should-not (overlays-in (point-min) (point-max)))))
+
+(ert-deftest replace-tests-preview-disabled ()
+  (let ((query-replace-show-preview nil))
+    (should (eq (replace-preview-setup "foo" nil nil) #'ignore)))
+  (let ((query-replace-show-preview 'replacement-only))
+    (should-not (eq (replace-preview-setup "foo" nil nil) #'ignore))))
+
+(ert-deftest test-count-matches ()
+  (with-temp-buffer
+    (insert "oooooooooo")
+    (goto-char (point-min))
+    (should (= (count-matches "oo") 5))
+    (should (= (count-matches "o+") 1)))
+  (with-temp-buffer
+    (insert "o\n\n\n\no\n\n")
+    (goto-char (point-min))
+    (should (= (count-matches "^$") 4))))
 
 ;;; replace-tests.el ends here

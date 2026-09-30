@@ -1,6 +1,6 @@
-;;; help-at-pt.el --- local help through the keyboard
+;;; help-at-pt.el --- local help through the keyboard  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2003-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2003-2026 Free Software Foundation, Inc.
 
 ;; Author: Luc Teirlinck <teirllm@auburn.edu>
 ;; Keywords: help
@@ -40,11 +40,8 @@
 ;;
 ;; Suggested key bindings:
 ;;
-;; (global-set-key [C-tab] 'scan-buf-next-region)
-;; (global-set-key [C-M-tab] 'scan-buf-previous-region)
-;;
-;; You do not have to do anything special to use the functionality
-;; provided by this file, because all important functions autoload.
+;; (keymap-global-set "C-<tab>" #'scan-buf-next-region)
+;; (keymap-global-set "C-M-<tab>" #'scan-buf-previous-region)
 
 ;;; Code:
 
@@ -84,22 +81,37 @@ If this produces no string either, return nil."
 	(echo (help-at-pt-string)))
     (if (and kbd (not (eq kbd t))) kbd echo)))
 
-;;;###autoload
-(defun display-local-help (&optional arg)
-  "Display local help in the echo area.
-This displays a short help message, namely the string produced by
-the `kbd-help' property at point.  If `kbd-help' does not produce
-a string, but the `help-echo' property does, then that string is
-printed instead.
+(declare-function widget-describe "wid-edit" (&optional widget-or-pos))
+(declare-function widget-at "wid-edit" (&optional pos))
 
-A numeric argument ARG prevents display of a message in case
-there is no help.  While ARG can be used interactively, it is
-mainly meant for use from Lisp."
-  (interactive "P")
+;;;###autoload
+(defun display-local-help (&optional inhibit-warning describe-button)
+  "Display in the echo area `kbd-help' or `help-echo' text at point.
+This command displays the help message which is the string produced
+by the `kbd-help' property at point.  If `kbd-help' at point does not
+produce a string, but the `help-echo' property does, then that string
+is displayed instead.
+
+The string is passed through `substitute-command-keys' before it
+is displayed.
+
+If INHIBIT-WARNING is non-nil, do not display a warning message when
+there is no help property at point.
+
+If DESCRIBE-BUTTON in non-nil (interactively, the prefix arg), and
+there's a button/widget at point, pop up a buffer describing that
+button/widget instead."
+  (interactive (list nil current-prefix-arg))
   (let ((help (help-at-pt-kbd-string)))
-    (if help
-	(message "%s" help)
-      (if (not arg) (message "No local help at point")))))
+    (cond
+     ((and describe-button (button-at (point)))
+      (button-describe))
+     ((and describe-button (widget-at (point)))
+      (widget-describe))
+     (help
+      (message "%s" (substitute-command-keys help)))
+     ((not inhibit-warning)
+      (message "No local help at point")))))
 
 (defvar help-at-pt-timer nil
   "Non-nil means that a timer is set that checks for local help.
@@ -162,6 +174,10 @@ included in this list.  Suggested properties are `keymap',
 `local-map', `button' and `kbd-help'.  Any value other than t or
 a non-empty list disables the feature.
 
+The text printed from the `help-echo' property is often only
+relevant when using the mouse.  The presence of a `kbd-help'
+property guarantees that non mouse specific help is available.
+
 This variable only takes effect after a call to
 `help-at-pt-set-timer'.  The help gets printed after Emacs has
 been idle for `help-at-pt-timer-delay' seconds.  You can call
@@ -175,7 +191,12 @@ list of properties through Custom will set the timer, thus
 enabling buffer local values.  It sets the actual value to nil.
 Thus, Custom distinguishes between a nil value and other values
 that disable the feature, which Custom identifies with `never'.
-The default is `never'."
+The default is `never'.
+
+Eldoc uses the echo area to display documentation.  As such it
+conflicts with `help-at-pt-display-when-idle' due to the use of
+the echo area.  If you use Eldoc, consider setting
+`eldoc-help-at-pt' instead."
   :group 'help-at-pt
   :type '(choice  (const :tag "Always"
 			 :format "%t\n%h"
@@ -225,11 +246,11 @@ this option, or use \"In certain situations\" and specify no text
 properties, to enable buffer local values."
 			 never))
   :initialize 'custom-initialize-default
-  :set #'(lambda (variable value)
-	   (set-default variable value)
-	   (if (eq value 'never)
-	       (help-at-pt-cancel-timer)
-	     (help-at-pt-set-timer)))
+  :set (lambda (variable value)
+         (set-default variable value)
+         (if (eq value 'never)
+             (help-at-pt-cancel-timer)
+           (help-at-pt-set-timer)))
   :set-after '(help-at-pt-timer-delay)
   :require 'help-at-pt)
 

@@ -1,8 +1,8 @@
-;;; reftex-global.el --- operations on entire documents with RefTeX
+;;; reftex-global.el --- operations on entire documents with RefTeX  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1997-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1997-2026 Free Software Foundation, Inc.
 
-;; Author: Carsten Dominik <dominik@science.uva.nl>
+;; Author: Carsten Dominik <carsten.dominik@gmail.com>
 ;; Maintainer: auctex-devel@gnu.org
 
 ;; This file is part of GNU Emacs.
@@ -24,9 +24,10 @@
 
 ;;; Code:
 
-(eval-when-compile (require 'cl-lib))
 (provide 'reftex-global)
 (require 'reftex)
+
+(declare-function fileloop-continue "fileloop")
 ;;;
 
 ;;;###autoload
@@ -35,14 +36,18 @@
 The TAGS file is also immediately visited with `visit-tags-table'."
   (interactive)
   (reftex-access-scan-info current-prefix-arg)
-  (let* ((master (reftex-TeX-master-file))
-         (files  (reftex-all-document-files))
-         (cmd    (format "etags %s" (mapconcat 'shell-quote-argument
-					       files " "))))
-    (with-current-buffer (reftex-get-file-buffer-force master)
-      (message "Running etags to create TAGS file...")
-      (shell-command cmd)
-      (visit-tags-table "TAGS"))))
+  (let ((master (reftex-TeX-master-file)))
+    (if (bufferp master)
+        (user-error "Cannot create TAGS file for non-file buffers")
+      (let* ((files  (reftex-all-document-files))
+             (cmd (format "%s %s"
+                          etags-program-name
+                          (mapconcat #'shell-quote-argument
+                                     files " "))))
+        (with-current-buffer (reftex-get-file-buffer-force master)
+          (message "Running etags to create TAGS file...")
+          (shell-command cmd)
+          (visit-tags-table "TAGS"))))))
 
 ;; History of grep commands.
 (defvar reftex-grep-history nil)
@@ -63,7 +68,7 @@ No active TAGS table is required."
   (let* ((files  (reftex-all-document-files t))
          (cmd    (format
                   "%s %s" grep-cmd
-                  (mapconcat 'identity files " "))))
+                  (mapconcat #'identity files " "))))
     (grep cmd)))
 
 ;;;###autoload
@@ -86,6 +91,12 @@ No active TAGS table is required."
 (defun reftex-query-replace-document (&optional from to delimited)
   "Do `query-replace-regexp' of FROM with TO over the entire document.
 Third arg DELIMITED (prefix arg) means replace only word-delimited matches.
+
+As each match is found, the user must type a character saying
+what to do with it.  Type SPC or `y' to replace the match,
+DEL or `n' to skip and go to the next match.  For more directions,
+type \\[help-command] at that time.
+
 If you exit (\\[keyboard-quit], RET or q), you can resume the query replace
 with the command \\[tags-loop-continue].
 No active TAGS table is required."
@@ -98,8 +109,11 @@ No active TAGS table is required."
     (unless to
       (setq to (read-string (format "Replace regexp %s with: " from))))
     (reftex-access-scan-info current-prefix-arg)
-    (tags-query-replace from to (or delimited current-prefix-arg)
-                        (list 'reftex-all-document-files))))
+    (fileloop-initialize-replace
+     from to (reftex-all-document-files)
+     (if (equal from (downcase from)) nil 'default)
+     (or delimited current-prefix-arg))
+    (fileloop-continue)))
 
 (defvar TeX-master)
 (defvar isearch-next-buffer-function)
@@ -131,7 +145,7 @@ No active TAGS table is required."
                 (if (< 1 (length x1))
                     (append (list (car x))
                             (mapcar (lambda(x)
-                                      (abbreviate-file-name (nth 3 x)))
+                                      (reftex--abbreviate-name (nth 3 x)))
                                     x1))
                   (list nil))))))
           (reftex-uniquify-by-car (symbol-value reftex-docstruct-symbol)))))
@@ -139,12 +153,14 @@ No active TAGS table is required."
     (setq dlist (reftex-uniquify-by-car dlist))
     (if (null dlist) (error "No duplicate labels in document"))
     (switch-to-buffer-other-window "*Duplicate Labels*")
-    (set (make-local-variable 'TeX-master) master)
+    (setq-local TeX-master master)
     (erase-buffer)
     (insert "                MULTIPLE LABELS IN CURRENT DOCUMENT:\n")
     (insert
-     " Move point to label and type `r' to run a query-replace on the label\n"
-     " and its references.  Type `q' to exit this buffer.\n\n")
+     (substitute-command-keys
+      " Move point to label and type \\`r' to run a query-replace on the label\n")
+     (substitute-command-keys
+      " and its references.  Type \\`q' to exit this buffer.\n\n"))
     (insert " LABEL               FILE\n")
     (insert " -------------------------------------------------------------\n")
     (use-local-map (make-sparse-keymap))
@@ -154,8 +170,8 @@ No active TAGS table is required."
     (while dlist
       (when (and (car (car dlist))
                  (cdr (car dlist)))
-        (cl-incf cnt)
-        (insert (mapconcat 'identity (car dlist) "\n    ") "\n"))
+        (incf cnt)
+        (insert (mapconcat #'identity (car dlist) "\n    ") "\n"))
       (pop dlist))
     (goto-char (point-min))
     (when (= cnt 0)
@@ -177,8 +193,8 @@ No active TAGS table is required."
                                       default))))
     (if (string= from "") (setq from default))
     (unless to
-      (setq to (read-string (format "Replace label %s with: "
-                                    from))))
+      (setq to (read-string (format "Replace label %s with: " from)
+                            nil nil from)))
     (reftex-query-replace-document
      (concat "{" (regexp-quote from) "}")
      (format "{%s}" to))))
@@ -203,7 +219,7 @@ one with the `xr' package."
       (error "Abort"))
   ;; Make the translation list
   (let* ((re-core (concat "\\("
-                          (mapconcat 'cdr reftex-typekey-to-prefix-alist "\\|")
+                          (mapconcat #'cdr reftex-typekey-to-prefix-alist "\\|")
                           "\\)"))
          (label-re (concat "\\`" re-core "\\([0-9]+\\)\\'"))
          (search-re (concat "[{,]\\(" re-core "\\([0-9]+\\)\\)[,}]"))
@@ -223,7 +239,7 @@ one with the `xr' package."
         (if (assoc label translate-alist)
             (error "Duplicate label %s" label))
         (setq new-label (concat (match-string 1 (car entry))
-                                (int-to-string (cl-incf (cdr nr-cell)))))
+                                (int-to-string (incf (cdr nr-cell)))))
         (push (cons label new-label) translate-alist)
         (or (string= label new-label) (setq changed-sequence t))))
 
@@ -263,7 +279,18 @@ one with the `xr' package."
   ;; to ignore the problematic string.
   ;; If TEST is nil, it is ignored without query.
   ;; Return the number of replacements.
-  (let ((n 0) file label match-data buf macro pos cell)
+  (let ((n 0)
+        (opt-re (concat "\\(?:{[^}{]*"
+                        "\\(?:{[^}{]*"
+                        "\\(?:{[^}{]*}[^}{]*\\)*"
+                        "}[^}{]*\\)*"
+                        "}[^][]*\\)*"))
+        (man-re (concat "\\(?:{[^}{]*"
+                        "\\(?:{[^}{]*"
+                        "\\(?:{[^}{]*}[^}{]*\\)*"
+                        "}[^}{]*\\)*"
+                        "}[^}{]*\\)*"))
+        file label match-data buf macro pos cell)
     (while (setq file (pop files))
       (setq buf (reftex-get-file-buffer-force file))
       (unless buf
@@ -288,7 +315,29 @@ one with the `xr' package."
                              (looking-at "\\\\ref[a-zA-Z]*[^a-zA-Z]")
                              (looking-at (format
                                           reftex-find-label-regexp-format
-                                          (regexp-quote label)))))
+                                          (regexp-quote label)))
+                             ;; In case the label-keyval is inside an
+                             ;; optional argument to \begin{env}
+                             (looking-at (concat
+                                          "\\\\begin[[:space:]]*{[^}]+}"
+                                          "[[:space:]]*"
+                                          "\\[[^][]*"
+                                          opt-re
+                                          (format
+                                           reftex-find-label-regexp-format
+                                           (regexp-quote label))
+                                          "[^]]*\\]"))
+                             ;; In case the label-keyval is inside the
+                             ;; first mandatory argument to \begin{env}
+                             (looking-at (concat
+                                          "\\\\begin[[:space:]]*{[^}]+}"
+                                          "[[:space:]]*"
+                                          "{[^}{]*"
+                                          man-re
+                                          (format
+                                           reftex-find-label-regexp-format
+                                           (regexp-quote label))
+                                          "[^}]*}"))))
                 ;; OK, we should replace it.
                 (set-match-data match-data)
                 (cond
@@ -302,7 +351,7 @@ one with the `xr' package."
                             (error "Abort")))
                     (reftex-unhighlight 1)))
                  ((and test cell)
-                  (cl-incf n))
+                  (incf n))
                  ((and (not test) cell)
                   ;; Replace
                   (goto-char (match-beginning 1))
@@ -321,31 +370,33 @@ labels."
         file buffer)
     (save-current-buffer
       (while (setq file (pop files))
-        (setq buffer (reftex-get-buffer-visiting file))
-        (when buffer
-          (set-buffer buffer)
-          (save-buffer))))))
+        (when (stringp file) ; Ignore non-file buffers.
+          (setq buffer (find-buffer-visiting file))
+          (when buffer
+            (set-buffer buffer)
+            (save-buffer)))))))
 
 (defun reftex-ensure-write-access (files)
   "Make sure we have write access to all files in FILES.
 Also checks if buffers visiting the files are in read-only mode."
   (let (file buf)
-    (while (setq file (pop files))
-      (unless (file-exists-p file)
-        (ding)
-        (or (y-or-n-p (format "No such file %s. Continue? " file))
-            (error "Abort")))
-      (unless (file-writable-p file)
-        (ding)
-        (or (y-or-n-p (format "No write access to %s. Continue? " file))
-            (error "Abort")))
-      (when (and (setq buf (reftex-get-buffer-visiting file))
-                 (with-current-buffer buf
-                   buffer-read-only))
-        (ding)
-        (or (y-or-n-p (format "Buffer %s is read-only. Continue? "
-                              (buffer-name buf)))
-            (error "Abort"))))))
+    (while (setq file (pop files)) ; Ignore non-file buffers.
+      (when (stringp file)
+        (unless (file-exists-p file)
+          (ding)
+          (or (y-or-n-p (format "No such file %s. Continue?" file))
+              (error "Abort")))
+        (unless (file-writable-p file)
+          (ding)
+          (or (y-or-n-p (format "No write access to %s. Continue?" file))
+              (error "Abort")))
+        (when (and (setq buf (find-buffer-visiting file))
+                   (with-current-buffer buf
+                     buffer-read-only))
+          (ding)
+          (or (y-or-n-p (format "Buffer %s is read-only.  Continue?"
+                                (buffer-name buf)))
+              (error "Abort")))))))
 
 ;;; Multi-file RefTeX Isearch
 
@@ -361,10 +412,10 @@ Also checks if buffers visiting the files are in read-only mode."
   (goto-char (if isearch-forward (point-min) (point-max))))
 
 (defun reftex-isearch-push-state-function ()
-  `(lambda (cmd)
-     (reftex-isearch-pop-state-function cmd ,(current-buffer))))
+  (let ((buf (current-buffer)))
+    (lambda (cmd) (reftex-isearch-pop-state-function cmd buf))))
 
-(defun reftex-isearch-pop-state-function (cmd buffer)
+(defun reftex-isearch-pop-state-function (_cmd buffer)
   (switch-to-buffer buffer))
 
 (defun reftex-isearch-isearch-search (string bound noerror)
@@ -389,7 +440,7 @@ Also checks if buffers visiting the files are in read-only mode."
 		(t
 		 (setq nxt-buff
 		       (funcall isearch-next-buffer-function
-					 (current-buffer)))
+				(current-buffer)))
 		 (if (not nxt-buff)
 		     (progn
 		       (error "Wrap backward"))
@@ -408,7 +459,7 @@ Also checks if buffers visiting the files are in read-only mode."
 ;; beginning/end of the file list, depending of the search direction.
 (defun reftex-isearch-switch-to-next-file (crt-buf &optional wrapp)
   (reftex-access-scan-info)
-  (let ((cb (buffer-file-name crt-buf))
+  (let ((cb (reftex--get-buffer-identifier crt-buf))
 	(flist (reftex-all-document-files)))
     (when flist
       (if wrapp
@@ -416,7 +467,7 @@ Also checks if buffers visiting the files are in read-only mode."
 	    (setq flist (last flist)))
 	(unless isearch-forward
 	  (setq flist (reverse flist)))
-	(while (not (string= (car flist) cb))
+	(while (not (equal (car flist) cb))
 	  (setq flist (cdr flist)))
 	(setq flist (cdr flist)))
       (when flist
@@ -424,55 +475,43 @@ Also checks if buffers visiting the files are in read-only mode."
 
 ;; NB this is a global autoload - see reftex.el.
 ;;;###autoload
-(defun reftex-isearch-minor-mode (&optional arg)
+(define-minor-mode reftex-isearch-minor-mode
   "When on, isearch searches the whole document, not only the current file.
 This minor mode allows isearch to search through all the files of
-the current TeX document.
-
-With no argument, this command toggles
-`reftex-isearch-minor-mode'.  With a prefix argument ARG, turn
-`reftex-isearch-minor-mode' on if ARG is positive, otherwise turn it off."
-  (interactive "P")
-  (let ((old-reftex-isearch-minor-mode reftex-isearch-minor-mode))
-    (setq reftex-isearch-minor-mode
-	  (not (or (and (null arg) reftex-isearch-minor-mode)
-		   (<= (prefix-numeric-value arg) 0))))
-    (unless (eq reftex-isearch-minor-mode old-reftex-isearch-minor-mode)
-      (if reftex-isearch-minor-mode
-	  (progn
-	    (dolist (crt-buf (buffer-list))
-	      (with-current-buffer crt-buf
-		(when reftex-mode
-		  (if (boundp 'multi-isearch-next-buffer-function)
-		      (set (make-local-variable
-			    'multi-isearch-next-buffer-function)
-			   'reftex-isearch-switch-to-next-file)
-		    (set (make-local-variable 'isearch-wrap-function)
-			 'reftex-isearch-wrap-function)
-		    (set (make-local-variable 'isearch-search-fun-function)
-			 (lambda () 'reftex-isearch-isearch-search))
-		    (set (make-local-variable 'isearch-push-state-function)
-			 'reftex-isearch-push-state-function)
-		    (set (make-local-variable 'isearch-next-buffer-function)
-			 'reftex-isearch-switch-to-next-file))
-		  (setq reftex-isearch-minor-mode t))))
-	    (add-hook 'reftex-mode-hook 'reftex-isearch-minor-mode))
+the current TeX document."
+  :lighter "/I"
+  :global t
+  :group 'reftex
+  (if reftex-isearch-minor-mode
+      (progn
 	(dolist (crt-buf (buffer-list))
 	  (with-current-buffer crt-buf
 	    (when reftex-mode
 	      (if (boundp 'multi-isearch-next-buffer-function)
-		  (kill-local-variable 'multi-isearch-next-buffer-function)
-		(kill-local-variable 'isearch-wrap-function)
-		(kill-local-variable 'isearch-search-fun-function)
-		(kill-local-variable 'isearch-push-state-function)
-		(kill-local-variable 'isearch-next-buffer-function))
-	      (setq reftex-isearch-minor-mode nil))))
-	(remove-hook 'reftex-mode-hook 'reftex-isearch-minor-mode)))
-    ;; Force mode line redisplay.
-    (set-buffer-modified-p (buffer-modified-p))))
+                  (setq-local multi-isearch-next-buffer-function
+                              #'reftex-isearch-switch-to-next-file)
+                (setq-local isearch-wrap-function
+                            #'reftex-isearch-wrap-function)
+                (setq-local isearch-search-fun-function
+                            (lambda () #'reftex-isearch-isearch-search))
+                (setq-local isearch-push-state-function
+                            #'reftex-isearch-push-state-function)
+                (setq-local isearch-next-buffer-function
+                            #'reftex-isearch-switch-to-next-file)))))
+	(add-hook 'reftex-mode-hook #'reftex-isearch-minor-mode))
+    (dolist (crt-buf (buffer-list))
+      (with-current-buffer crt-buf
+	(when reftex-mode
+	  (if (boundp 'multi-isearch-next-buffer-function)
+	      (kill-local-variable 'multi-isearch-next-buffer-function)
+	    (kill-local-variable 'isearch-wrap-function)
+	    (kill-local-variable 'isearch-search-fun-function)
+	    (kill-local-variable 'isearch-push-state-function)
+	    (kill-local-variable 'isearch-next-buffer-function)))))
+    (remove-hook 'reftex-mode-hook #'reftex-isearch-minor-mode)))
 
-(add-minor-mode 'reftex-isearch-minor-mode "/I" nil nil
-		'reftex-isearch-minor-mode)
+
+
 
 ;;; reftex-global.el ends here
 

@@ -1,6 +1,6 @@
 ;;; em-banner.el --- sample module that displays a login banner  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1999-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1999-2026 Free Software Foundation, Inc.
 
 ;; Author: John Wiegley <johnw@gnu.org>
 
@@ -41,11 +41,11 @@
 (eval-when-compile
   (require 'cl-lib))
 
+(require 'esh-cmd)
 (require 'esh-util)
 (require 'esh-mode)
-(require 'eshell)
 
-;;;###autoload
+;;;###esh-module-autoload
 (progn
 (defgroup eshell-banner nil
   "This sample module displays a welcome banner at login.
@@ -61,9 +61,8 @@ modules may have a simple template to begin with."
   "The banner message to be displayed when Eshell is loaded.
 This can be any sexp, and should end with at least two newlines."
   :type 'sexp
+  :risky t
   :group 'eshell-banner)
-
-(put 'eshell-banner-message 'risky-local-variable t)
 
 (defcustom eshell-banner-load-hook nil
   "A list of functions to run when `eshell-banner' is loaded."
@@ -71,7 +70,7 @@ This can be any sexp, and should end with at least two newlines."
   :type 'hook
   :group 'eshell-banner)
 
-(defun eshell-banner-initialize ()
+(defun eshell-banner-initialize ()  ;Called from `eshell-mode' via intern-soft!
   "Output a welcome banner on initialization."
   ;; it's important to use `eshell-interactive-print' rather than
   ;; `insert', because `insert' doesn't know how to interact with the
@@ -79,14 +78,9 @@ This can be any sexp, and should end with at least two newlines."
   (unless eshell-non-interactive-p
     (cl-assert eshell-mode)
     (cl-assert eshell-banner-message)
-    (let ((msg (eval eshell-banner-message)))
+    (let ((msg (eshell--eval eshell-banner-message)))
       (cl-assert msg)
       (eshell-interactive-print msg))))
 
 (provide 'em-banner)
-
-;; Local Variables:
-;; generated-autoload-file: "esh-groups.el"
-;; End:
-
 ;;; em-banner.el ends here

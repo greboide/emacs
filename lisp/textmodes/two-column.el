@@ -1,10 +1,10 @@
-;;; two-column.el --- minor mode for editing of two-column text
+;;; two-column.el --- minor mode for editing of two-column text  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1992-1995, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1992-1995, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Daniel Pfeiffer <occitan@esperanto.org>
 ;; Adapted-By: ESR, Daniel Pfeiffer
-;; Keywords: wp
+;; Keywords: text
 
 ;; This file is part of GNU Emacs.
 
@@ -133,50 +133,41 @@
 	'("-%*- %15b --"  (-3 . "%p")  "--%[("  mode-name
 	  minor-mode-alist  "%n"  mode-line-process  ")%]%-")
   "Value of `mode-line-format' for a buffer in two-column minor mode."
-  :type 'sexp
-  :group 'two-column)
+  :type 'sexp)
 
 (defcustom 2C-other-buffer-hook 'text-mode
   "Hook run in new buffer when it is associated with current one."
-  :type 'function
-  :group 'two-column)
+  :type 'function)
 
 (defcustom 2C-separator ""
   "A string inserted between the two columns when merging.
 This gets set locally by \\[2C-split]."
   :type 'string
-  :group 'two-column)
-(put '2C-separator 'permanent-local t)
+  :local 'permanent-only)
 
 (defcustom 2C-window-width 40
   "The width of the first column.  (Must be at least `window-min-width'.)
 This value is local for every buffer that sets it."
   :type 'integer
-  :group 'two-column)
-(make-variable-buffer-local '2C-window-width)
-(put '2C-window-width 'permanent-local t)
+  :local 'permanent)
 
 (defcustom 2C-beyond-fill-column 4
   "Base for calculating `fill-column' for a buffer in two-column minor mode.
 The value of `fill-column' becomes `2C-window-width' for this buffer
 minus this value."
-  :type 'integer
-  :group 'two-column)
+  :type 'integer)
 
 (defcustom 2C-autoscroll t
   "If non-nil, Emacs attempts to keep the two column's buffers aligned."
-  :type 'boolean
-  :group 'two-column)
+  :type 'boolean)
 
 
-(defvar 2C-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map "2" '2C-two-columns)
-    (define-key map [f2] '2C-two-columns)
-    (define-key map "b" '2C-associate-buffer)
-    (define-key map "s" '2C-split)
-    map)
-  "Keymap for commands for setting up two-column mode.")
+(defvar-keymap 2C-mode-map
+  :doc "Keymap for commands for setting up two-column mode."
+  "2"    #'2C-two-columns
+  "<f2>" #'2C-two-columns
+  "b"    #'2C-associate-buffer
+  "s"    #'2C-split)
 
 ;;;###autoload (autoload '2C-command "two-column" () t 'keymap)
 (fset '2C-command 2C-mode-map)
@@ -184,21 +175,19 @@ minus this value."
 ;; This one is for historical reasons and simple keyboards, it is not
 ;; at all mnemonic.  All usual sequences containing 2 were used, and
 ;; f2 could not be set up in a standard way under Emacs 18.
-;;;###autoload (global-set-key "\C-x6" '2C-command)
+;;;###autoload (keymap-global-set "C-x 6" #'2C-command)
 
-;;;###autoload (global-set-key [f2] '2C-command)
+;;;###autoload (keymap-global-set "<f2>" #'2C-command)
 
-(defvar 2C-minor-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map "1" '2C-merge)
-    (define-key map "d" '2C-dissociate)
-    (define-key map "o" '2C-associated-buffer)
-    (define-key map "\^m" '2C-newline)
-    (define-key map "|" '2C-toggle-autoscroll)
-    (define-key map "{" '2C-shrink-window-horizontally)
-    (define-key map "}" '2C-enlarge-window-horizontally)
-    map)
-  "Keymap for commands for use in two-column mode.")
+(defvar-keymap 2C-minor-mode-map
+  :doc "Keymap for commands for use in two-column mode."
+  "1"   #'2C-merge
+  "d"   #'2C-dissociate
+  "o"   #'2C-associated-buffer
+  "RET" #'2C-newline
+  "|"   #'2C-toggle-autoscroll
+  "{"   #'2C-shrink-window-horizontally
+  "}"   #'2C-enlarge-window-horizontally)
 
 (setq minor-mode-map-alist
       (cons (cons '2C-mode
@@ -218,15 +207,13 @@ minus this value."
 ;; Markers seem to be the only buffer-id not affected by renaming a buffer.
 ;; This nevertheless loses when a buffer is killed.  The variable-name is
 ;; required by `describe-mode'.
-(defvar 2C-mode nil
+(defvar-local 2C-mode nil
   "Marker to the associated buffer, if non-nil.")
-(make-variable-buffer-local '2C-mode)
 (put '2C-mode 'permanent-local t)
 
 (setq minor-mode-alist (cons '(2C-mode " 2C") minor-mode-alist))
 
-(defvar 2C-autoscroll-start nil)
-(make-variable-buffer-local '2C-autoscroll-start)
+(defvar-local 2C-autoscroll-start nil)
 
 ;;;;; base functions ;;;;;
 
@@ -283,7 +270,7 @@ some prefix.
 The appearance of the screen can be customized by the variables
 `2C-window-width', `2C-beyond-fill-column', `2C-mode-line-format' and
 `truncate-partial-width-windows'."
-  (add-hook 'post-command-hook '2C-autoscroll nil t)
+  (add-hook 'post-command-hook #'2C-autoscroll nil t)
   (setq fill-column (- 2C-window-width
 		       2C-beyond-fill-column)
 	mode-line-format 2C-mode-line-format
@@ -327,16 +314,17 @@ first and the associated buffer to its right."
 
 
 ;;;###autoload
-(defun 2C-associate-buffer ()
-  "Associate another buffer with this one in two-column minor mode.
+(defun 2C-associate-buffer (buffer)
+  "Associate another BUFFER with this one in two-column minor mode.
 Can also be used to associate a just previously visited file, by
 accepting the proposed default buffer.
 
 \(See  \\[describe-mode] .)"
-  (interactive)
+  (interactive
+   (list (or (2C-other)
+	     (read-buffer "Associate buffer: " (other-buffer)))))
   (let ((b1 (current-buffer))
-	(b2 (or (2C-other)
-		(read-buffer "Associate buffer: " (other-buffer)))))
+	(b2 buffer))
     (setq 2C-mode nil)
     (with-current-buffer b2
       (and (2C-other)
@@ -388,9 +376,8 @@ First column's text    sSs  Second column's text
       (backward-char arg)
       (setq chars (buffer-substring (point) point))
       (skip-chars-forward " \t" point)
-      (make-local-variable '2C-separator)
-      (setq 2C-separator (buffer-substring (point) point)
-	    2C-window-width (+ (fringe-columns 'left)
+      (setq-local 2C-separator (buffer-substring (point) point))
+      (setq 2C-window-width (+ (fringe-columns 'left)
 			       (fringe-columns 'right)
 			       (scroll-bar-columns 'left)
 			       (scroll-bar-columns 'right)

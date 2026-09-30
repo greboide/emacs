@@ -1,7 +1,6 @@
-;;; follow.el --- synchronize windows showing the same buffer
+;;; follow.el --- synchronize windows showing the same buffer  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1995-1997, 1999, 2001-2018 Free Software Foundation,
-;; Inc.
+;; Copyright (C) 1995-2026 Free Software Foundation, Inc.
 
 ;; Author: Anders Lindgren
 ;; Maintainer: emacs-devel@gnu.org
@@ -25,8 +24,8 @@
 
 ;;; Commentary:
 
-;; `Follow mode' is a minor mode for Emacs and XEmacs that
-;; combines windows into one tall virtual window.
+;; `follow-mode' is a minor mode that combines windows into one tall
+;; virtual window.
 ;;
 ;; The feeling of a "virtual window" has been accomplished by the use
 ;; of two major techniques:
@@ -75,13 +74,13 @@
 ;;   immediately below the end of the left-hand window.  As long as
 ;;   `follow-mode' is active, the two windows will follow each other!
 ;;
-;; * Play around and enjoy! Scroll one window and watch the other.
+;; * Play around and enjoy!  Scroll one window and watch the other.
 ;;   Jump to the beginning or end.  Press `Cursor down' at the last
 ;;   line of the left-hand window.  Enter new lines into the
 ;;   text.  Enter long lines spanning several lines, or several
 ;;   windows.
 ;;
-;; * Should you find `Follow' mode annoying, just type
+;; * Should you find Follow mode annoying, just type
 ;;	M-x follow-mode <RETURN>
 ;;   to turn it off.
 
@@ -90,38 +89,35 @@
 ;; visible area of the current buffer.
 ;;
 ;; I recommend adding it, and `follow-mode', to hotkeys in the global
-;; key map.  To do so, add the following lines (replacing `[f7]' and
-;; `[f8]' with your favorite keys) to the init file:
+;; key map.  To do so, add the following lines (replacing "<f7>" and
+;; "<f8>" with your favorite keys) to your init file:
 ;;
-;; (global-set-key [f8] 'follow-mode)
-;; (global-set-key [f7] 'follow-delete-other-windows-and-split)
+;; (keymap-global-set "<f8>" #'follow-mode)
+;; (keymap-global-set "<f7>" #'follow-delete-other-windows-and-split)
 
 
 ;; There exist two system variables that control the appearance of
 ;; lines wider than the window containing them.  The default is to
 ;; truncate long lines whenever a window isn't as wide as the frame.
 ;;
-;; To make sure lines are never truncated, please place the following
-;; lines in your init file:
+;; To make sure lines are never truncated, place the following lines
+;; in your Init file:
 ;;
-;; (setq truncate-lines nil)
-;; (setq truncate-partial-width-windows nil)
+;; (setopt truncate-lines nil)
+;; (setopt truncate-partial-width-windows nil)
 
 
-;; The correct way to configure Follow mode, or any other mode for
-;; that matter, is to create one or more functions that do
-;; whatever you would like to do.  These functions are then added to
-;; a hook.
+;; One way to configure Follow mode is to create one or more functions
+;; that do whatever you would like to do.  These functions are then
+;; added to a hook.
 ;;
-;; The keymap `follow-key-map' contains key bindings activated by
+;; The keymap `follow-mode-map' contains key bindings activated by
 ;; `follow-mode'.
 ;;
 ;; Example:
-;; (add-hook 'follow-mode-hook 'my-follow-mode-hook)
-;;
-;; (defun my-follow-mode-hook ()
-;;    (define-key follow-mode-map "\C-ca" 'your-favorite-function)
-;;    (define-key follow-mode-map "\C-cb" 'another-function))
+;; (with-eval-after-load 'follow
+;;   (keymap-set follow-mode-map "C-c a" #'your-favorite-function)
+;;   (keymap-set follow-mode-map "C-c b" #'another-function))
 
 
 ;; Usage:
@@ -129,66 +125,66 @@
 ;; To activate, issue the command "M-x follow-mode"
 ;; and press Return.  To deactivate, do it again.
 ;;
-;; The following is a list of commands useful when follow-mode is active.
+;; The following is a list of commands useful when `follow-mode' is active.
 ;;
-;;	follow-scroll-up			 C-c . C-v
+;;	`follow-scroll-up'			 C-c . C-v
 ;;		Scroll text in a Follow mode window chain up.
 ;;
-;;	follow-scroll-down			 C-c . v
+;;	`follow-scroll-down'			 C-c . v
 ;;		Like `follow-scroll-up', but in the other direction.
 ;;
-;;	follow-delete-other-windows-and-split	 C-c . 1
+;;	`follow-delete-other-windows-and-split'	 C-c . 1
 ;;		Maximize the visible area of the current buffer,
-;;		and enter Follow mode. 	This is a very convenient
+;;		and enter Follow mode.  	This is a very convenient
 ;;		way to start Follow mode, hence we recommend that
 ;;		this command be added to the global keymap.
 ;;
-;;	follow-recenter				 C-c . C-l
+;;	`follow-recenter'				 C-c . C-l
 ;;		Place point in the center of the middle window,
 ;;		or a specified number of lines from either top or bottom.
 ;;
-;;	follow-switch-to-buffer			 C-c . b
+;;	`follow-switch-to-buffer'			 C-c . b
 ;;		Switch buffer in all windows displaying the current buffer
 ;;		in this frame.
 ;;
-;;	follow-switch-to-buffer-all		 C-c . C-b
+;;	`follow-switch-to-buffer-all'		 C-c . C-b
 ;;		Switch buffer in all windows in the selected frame.
 ;;
-;;	follow-switch-to-current-buffer-all
+;;	`follow-switch-to-current-buffer-all'
 ;;		Show the current buffer in all windows on the current
 ;;		frame and turn on `follow-mode'.
 ;;
-;;	follow-first-window			 C-c . <
+;;	`follow-first-window'			 C-c . <
 ;;		Select the first window in the frame showing the same buffer.
 ;;
-;;	follow-last-window			 C-c . >
+;;	`follow-last-window'			 C-c . >
 ;;		Select the last window in the frame showing the same buffer.
 ;;
-;;	follow-next-window			 C-c . n
+;;	`follow-next-window'			 C-c . n
 ;;		Select the next window in the frame showing the same buffer.
 ;;
-;;	follow-previous-window			 C-c . p
+;;	`follow-previous-window'			 C-c . p
 ;;		Select the previous window showing the same buffer.
 
 
 ;; Well, it seems ok, but what if I really want to look at two different
-;; positions in the text? Here are two simple methods to use:
+;; positions in the text?  Here are two simple methods to use:
 ;;
 ;; 1) Use multiple frames; `follow' mode only affects windows displayed
-;;    in the same frame. (My apologies to you who can't use frames.)
+;;    in the same frame.  (My apologies to you who can't use frames.)
 ;;
 ;; 2) Bind `follow-mode' to key so you can turn it off whenever
-;;    you want to view two locations.  Of course, `follow' mode can
+;;    you want to view two locations.  Of course, `follow-mode' can
 ;;    be reactivated by hitting the same key again.
 ;;
 ;;    Example from my ~/.emacs:
-;;	(global-set-key [f8] 'follow-mode)
+;;	(keymap-global-set "<f8>" #'follow-mode)
 
 ;; Implementation:
 ;;
 ;; The main method by which Follow mode aligns windows is via the
-;; function `follow-post-command-hook', which is run after each
-;; command.  This "fixes up" the alignment of other windows which are
+;; function `follow-pre-redisplay-function', which is run before each
+;; redisplay.  This "fixes up" the alignment of other windows which are
 ;; showing the same Follow mode buffer, on the same frame as the
 ;; selected window.  It does not try to deal with buffers other than
 ;; the buffer of the selected frame, or windows on other frames.
@@ -201,7 +197,6 @@
 
 ;;; Code:
 
-(require 'easymenu)
 (eval-when-compile (require 'cl-lib))
 
 ;;; Variables
@@ -232,39 +227,52 @@ The value of this variable is checked as part of loading Follow mode.
 After that, changing the prefix key requires manipulating keymaps."
   :type 'string
   :group 'follow)
+(make-obsolete-variable 'follow-mode-prefix 'follow-mode-prefix-key "31.1")
 
-(defvar follow-mode-map
-  (let ((mainmap (make-sparse-keymap))
-        (map (make-sparse-keymap)))
-    (define-key map "\C-v"	'follow-scroll-up)
-    (define-key map "\M-v"	'follow-scroll-down)
-    (define-key map "v"		'follow-scroll-down)
-    (define-key map "1"		'follow-delete-other-windows-and-split)
-    (define-key map "b"		'follow-switch-to-buffer)
-    (define-key map "\C-b"	'follow-switch-to-buffer-all)
-    (define-key map "\C-l"	'follow-recenter)
-    (define-key map "<"		'follow-first-window)
-    (define-key map ">"		'follow-last-window)
-    (define-key map "n"		'follow-next-window)
-    (define-key map "p"		'follow-previous-window)
+(defcustom follow-mode-prefix-key (key-description follow-mode-prefix)
+  "Prefix key to use for follow commands in Follow mode."
+  :type 'key
+  :initialize 'custom-initialize-default
+  :set (lambda (symbol value)
+         (defvar follow-mode-map) (defvar follow-mode-submap)
+         (keymap-unset follow-mode-map (symbol-value symbol))
+         (keymap-set follow-mode-map value follow-mode-submap)
+         (set-default symbol value))
+  :group 'follow
+  :version "31.1")
 
-    (define-key mainmap follow-mode-prefix map)
+(defun follow--prefix-key (key)
+  (concat follow-mode-prefix-key " " key))
 
-    ;; Replace the standard `end-of-buffer', when in Follow mode.  (I
-    ;; don't see the point in trying to replace every function that
-    ;; could be enhanced in Follow mode.  End-of-buffer is a special
-    ;; case since it is very simple to define and it greatly enhances
-    ;; the look and feel of Follow mode.)
-    (define-key mainmap [remap end-of-buffer] 'follow-end-of-buffer)
+(defvar-keymap follow-mode-submap
+  "C-v" #'follow-scroll-up
+  "M-v" #'follow-scroll-down
+  "v"   #'follow-scroll-down
+  "1"   #'follow-delete-other-windows-and-split
+  "b"   #'follow-switch-to-buffer
+  "C-b" #'follow-switch-to-buffer-all
+  "C-l" #'follow-recenter
+  "<"   #'follow-first-window
+  ">"   #'follow-last-window
+  "n"   #'follow-next-window
+  "p"   #'follow-previous-window)
 
-    (define-key mainmap [remap scroll-bar-toolkit-scroll] 'follow-scroll-bar-toolkit-scroll)
-    (define-key mainmap [remap scroll-bar-drag] 'follow-scroll-bar-drag)
-    (define-key mainmap [remap scroll-bar-scroll-up] 'follow-scroll-bar-scroll-up)
-    (define-key mainmap [remap scroll-bar-scroll-down] 'follow-scroll-bar-scroll-down)
-    (define-key mainmap [remap mwheel-scroll] 'follow-mwheel-scroll)
+(defvar-keymap follow-mode-map
+  :doc "Minor mode keymap for Follow mode."
+  follow-mode-prefix-key follow-mode-submap
 
-    mainmap)
-  "Minor mode keymap for Follow mode.")
+  ;; Replace the standard `end-of-buffer' when in Follow mode.  (I don't
+  ;; see the point in trying to replace every function that could be
+  ;; enhanced in Follow mode.  End-of-buffer is a special case since it
+  ;; is very simple to define and it greatly enhances the look and feel
+  ;; of Follow mode.)
+  "<remap> <end-of-buffer>"             #'follow-end-of-buffer
+
+  "<remap> <scroll-bar-toolkit-scroll>" #'follow-scroll-bar-toolkit-scroll
+  "<remap> <scroll-bar-drag>"           #'follow-scroll-bar-drag
+  "<remap> <scroll-bar-scroll-up>"      #'follow-scroll-bar-scroll-up
+  "<remap> <scroll-bar-scroll-down>"    #'follow-scroll-bar-scroll-down
+  "<remap> <mwheel-scroll>"             #'follow-mwheel-scroll)
 
 ;; When the mode is not activated, only one item is visible to activate
 ;; the mode.
@@ -311,6 +319,17 @@ are \" Fw\", or simply \"\"."
 	   (remove-hook 'find-file-hook 'follow-find-file-hook))
 	 (set-default symbol value)))
 
+(defcustom follow-hide-ghost-cursors t  ; Maybe this should be nil.
+  "When non-nil, Follow mode attempts to hide the obtrusive cursors
+in the non-selected windows of a window group.
+
+This variable takes effect when `follow-mode' is initialized.
+
+Due to limitations in Emacs, this only operates on the followers
+of the selected window."
+  :type 'boolean
+  :group 'follow)
+
 (defvar follow-cache-command-list
   '(next-line previous-line forward-char backward-char right-char left-char)
   "List of commands that don't require recalculation.
@@ -332,7 +351,7 @@ property `follow-mode-use-cache' to non-nil.")
 ;; Internal variables:
 
 (defvar follow-internal-force-redisplay nil
-  "True when Follow mode should redisplay the windows.")
+  "Non-nil when Follow mode should redisplay the windows.")
 
 (defvar follow-active-menu nil
   "The menu visible when Follow mode is active.")
@@ -345,7 +364,7 @@ property `follow-mode-use-cache' to non-nil.")
 Used by `follow-window-size-change'.")
 
 (defvar follow-windows-start-end-cache nil
-  "Cache used by `follow-window-start-end'.")
+  "Cache used by `follow-window-start' and `follow-window-end'.")
 
 (defvar follow-fixed-window nil
   "If non-nil, the current window must not be scrolled.
@@ -359,7 +378,7 @@ This is typically set by explicit scrolling commands.")
 (defsubst follow-debug-message (&rest args)
   "Like `message', but only active when `follow-debug' is non-nil."
   (if (and (boundp 'follow-debug) follow-debug)
-      (apply 'message args)))
+      (apply #'message args)))
 
 ;;; Cache
 
@@ -383,9 +402,6 @@ This is typically set by explicit scrolling commands.")
 ;;;###autoload
 (define-minor-mode follow-mode
   "Toggle Follow mode.
-With a prefix argument ARG, enable Follow mode if ARG is
-positive, and disable it otherwise.  If called from Lisp, enable
-the mode if ARG is omitted or nil.
 
 Follow mode is a minor mode that combines windows into one tall
 virtual window.  This is accomplished by two main techniques:
@@ -407,8 +423,8 @@ being able to use 144 or 216 lines instead of the normal 72... (your
 mileage may vary).
 
 To split one large window into two side-by-side windows, the commands
-`\\[split-window-right]' or \
-`\\[follow-delete-other-windows-and-split]' can be used.
+\\[split-window-right] or \
+\\[follow-delete-other-windows-and-split] can be used.
 
 Only windows displayed in the same frame follow each other.
 
@@ -421,7 +437,7 @@ Keys specific to Follow mode:
   (if follow-mode
       (progn
 	(add-hook 'compilation-filter-hook 'follow-align-compilation-windows t t)
-	(add-hook 'post-command-hook 'follow-post-command-hook t)
+        (add-function :before pre-redisplay-function 'follow-pre-redisplay-function)
 	(add-hook 'window-size-change-functions 'follow-window-size-change t)
         (add-hook 'after-change-functions 'follow-after-change nil t)
         (add-hook 'isearch-update-post-hook 'follow-post-command-hook nil t)
@@ -430,6 +446,8 @@ Keys specific to Follow mode:
 
         (when isearch-lazy-highlight
           (setq-local isearch-lazy-highlight 'all-windows))
+        (when follow-hide-ghost-cursors
+          (setq-local cursor-in-non-selected-windows nil))
 
         (setq window-group-start-function 'follow-window-start)
         (setq window-group-end-function 'follow-window-end)
@@ -448,7 +466,7 @@ Keys specific to Follow mode:
 	(setq following (buffer-local-value 'follow-mode (car buffers))
 	      buffers (cdr buffers)))
       (unless following
-	(remove-hook 'post-command-hook 'follow-post-command-hook)
+        (remove-function pre-redisplay-function 'follow-pre-redisplay-function)
 	(remove-hook 'window-size-change-functions 'follow-window-size-change)))
 
     (kill-local-variable 'move-to-window-group-line-function)
@@ -458,6 +476,8 @@ Keys specific to Follow mode:
     (kill-local-variable 'set-window-group-start-function)
     (kill-local-variable 'window-group-end-function)
     (kill-local-variable 'window-group-start-function)
+
+    (kill-local-variable 'cursor-in-non-selected-windows)
 
     (remove-hook 'ispell-update-post-hook 'follow-post-command-hook t)
     (remove-hook 'replace-update-post-hook 'follow-post-command-hook t)
@@ -545,7 +565,7 @@ This is an internal function for `follow-scroll-up' and
   (let ((opoint (point))  (owin (selected-window)))
     (while
         ;; If we are too near EOB, try scrolling the previous window.
-        (condition-case nil (progn (scroll-up arg) nil)
+        (condition-case nil (progn (scroll-up-command arg) nil)
           (end-of-buffer
            (condition-case nil (progn (follow-previous-window) t)
              (error
@@ -564,7 +584,7 @@ If ARG is nil, scroll the size of the current window.
 This is an internal function for `follow-scroll-down' and
 `follow-scroll-down-window'."
   (let ((opoint (point)))
-    (scroll-down arg)
+    (scroll-down-command arg)
     (unless (and scroll-preserve-screen-position
                  (get this-command 'scroll-command))
       (goto-char opoint))
@@ -584,7 +604,7 @@ Negative ARG means scroll downward.
 Works like `scroll-up' when not in Follow mode."
   (interactive "P")
   (cond ((not follow-mode)
-	 (scroll-up arg))
+	 (scroll-up-command arg))
 	((eq arg '-)
 	 (follow-scroll-down-window))
 	(t (follow-scroll-up-arg arg))))
@@ -604,7 +624,7 @@ Negative ARG means scroll upward.
 Works like `scroll-down' when not in Follow mode."
   (interactive "P")
   (cond ((not follow-mode)
-	 (scroll-down arg))
+	 (scroll-down-command arg))
 	((eq arg '-)
 	 (follow-scroll-up-window))
 	(t (follow-scroll-down-arg arg))))
@@ -623,13 +643,16 @@ Negative ARG means scroll downward.
 Works like `scroll-up' when not in Follow mode."
   (interactive "P")
   (cond ((not follow-mode)
-	 (scroll-up arg))
+	 (scroll-up-command arg))
 	(arg (follow-scroll-up-arg arg))
         (t
 	 (let* ((windows (follow-all-followers))
 		(end (window-end (car (reverse windows)))))
 	   (if (eq end (point-max))
-	       (signal 'end-of-buffer nil)
+	       (if (or (null scroll-error-top-bottom)
+		       (eobp))
+		   (signal 'end-of-buffer nil)
+		 (goto-char (point-max)))
 	     (select-window (car windows))
 	     ;; `window-end' might return nil.
 	     (if end
@@ -651,22 +674,35 @@ Negative ARG means scroll upward.
 Works like `scroll-down' when not in Follow mode."
   (interactive "P")
   (cond ((not follow-mode)
-	 (scroll-down arg))
+	 (scroll-down-command arg))
 	(arg (follow-scroll-down-arg arg))
         (t
-	 (let* ((windows (follow-all-followers))
-		(win (car (reverse windows)))
-		(start (window-start (car windows))))
+	 (let* ((orig-point (point))
+                (windows (follow-all-followers))
+		(start (window-start (car windows)))
+                (lines 0))
 	   (if (eq start (point-min))
-	       (signal 'beginning-of-buffer nil)
-	     (select-window win)
-	     (goto-char start)
-	     (vertical-motion (- (- (window-height win)
-				    (if header-line-format 2 1)
-				    next-screen-context-lines)))
-	     (set-window-start win (point))
-	     (goto-char start)
-	     (vertical-motion (- next-screen-context-lines 1))
+	       (if (or (null scroll-error-top-bottom)
+		       (bobp))
+		   (signal 'beginning-of-buffer nil)
+		 (goto-char (point-min)))
+             (select-window (car windows))
+             (dolist (win windows)
+               (setq lines
+                     (+ lines
+                        (- (window-height win)
+                           (if header-line-format 2 1) ; Count mode-line, too.
+                           (if tab-line-format 1 0)))))
+             (setq lines (- lines next-screen-context-lines))
+             (goto-char start)
+             (let ((at-top (> (vertical-motion (- lines)) (- lines))))
+               (set-window-start (car windows) (point))
+               (if at-top
+                   (goto-char orig-point)
+                 (goto-char start)
+                 (vertical-motion (- next-screen-context-lines 1))
+                 (if (< orig-point (point))
+                     (goto-char orig-point))))
 	     (setq follow-internal-force-redisplay t))))))
 (put 'follow-scroll-down 'scroll-command t)
 
@@ -842,9 +878,13 @@ from the bottom."
 	   (windows (follow-all-followers))
 	   (win (nth (/ (- (length windows) 1) 2) windows)))
       (select-window win)
-      (goto-char dest)
-      (recenter))))
+      (let ((win-s (window-start)))
+        (goto-char dest)
+        (recenter)
+        (when (< dest win-s)
+          (setq follow-internal-force-redisplay t))))))
 
+(put 'follow-recenter 'isearch-scroll t)
 
 (defun follow-redraw ()
   "Arrange windows displaying the same buffer in successor order.
@@ -928,7 +968,11 @@ used."
   (let* ((win (or win (selected-window)))
 	 (edges (window-inside-pixel-edges win))
 	 (ht (- (nth 3 edges) (nth 1 edges)))
-	 (last-line-pos (posn-point (posn-at-x-y 0 (1- ht) win))))
+	 (last-line-pos (posn-point
+                         (posn-at-x-y 0 (+ (window-header-line-height win)
+                                           (window-tab-line-height win)
+                                           (1- ht))
+                                      win))))
     (if (pos-visible-in-window-p last-line-pos win)
 	(let ((end (window-end win t)))
 	  (list end (pos-visible-in-window-p (point-max) win)))
@@ -1002,8 +1046,8 @@ returned by `follow-windows-start-end'."
       (setq win-start-end (cdr win-start-end)))
     result))
 
-;; Check if point is visible in all windows. (So that
-;; no one will be recentered.)
+;; Check if point is visible in all windows.
+;; (So that no one will be recentered.)
 
 (defun follow-point-visible-all-windows-p (win-start-end)
   "Non-nil when the `window-point' is visible in all windows."
@@ -1051,13 +1095,9 @@ Return the selected window."
       (setq win-start-end (cdr win-start-end)))
     win))
 
-;; Lets select a window showing the end. Make sure we only select it if
-;; it wasn't just moved here. (I.e. M-> shall not unconditionally place
+;; Lets select a window showing the end.  Make sure we only select it if
+;; it wasn't just moved here.  (I.e. M-> shall not unconditionally place
 ;; point in the selected window.)
-;;
-;; (Compatibility kludge: in Emacs `window-end' is equal to `point-max';
-;; in XEmacs, it is equal to `point-max + 1'. Should I really bother
-;; checking `window-end' now when I check `end-of-buffer' explicitly?)
 
 (defun follow-select-if-end-visible (win-start-end)
   "Select and return a window, if end is visible in it."
@@ -1068,10 +1108,7 @@ Return the selected window."
       ;; command.
       (if (and (eq (point-max) (nth 2 (car win-start-end)))
 	       (nth 3 (car win-start-end))
-	       ;; `window-end' might return nil.
-	       (let ((end (window-end (car (car win-start-end)))))
-		 (and end
-		      (eq (point-max) (min (point-max) end)))))
+               (eq (point-max) (window-end (caar win-start-end))))
 	  (progn
 	    (setq win (car (car win-start-end)))
 	    (select-window win)))
@@ -1080,7 +1117,7 @@ Return the selected window."
 
 
 ;; Select a window that will display point if the windows would
-;; be redisplayed with the first window fixed. This is useful for
+;; be redisplayed with the first window fixed.  This is useful for
 ;; example when the user has pressed return at the bottom of a window
 ;; as point is not visible in any window.
 
@@ -1122,9 +1159,8 @@ Otherwise, return nil."
 ;; is nil.  Start every window directly after the end of the previous
 ;; window, to make sure long lines are displayed correctly.
 
-(defvar follow-start-end-invalid t
+(defvar-local follow-start-end-invalid t
   "When non-nil, indicates `follow-windows-start-end-cache' is invalid.")
-(make-variable-buffer-local 'follow-start-end-invalid)
 
 (defun follow-redisplay (&optional windows win preserve-win)
   "Reposition the WINDOWS around WIN.
@@ -1186,7 +1222,7 @@ should be a member of WINDOWS, starts at position START."
       (goto-char guess)
       (while (not done)
 	(if (not (= (vertical-motion 1 (car windows)) 1))
-	    ;; Hit bottom! (Can we really do this?)
+            ;; Hit bottom!  (Can we really do this?)
 	    ;; We'll keep it, since it ensures termination.
 	    (progn
 	      (setq done t)
@@ -1263,10 +1299,31 @@ non-first windows in Follow mode."
 	    (not (eq win top))))  ;; Loop while this is true.
       (set-buffer orig-buffer))))
 
+;;; Pre Display Function
+
+(defvar follow-prev-buffer nil
+  "The buffer current at the last call to `follow-adjust-window' or nil.
+`follow-mode' is not necessarily enabled in this buffer.")
+
+;; This function is added to `pre-redisplay-function' and is thus called
+;; before each redisplay operation.  It supersedes (2018-09) the
+;; former use of the post command hook, and now does the right thing
+;; when a program calls `redisplay' or `sit-for'.
+
+(defun follow-pre-redisplay-function (wins)
+  (if (or (eq wins t)
+          (null wins)
+          (and (listp wins)
+               (memq (selected-window) wins)))
+      (follow-post-command-hook)))
+
 ;;; Post Command Hook
 
-;; The magic little box. This function is called after every command.
-
+;; The magic little box. This function was formerly called after every
+;; command.  It is now called before each redisplay operation (see
+;; `follow-pre-redisplay-function' above), and at the end of several
+;; search/replace commands.  It retains its historical name.
+;;
 ;; This is not as complicated as it seems. It is simply a list of common
 ;; display situations and the actions to take, plus commands for redrawing
 ;; the screen if it should be unaligned.
@@ -1287,9 +1344,33 @@ non-first windows in Follow mode."
 	  (setq follow-windows-start-end-cache nil))
         (follow-adjust-window win)))))
 
+;; NOTE: to debug follow-mode with edebug, it is helpful to add
+;; `follow-post-command-hook' to `post-command-hook' temporarily.  Do
+;; this locally to the target buffer with, say,:
+;; M-: (add-hook 'post-command-hook 'follow-post-command-hook t t)
+;; .
+
 (defun follow-adjust-window (win)
-  ;; Adjust the window WIN and its followers.
+  "Adjust the window WIN and its followers."
   (cl-assert (eq (window-buffer win) (current-buffer)))
+
+  ;; Have we moved out of or into a follow-mode window group?
+  ;; If so, attend to the visibility of the cursors.
+  (when (not (eq (current-buffer) follow-prev-buffer))
+    ;; Do we need to switch off cursor handling in the previous buffer?
+    (when (buffer-live-p follow-prev-buffer)
+      (with-current-buffer follow-prev-buffer
+        (when (and follow-mode
+                   (local-variable-p 'cursor-in-non-selected-windows))
+          (setq cursor-in-non-selected-windows
+                (default-value 'cursor-in-non-selected-windows)))))
+    ;; Do we need to switch on cursor handling in the current buffer?
+    (when (and follow-mode
+               (local-variable-p 'cursor-in-non-selected-windows))
+      (setq cursor-in-non-selected-windows nil))
+    (when (buffer-live-p (current-buffer))
+      (setq follow-prev-buffer (current-buffer))))
+
   (when (and follow-mode
              (not (window-minibuffer-p win)))
     (let ((windows (follow-all-followers win)))
@@ -1385,7 +1466,13 @@ non-first windows in Follow mode."
 	  (unless (eq win (selected-window))
 	    (let ((p (window-point win)))
 	      (set-window-start win (window-start win) nil)
-	      (set-window-point win p))))
+              (if (nth 2 (pos-visible-in-window-p p win t))
+                  ;; p is in a partially visible line.  We can't leave
+                  ;; window-point there, because C-x o back into WIN
+                  ;; would then fail.
+                  (with-selected-window win
+                    (forward-line)) ; redisplay will recenter it in WIN.
+	        (set-window-point win p)))))
 
 	(unless visible
 	  ;; If point may not be visible in the selected window,
@@ -1469,7 +1556,7 @@ non-first windows in Follow mode."
 (declare-function scroll-bar-drag "scroll-bar" (event))
 (declare-function scroll-bar-scroll-up "scroll-bar" (event))
 (declare-function scroll-bar-scroll-down "scroll-bar" (event))
-(declare-function mwheel-scroll "mwheel" (event))
+(declare-function mwheel-scroll "mwheel" (event &optional arg))
 
 (defun follow-scroll-bar-toolkit-scroll (event)
   (interactive "e")
@@ -1579,17 +1666,17 @@ This is updated by redisplay or by calling
 
 (defun follow-window-end (&optional window update)
   "Return position at which display currently ends in the Follow
-  Mode group of windows which includes WINDOW.
+Mode group of windows which includes WINDOW.
 
-  WINDOW must be a live window and defaults to the selected one.
-  This is updated by redisplay, when it runs to completion.
-  Simply changing the buffer text or setting `window-start' does
-  not update this value.
+WINDOW must be a live window and defaults to the selected one.
+This is updated by redisplay, when it runs to completion.
+Simply changing the buffer text or setting `window-start' does
+not update this value.
 
-  Return nil if there is no recorded value.  (This can happen if
-  the last redisplay of WINDOW was preempted, and did not
-  finish.)  If UPDATE is non-nil, compute the up-to-date position
-  if it isn't already recorded."
+Return nil if there is no recorded value.  (This can happen if
+the last redisplay of WINDOW was preempted, and did not
+finish.)  If UPDATE is non-nil, compute the up-to-date position
+if it isn't already recorded."
   (let* ((windows (follow-all-followers window))
          (last (car (last windows))))
     (when (and update follow-start-end-invalid)
@@ -1609,7 +1696,7 @@ overriding motion of point in order to display at this exact start."
 
 (defun follow-pos-visible-in-window-p (&optional pos window partially)
   "Return non-nil if position POS is currently on the frame in one of
-  the windows in the Follow Mode group which includes WINDOW.
+the windows in the Follow Mode group which includes WINDOW.
 
 WINDOW must be a live window and defaults to the selected one.
 
@@ -1628,8 +1715,7 @@ omitted if the character after POS is fully visible; otherwise, RTOP
 and RBOT are the number of pixels off-window at the top and bottom of
 the screen line (\"row\") containing POS, ROWH is the visible height
 of that row, and VPOS is the row number \(zero-based)."
-  (let* ((windows (follow-all-followers window))
-         (last (car (last windows))))
+  (let* ((windows (follow-all-followers window)))
     (when follow-start-end-invalid
       (follow-redisplay windows (car windows)))
     (let* ((cache (follow-windows-start-end windows))
@@ -1657,7 +1743,7 @@ zero means top of the first window in the group, negative means
          (start-end (follow-windows-start-end windows))
          (rev-start-end (reverse start-end))
          (lines 0)
-         middle-window elt count)
+         elt count)
     (select-window
      (cond
       ((null arg)

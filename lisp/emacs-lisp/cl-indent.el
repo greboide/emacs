@@ -1,6 +1,6 @@
 ;;; cl-indent.el --- Enhanced lisp-indent mode  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1987, 2000-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1987, 2000-2026 Free Software Foundation, Inc.
 
 ;; Author: Richard Mlynarik <mly@eddie.mit.edu>
 ;; Created: July 1987
@@ -27,7 +27,7 @@
 
 ;; This package supplies a single entry point, common-lisp-indent-function,
 ;; which performs indentation in the preferred style for Common Lisp code.
-;; It is also a suitable function for indenting Emacs lisp code.
+;; It is also a suitable function for indenting Emacs Lisp code.
 ;;
 ;; To enable it:
 ;;
@@ -46,14 +46,12 @@
   "Maximum depth to backtrack out from a sublist for structured indentation.
 If this variable is 0, no backtracking will occur and forms such as `flet'
 may not be correctly indented."
-  :type 'integer
-  :group 'lisp-indent)
+  :type 'integer)
 
 (defcustom lisp-tag-indentation 1
   "Indentation of tags relative to containing list.
 This variable is used by the function `lisp-indent-tagbody'."
-  :type 'integer
-  :group 'lisp-indent)
+  :type 'integer)
 
 (defcustom lisp-tag-body-indentation 3
   "Indentation of non-tagged lines relative to containing list.
@@ -64,32 +62,30 @@ the special form.  If the value is t, the body of tags will be indented
 as a block at the same indentation as the first s-expression following
 the tag.  In this case, any forms before the first tag are indented
 by `lisp-body-indent'."
-  :type 'integer
-  :group 'lisp-indent)
+  :type 'integer)
 
 (defcustom lisp-backquote-indentation t
   "Whether or not to indent backquoted lists as code.
 If nil, indent backquoted lists as data, i.e., like quoted lists."
-  :type 'boolean
-  :group 'lisp-indent)
+  :type 'boolean)
 
 
-(defcustom lisp-loop-keyword-indentation 3
+(defcustom lisp-loop-keyword-indentation 6
   "Indentation of loop keywords in extended loop forms."
   :type 'integer
-  :group 'lisp-indent)
+  :version "28.1")
 
 
-(defcustom lisp-loop-forms-indentation 5
+(defcustom lisp-loop-forms-indentation 6
   "Indentation of forms in extended loop forms."
   :type 'integer
-  :group 'lisp-indent)
+  :version "28.1")
 
 
-(defcustom lisp-simple-loop-indentation 3
+(defcustom lisp-simple-loop-indentation 1
   "Indentation of forms in simple loop forms."
   :type 'integer
-  :group 'lisp-indent)
+  :version "28.1")
 
 (defcustom lisp-lambda-list-keyword-alignment nil
   "Whether to vertically align lambda-list keywords together.
@@ -107,16 +103,14 @@ If non-nil, alignment is done with the first keyword
                       &key key1 key2)
   #|...|#)"
   :version "24.1"
-  :type 'boolean
-  :group 'lisp-indent)
+  :type 'boolean)
 
 (defcustom lisp-lambda-list-keyword-parameter-indentation 2
   "Indentation of lambda list keyword parameters.
 See `lisp-lambda-list-keyword-parameter-alignment'
 for more information."
   :version "24.1"
-  :type 'integer
-  :group 'lisp-indent)
+  :type 'integer)
 
 (defcustom lisp-lambda-list-keyword-parameter-alignment nil
   "Whether to vertically align lambda-list keyword parameters together.
@@ -135,8 +129,7 @@ If non-nil, alignment is done with the first parameter
                             key3 key4)
   #|...|#)"
   :version "24.1"
-  :type 'boolean
-  :group 'lisp-indent)
+  :type 'boolean)
 
 (defcustom lisp-indent-backquote-substitution-mode t
   "How to indent substitutions in backquotes.
@@ -148,8 +141,7 @@ In any case, do not backtrack beyond a backquote substitution.
 
 Until Emacs 25.1, the nil behavior was hard-wired."
   :version "25.1"
-  :type '(choice (const corrected) (const nil) (const t))
-  :group 'lisp-indent)
+  :type '(choice (const corrected) (const nil) (const t)))
 
 
 (defvar lisp-indent-defun-method '(4 &lambda &body)
@@ -170,14 +162,17 @@ is set to `defun'.")
     (error t)))
 
 (defun lisp-indent-find-method (symbol &optional no-compat)
-  "Find the lisp indentation function for SYMBOL.
+  "Find the Lisp indentation function for SYMBOL.
 If NO-COMPAT is non-nil, do not retrieve indenters intended for
-the standard lisp indent package."
+the standard Lisp indent package."
   (or (and (derived-mode-p 'emacs-lisp-mode)
            (get symbol 'common-lisp-indent-function-for-elisp))
       (get symbol 'common-lisp-indent-function)
       (and (not no-compat)
-           (get symbol 'lisp-indent-function))))
+           (let ((local (assq symbol lisp-indent-local-overrides)))
+             (if local
+                 (cdr local)
+               (get symbol 'lisp-indent-function))))))
 
 (defun common-lisp-loop-part-indentation (indent-point state)
   "Compute the indentation of loop form constituents."
@@ -187,20 +182,20 @@ the standard lisp indent package."
     (when (and (eq lisp-indent-backquote-substitution-mode 'corrected))
       (save-excursion
         (goto-char (elt state 1))
-        (cl-incf loop-indentation
-                 (cond ((eq (char-before) ?,) -1)
-                       ((and (eq (char-before) ?@)
-                             (progn (backward-char)
-                                    (eq (char-before) ?,)))
-                        -2)
-                       (t 0)))))
+        (incf loop-indentation
+              (cond ((eq (char-before) ?,) -1)
+                    ((and (eq (char-before) ?@)
+                          (progn (backward-char)
+                                 (eq (char-before) ?,)))
+                     -2)
+                    (t 0)))))
 
     (goto-char indent-point)
     (beginning-of-line)
     (list
      (cond ((not (lisp-extended-loop-p (elt state 1)))
 	    (+ loop-indentation lisp-simple-loop-indentation))
-	   ((looking-at "^\\s-*\\(:?\\sw+\\|;\\)")
+	   ((looking-at "^\\s-*\\(?::?\\sw+\\|;\\)")
 	    (+ loop-indentation lisp-loop-keyword-indentation))
 	   (t
 	    (+ loop-indentation lisp-loop-forms-indentation)))
@@ -386,10 +381,9 @@ instead."
 					  function)
 			    (setq tentative-defun t))
 			   ((string-match
-                             (eval-when-compile
-                              (concat "\\`\\("
-                                      (regexp-opt '("with" "without" "do"))
-                                      "\\)-"))
+                             (concat "\\`\\("
+                                     (regexp-opt '("with" "without" "do"))
+                                     "\\)-")
                              function)
 			    (setq method '(&lambda &body))))))
                   ;; backwards compatibility.  Bletch.
@@ -409,9 +403,9 @@ instead."
                      ;; ",(...)" or ",@(...)"
                      (when (eq lisp-indent-backquote-substitution-mode
                                'corrected)
-                       (cl-incf sexp-column -1)
+                       (incf sexp-column -1)
                        (when (eq (char-after (1- containing-sexp)) ?\@)
-                         (cl-incf sexp-column -1)))
+                         (incf sexp-column -1)))
                      (cond (lisp-indent-backquote-substitution-mode
                             (setf tentative-calculated normal-indent)
                             (setq depth lisp-indent-maximum-backtracking)
@@ -593,7 +587,7 @@ optional\\|rest\\|key\\|allow-other-keys\\|aux\\|whole\\|body\\|environment\
                    (null (cdr method)))
               (lisp-indent-report-bad-format method))
 
-          (cond ((and tail (not (consp tem)))
+          (cond ((and tail (not (or (consp tem) (symbolp tem))))
                  ;; indent tail of &rest in same way as first elt of rest
                  (throw 'exit normal-indent))
                 ((eq tem '&body)
@@ -715,7 +709,7 @@ optional\\|rest\\|key\\|allow-other-keys\\|aux\\|whole\\|body\\|environment\
 		(forward-sexp 2)
 		(skip-chars-forward " \t\n")
 		(while (looking-at "\\sw\\|\\s_")
-		  (cl-incf nqual)
+                  (incf nqual)
 		  (forward-sexp)
 		  (skip-chars-forward " \t\n"))
 		(> nqual 0)))

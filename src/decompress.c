@@ -1,5 +1,5 @@
 /* Interface to zlib.
-   Copyright (C) 2013-2018 Free Software Foundation, Inc.
+   Copyright (C) 2013-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -25,11 +25,11 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "lisp.h"
 #include "buffer.h"
 #include "composite.h"
-
-#include <verify.h>
+#include "md5.h"
 
 #ifdef WINDOWSNT
 # include <windows.h>
+# include "w32common.h"
 # include "w32.h"
 
 DEF_DLL_FN (int, inflateInit2_,
@@ -65,6 +65,109 @@ init_zlib_functions (void)
 #endif	/* WINDOWSNT */
 
 
+#ifdef HAVE_NATIVE_COMP
+
+# define MD5_BLOCKSIZE 32768 /* From md5.c  */
+
+static char acc_buff[2 * MD5_BLOCKSIZE];
+static ptrdiff_t acc_size;
+
+static void
+accumulate_and_process_md5 (void *data, ptrdiff_t len, struct md5_ctx *ctxt)
+{
+  eassert (len <= MD5_BLOCKSIZE);
+  /* We may optimize this saving some of these memcpy/move using
+     directly the outer buffers but so far don't bother.  */
+  memcpy (acc_buff + acc_size, data, len);
+  acc_size += len;
+  if (acc_size >= MD5_BLOCKSIZE)
+    {
+      acc_size -= MD5_BLOCKSIZE;
+      md5_process_block (acc_buff, MD5_BLOCKSIZE, ctxt);
+      memmove (acc_buff, acc_buff + MD5_BLOCKSIZE, acc_size);
+    }
+}
+
+static void
+final_process_md5 (struct md5_ctx *ctxt)
+{
+  if (acc_size)
+    {
+      md5_process_bytes (acc_buff, acc_size, ctxt);
+      acc_size = 0;
+    }
+}
+
+int
+md5_gz_stream (FILE *source, void *resblock)
+{
+  z_stream stream;
+  unsigned char in[MD5_BLOCKSIZE];
+  unsigned char out[MD5_BLOCKSIZE];
+
+# ifdef WINDOWSNT
+  if (!zlib_initialized)
+    zlib_initialized = init_zlib_functions ();
+  if (!zlib_initialized)
+    {
+      message1 ("zlib library not found");
+      return -1;
+    }
+# endif
+
+  eassert (!acc_size);
+
+  struct md5_ctx ctx;
+  md5_init_ctx (&ctx);
+
+  /* allocate inflate state */
+  stream.zalloc = Z_NULL;
+  stream.zfree = Z_NULL;
+  stream.opaque = Z_NULL;
+  stream.avail_in = 0;
+  stream.next_in = Z_NULL;
+  int res = inflateInit2 (&stream, MAX_WBITS + 32);
+  if (res != Z_OK)
+    return -1;
+
+  do {
+    stream.avail_in = fread (in, 1, MD5_BLOCKSIZE, source);
+    if (ferror (source)) {
+      inflateEnd (&stream);
+      return -1;
+    }
+    if (stream.avail_in == 0)
+      break;
+    stream.next_in = in;
+
+    do {
+      stream.avail_out = MD5_BLOCKSIZE;
+      stream.next_out = out;
+      res = inflate (&stream, Z_NO_FLUSH);
+
+      if (res != Z_OK && res != Z_STREAM_END)
+	return -1;
+
+      accumulate_and_process_md5 (out, MD5_BLOCKSIZE - stream.avail_out, &ctx);
+    } while (stream.avail_in && !stream.avail_out);
+
+  } while (res != Z_STREAM_END);
+
+  final_process_md5 (&ctx);
+  inflateEnd (&stream);
+
+  if (res != Z_STREAM_END)
+    return -1;
+
+  md5_finish_ctx (&ctx, resblock);
+
+  return 0;
+}
+# undef MD5_BLOCKSIZE
+#endif
+
+
+
 struct decompress_unwind_data
 {
   ptrdiff_t old_point, orig, start, nbytes;
@@ -86,7 +189,7 @@ unwind_decompress (void *ddata)
                    0);
       update_compositions (data->start, data->start, CHECK_HEAD);
       /* "Balance" the before-change-functions call, which would
-         otherwise be left "hanging". */
+         otherwise be left "hanging".  */
       signal_after_change (data->orig, data->start - data->orig,
                            data->start - data->orig);
     }
@@ -119,18 +222,24 @@ DEFUN ("zlib-available-p", Fzlib_available_p, Szlib_available_p, 0, 0, 0,
 
 DEFUN ("zlib-decompress-region", Fzlib_decompress_region,
        Szlib_decompress_region,
-       2, 2, 0,
+       2, 3, 0,
        doc: /* Decompress a gzip- or zlib-compressed region.
 Replace the text in the region by the decompressed data.
-On failure, return nil and leave the data in place.
+
+If optional parameter ALLOW-PARTIAL is nil or omitted, then on
+failure, return nil and leave the data in place.  Otherwise, return
+the number of bytes that were not decompressed and replace the region
+text by whatever data was successfully decompressed (similar to gzip).
+If decompression is completely successful return t.
+
 This function can be called only in unibyte buffers.  */)
-  (Lisp_Object start, Lisp_Object end)
+  (Lisp_Object start, Lisp_Object end, Lisp_Object allow_partial)
 {
   ptrdiff_t istart, iend, pos_byte;
   z_stream stream;
   int inflate_status;
   struct decompress_unwind_data unwind_data;
-  ptrdiff_t count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
 
   validate_region (&start, &end);
 
@@ -149,10 +258,10 @@ This function can be called only in unibyte buffers.  */)
 
   /* This is a unibyte buffer, so character positions and bytes are
      the same.  */
-  istart = XINT (start);
-  iend = XINT (end);
+  istart = XFIXNUM (start);
+  iend = XFIXNUM (end);
 
-  /* Do the following before manipulating the gap. */
+  /* Do the following before manipulating the gap.  */
   modify_text (istart, iend);
 
   move_gap_both (iend, iend);
@@ -199,25 +308,31 @@ This function can be called only in unibyte buffers.  */)
       inflate_status = inflate (&stream, Z_NO_FLUSH);
       pos_byte += avail_in - stream.avail_in;
       decompressed = avail_out - stream.avail_out;
-      insert_from_gap (decompressed, decompressed, 0);
+      insert_from_gap (decompressed, decompressed, 0, false);
       unwind_data.nbytes += decompressed;
       maybe_quit ();
     }
   while (inflate_status == Z_OK);
 
+  Lisp_Object ret = Qt;
   if (inflate_status != Z_STREAM_END)
-    return unbind_to (count, Qnil);
+    {
+      if (!NILP (allow_partial))
+        ret = make_int (iend - pos_byte);
+      else
+        return unbind_to (count, Qnil);
+    }
 
   unwind_data.start = 0;
 
   /* Delete the compressed data.  */
-  del_range_2 (istart, istart, /* byte and char offsets are the same. */
+  del_range_2 (istart, istart, /* byte and char offsets are the same */
                iend, iend, 0);
 
   signal_after_change (istart, iend - istart, unwind_data.nbytes);
   update_compositions (istart, istart, CHECK_HEAD);
 
-  return unbind_to (count, Qt);
+  return unbind_to (count, ret);
 }
 
 

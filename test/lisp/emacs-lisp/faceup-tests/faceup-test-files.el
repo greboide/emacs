@@ -1,6 +1,6 @@
-;;; faceup-test-files.el --- Self test of `faceup' using dummy major mode.
+;;; faceup-test-files.el --- Self test of `faceup' using dummy major mode.  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2014-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2014-2026 Free Software Foundation, Inc.
 
 ;; Author: Anders Lindgren
 ;; Keywords: languages, faces
@@ -48,6 +48,7 @@
 
 FILE is interpreted as relative to this source directory."
   (let ((faceup-properties '(face syntax-table help-echo)))
+    (prefer-coding-system 'utf-8)
     (faceup-test-font-lock-file 'faceup-test-mode
                                 (concat
                                  faceup-test-files-dir

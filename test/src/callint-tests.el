@@ -1,6 +1,6 @@
 ;;; callint-tests.el --- unit tests for callint.c    -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2018 Free Software Foundation, Inc.
+;; Copyright (C) 2018-2026 Free Software Foundation, Inc.
 
 ;; Author: Philipp Stephani <phst@google.com>
 
@@ -29,7 +29,8 @@
 
 (ert-deftest call-interactively/incomplete-multibyte-sequence ()
   "Check that Bug#30004 is fixed."
-  (let ((data (should-error (call-interactively (lambda () (interactive "\xFF"))))))
+  (let* ((text-quoting-style 'grave)
+         (data (should-error (call-interactively (lambda () (interactive "\xFF"))))))
     (should
      (equal
       (cdr data)
@@ -50,5 +51,27 @@
     (dotimes (_ (1+ history-length))
       (call-interactively #'ignore t))
     (should (= (length command-history) history-length))))
+
+(defun callint-test-int-args (foo bar &optional zot)
+  (declare (interactive-args
+            (bar 10)
+            (zot 11)))
+  (interactive (list 1 1 1))
+  (+ foo bar zot))
+
+(ert-deftest test-interactive-args ()
+  (let ((history-length 1)
+        (command-history ()))
+    (should (= (call-interactively 'callint-test-int-args t) 3))
+    (should (equal command-history '((callint-test-int-args 1 10 11))))))
+
+(ert-deftest test-many-interactive-args ()
+  "Test that `'call-interactively' does not crash due to bug#81110"
+  (dotimes (_ 10)
+    (let ((str (apply #'concat (make-list 4096 "pp\n"))))
+      (call-interactively (eval `(lambda (&rest args)
+                                   (interactive ,str)
+                                   (length args))
+                                t)))))
 
 ;;; callint-tests.el ends here

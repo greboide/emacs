@@ -1,5 +1,5 @@
 /* Functions taken directly from X sources for use with the Microsoft Windows API.
-   Copyright (C) 1989, 1992-1995, 1999, 2001-2018 Free Software
+   Copyright (C) 1989, 1992-1995, 1999, 2001-2026 Free Software
    Foundation, Inc.
 
 This file is part of GNU Emacs.
@@ -23,6 +23,20 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include <windows.h>
 #include <windowsx.h>
 
+#ifdef WINDOWSNT
+/* Override API version to get the required functionality.  */
+# undef _WIN32_WINNT
+# define _WIN32_WINNT 0x0501
+/* mingw.org's MinGW headers mistakenly omit this enumeration: */
+# ifndef MINGW_W64
+typedef enum _WTS_VIRTUAL_CLASS {
+  WTSVirtualClientData,
+  WTSVirtualFileHandle
+} WTS_VIRTUAL_CLASS;
+# endif
+#include <wtsapi32.h>	/* for WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK */
+#endif	/* WINDOWSNT */
+
 #include "lisp.h"
 #include "frame.h"
 #include "w32term.h"
@@ -36,7 +50,8 @@ CRITICAL_SECTION critsect;
 extern HANDLE keyboard_handle;
 #endif /* WINDOWSNT */
 
-HANDLE input_available = NULL;
+static HANDLE input_available = NULL;
+extern HANDLE interrupt_handle;
 HANDLE interrupt_handle = NULL;
 
 void
@@ -136,13 +151,13 @@ select_palette (struct frame *f, HDC hdc)
     f->output_data.w32->old_palette = NULL;
 
   if (RealizePalette (hdc) != GDI_ERROR)
-  {
-    Lisp_Object frame, framelist;
-    FOR_EACH_FRAME (framelist, frame)
     {
-      SET_FRAME_GARBAGED (XFRAME (frame));
+      Lisp_Object frame, framelist;
+      FOR_EACH_FRAME (framelist, frame)
+	{
+	  SET_FRAME_GARBAGED (XFRAME (frame));
+	}
     }
-  }
 }
 
 void
@@ -157,19 +172,70 @@ deselect_palette (struct frame *f, HDC hdc)
 HDC
 get_frame_dc (struct frame *f)
 {
-  HDC hdc;
+  HDC hdc, paint_dc;
+  HBITMAP back_buffer;
+  HGDIOBJ obj;
+  struct w32_output *output;
 
-  if (f->output_method != output_w32)
+  if (!FRAME_W32_P (f))
     emacs_abort ();
 
   enter_crit ();
+  output = FRAME_OUTPUT_DATA (f);
 
-  hdc = GetDC (f->output_data.w32->window_desc);
+  if (output->paint_dc)
+    {
+      if (output->paint_buffer_width != FRAME_PIXEL_WIDTH (f)
+	  || output->paint_buffer_height != FRAME_PIXEL_HEIGHT (f)
+	  || w32_disable_double_buffering)
+	w32_release_paint_buffer (f);
+      else
+	{
+	  output->paint_buffer_dirty = 1;
+	  return output->paint_dc;
+	}
+    }
+
+  hdc = GetDC (output->window_desc);
 
   /* If this gets called during startup before the frame is valid,
      there is a chance of corrupting random data or crashing. */
   if (hdc)
-    select_palette (f, hdc);
+    {
+      select_palette (f, hdc);
+
+      if (!w32_disable_double_buffering
+	  && FRAME_OUTPUT_DATA (f)->want_paint_buffer)
+	{
+	  back_buffer
+	    = CreateCompatibleBitmap (hdc, FRAME_PIXEL_WIDTH (f),
+				      FRAME_PIXEL_HEIGHT (f));
+
+	  if (back_buffer)
+	    {
+	      paint_dc = CreateCompatibleDC (hdc);
+
+	      if (!paint_dc)
+		DeleteObject (back_buffer);
+	      else
+		{
+		  obj = SelectObject (paint_dc, back_buffer);
+
+		  output->paint_dc_object = obj;
+		  output->paint_dc = paint_dc;
+		  output->paint_buffer_handle = hdc;
+		  output->paint_buffer = back_buffer;
+		  output->paint_buffer_width = FRAME_PIXEL_WIDTH (f);
+		  output->paint_buffer_height = FRAME_PIXEL_HEIGHT (f);
+		  output->paint_buffer_dirty = 1;
+
+		  SET_FRAME_GARBAGED (f);
+
+		  return paint_dc;
+		}
+	    }
+	}
+    }
 
   return hdc;
 }
@@ -179,8 +245,15 @@ release_frame_dc (struct frame *f, HDC hdc)
 {
   int ret;
 
-  deselect_palette (f, hdc);
-  ret = ReleaseDC (f->output_data.w32->window_desc, hdc);
+  /* Avoid releasing the double-buffered DC here, since it'll be
+     released upon the next buffer flip instead.  */
+  if (hdc != FRAME_OUTPUT_DATA (f)->paint_dc)
+    {
+      deselect_palette (f, hdc);
+      ret = ReleaseDC (f->output_data.w32->window_desc, hdc);
+    }
+  else
+    ret = 0;
 
   leave_crit ();
 
@@ -193,9 +266,9 @@ typedef struct int_msg
   struct int_msg *lpNext;
 } int_msg;
 
-int_msg *lpHead = NULL;
-int_msg *lpTail = NULL;
-int nQueue = 0;
+static int_msg *lpHead = NULL;
+static int_msg *lpTail = NULL;
+static int nQueue = 0;
 
 BOOL
 get_next_msg (W32Msg * lpmsg, BOOL bWait)
@@ -355,8 +428,18 @@ drain_message_queue (void)
 
   while (PeekMessage (&msg, NULL, 0, 0, PM_REMOVE))
     {
-      if (msg.message == WM_EMACS_FILENOTIFY)
-	retval = 1;
+      switch (msg.message)
+	{
+#ifdef WINDOWSNT
+	case WM_WTSSESSION_CHANGE:
+	  if (msg.wParam == WTS_SESSION_LOCK)
+	    reset_w32_kbdhook_state ();
+	  break;
+#endif
+	case WM_EMACS_FILENOTIFY:
+	  retval = 1;
+	  break;
+	}
       TranslateMessage (&msg);
       DispatchMessage (&msg);
     }

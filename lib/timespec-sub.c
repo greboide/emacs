@@ -1,10 +1,10 @@
 /* Subtract two struct timespec values.
 
-   Copyright (C) 2011-2018 Free Software Foundation, Inc.
+   Copyright (C) 2011-2026 Free Software Foundation, Inc.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
+   the Free Software Foundation, either version 3 of the License, or
    (at your option) any later version.
 
    This program is distributed in the hope that it will be useful,
@@ -19,51 +19,35 @@
 
 /* Return the difference between two timespec values A and B.  On
    overflow, return an extremal value.  This assumes 0 <= tv_nsec <
-   TIMESPEC_RESOLUTION.  */
+   TIMESPEC_HZ.  */
 
 #include <config.h>
 #include "timespec.h"
 
+#include <stdckdint.h>
 #include "intprops.h"
 
 struct timespec
 timespec_sub (struct timespec a, struct timespec b)
 {
-  time_t rs = a.tv_sec;
-  time_t bs = b.tv_sec;
-  int ns = a.tv_nsec - b.tv_nsec;
-  int rns = ns;
-  time_t tmin = TYPE_MINIMUM (time_t);
-  time_t tmax = TYPE_MAXIMUM (time_t);
-
-  if (ns < 0)
-    {
-      rns = ns + TIMESPEC_RESOLUTION;
-      if (bs < tmax)
-        bs++;
-      else if (- TYPE_SIGNED (time_t) < rs)
-        rs--;
-      else
-        goto low_overflow;
-    }
-
-  /* INT_SUBTRACT_WRAPV is not appropriate since time_t might be unsigned.
-     In theory time_t might be narrower than int, so plain
-     INT_SUBTRACT_OVERFLOW does not suffice.  */
-  if (! INT_SUBTRACT_OVERFLOW (rs, bs) && tmin <= rs - bs && rs - bs <= tmax)
-    rs -= bs;
+  int nsdiff = a.tv_nsec - b.tv_nsec;
+  int borrow = nsdiff < 0;
+  time_t rs;
+  bool v = ckd_sub (&rs, a.tv_sec, b.tv_sec);
+  int rns;
+  if (v == ckd_sub (&rs, rs, borrow))
+    rns = nsdiff + TIMESPEC_HZ * borrow;
   else
     {
-      if (rs < 0)
+      if ((TYPE_MINIMUM (time_t) + TYPE_MAXIMUM (time_t)) / 2 < rs)
         {
-        low_overflow:
-          rs = tmin;
+          rs = TYPE_MINIMUM (time_t);
           rns = 0;
         }
       else
         {
-          rs = tmax;
-          rns = TIMESPEC_RESOLUTION - 1;
+          rs = TYPE_MAXIMUM (time_t);
+          rns = TIMESPEC_HZ - 1;
         }
     }
 

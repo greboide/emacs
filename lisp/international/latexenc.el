@@ -1,6 +1,6 @@
-;;; latexenc.el --- guess correct coding system in LaTeX files -*-coding: utf-8 -*-
+;;; latexenc.el --- guess correct coding system in LaTeX files -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2005-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2005-2026 Free Software Foundation, Inc.
 
 ;; Author: Arne Jørgensen <arne@arnested.dk>
 ;; Keywords: mule, coding system, latex
@@ -31,13 +31,13 @@
 
 ;; If this fails it will search for AUCTeX's TeX-master or tex-mode's
 ;; tex-main-file variable in the local variables section and visit
-;; that file to get the coding system from the master file. This check
+;; that file to get the coding system from the master file.  This check
 ;; can be disabled by setting `latexenc-dont-use-TeX-master-flag' to
 ;; t.
 
 ;; If we have still not found a coding system we will try to use the
 ;; standard tex-mode's `tex-guess-main-file' and get the coding system
-;; from the main file. This check can be disabled by setting
+;; from the main file.  This check can be disabled by setting
 ;; `latexenc-dont-use-tex-guess-main-file-flag' to t.
 
 ;; The functionality is enabled by adding the function
@@ -51,7 +51,6 @@
 
 ;;;###autoload
 (defcustom latex-inputenc-coding-alist
-  (purecopy
   '(("ansinew" . windows-1252) ; MS Windows ANSI encoding, extension of Latin-1
     ("applemac" . mac-roman)
     ("ascii" . us-ascii)
@@ -68,13 +67,13 @@
     ("latin2" . iso-8859-2)
     ("latin3" . iso-8859-3)
     ("latin4" . iso-8859-4)
-    ("latin5" . iso-8859-5)
+    ("latin5" . iso-8859-9)
     ("latin9" . iso-8859-15)
-    ;; ("latin10" . undecided)
+    ("latin10" . iso-8859-16)
     ;; ("macce" . undecided) ; Apple Central European
     ("next" . next) ; The Next encoding
     ("utf8" . utf-8)
-    ("utf8x" . utf-8))) ; used by the Unicode LaTeX package
+    ("utf8x" . utf-8)) ; used by the Unicode LaTeX package
   "Mapping from LaTeX encodings in \"inputenc.sty\" to Emacs coding systems.
 LaTeX encodings are specified with \"\\usepackage[encoding]{inputenc}\".
 Used by the function `latexenc-find-file-coding-system'."
@@ -108,6 +107,8 @@ Return nil if no matching input encoding can be found."
 
 (defvar latexenc-dont-use-tex-guess-main-file-flag nil
   "Non-nil means don't use tex-guessmain-file to find the coding system.")
+
+(defvar tex-start-of-header)
 
 ;;;###autoload
 (defun latexenc-find-file-coding-system (arg-list)
@@ -143,24 +144,32 @@ coding system names is determined from `latex-inputenc-coding-alist'."
 				       (file-name-directory (nth 1 arg-list))
 				     default-directory))
 		latexenc-main-file)
-            ;; Is there a TeX-master or tex-main-file in the local variables
-            ;; section?
+            ;; Is there a TeX-master or tex-main-file in the local
+            ;; variables section or is it globally set to a constant
+            ;; string?
             (unless latexenc-dont-use-TeX-master-flag
               (goto-char (point-max))
 	      (search-backward "\n\^L" (max (- (point-max) 3000) (point-min))
                                'move)
-	      (search-forward "Local Variables:" nil t)
-              (when (re-search-forward
-                     "^%+ *\\(TeX-master\\|tex-main-file\\): *\"\\(.+\\)\""
-                     nil t)
-                (let ((file (match-string 2)))
-                  (dolist (ext `("" ,(if (boundp 'TeX-default-extension)
-                                         (concat "." TeX-default-extension)
-                                       "")
-                                 ".tex" ".ltx" ".dtx" ".drv"))
-                    (if (and (null latexenc-main-file) ;Stop at first.
-                             (file-exists-p (concat file ext)))
-                        (setq latexenc-main-file (concat file ext)))))))
+	      (re-search-forward "^%+ *Local Variables:" nil t)
+              (let ((file (if (re-search-forward
+                               "^%+ *\\(TeX-master\\|tex-main-file\\): *\"\\(.+\\)\""
+                               nil t)
+                              (match-string 2)
+                            (or (and (bound-and-true-p TeX-master)
+                                     (stringp TeX-master)
+                                     TeX-master)
+                                (bound-and-true-p tex-main-file)))))
+                ;; Decode the main file name, assuming it's in UTF-8.
+                (if (stringp file)
+                    (setq file (decode-coding-string file 'utf-8)))
+                (dolist (ext `("" ,(if (boundp 'TeX-default-extension)
+                                       (concat "." TeX-default-extension)
+                                     "")
+                               ".tex" ".ltx" ".dtx" ".drv"))
+                  (if (and (null latexenc-main-file) ;Stop at first.
+                           (file-exists-p (concat file ext)))
+                      (setq latexenc-main-file (concat file ext))))))
             ;; try tex-modes tex-guess-main-file
             (when (and (not latexenc-dont-use-tex-guess-main-file-flag)
                        (not latexenc-main-file))

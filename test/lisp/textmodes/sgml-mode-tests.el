@@ -1,6 +1,6 @@
-;;; sgml-mode-tests.el --- Tests for sgml-mode
+;;; sgml-mode-tests.el --- Tests for sgml-mode  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2015-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2026 Free Software Foundation, Inc.
 
 ;; Author: Przemysław Wojnowski <esperanto@cumego.com>
 ;; Keywords: tests
@@ -125,7 +125,6 @@ The point is set to the beginning of the buffer."
      (should (string= content (buffer-string))))))
 
 (ert-deftest sgml-delete-tag-bug-8203-should-not-delete-apostrophe ()
-  :expected-result :failed
   (sgml-with-content
    "<title>Winter is comin'</title>"
    (sgml-delete-tag 1)
@@ -160,6 +159,77 @@ The point is set to the beginning of the buffer."
       (sgml-quote (point-min) (point-max) t)
       (sgml-quote (point-min) (point-max) t)
       (should (string= "&&" (buffer-string))))))
+
+(ert-deftest sgml-tests--quotes-syntax ()
+  (dolist (str '("a\"b <t>c'd</t>"
+                 "a'b <t>c\"d</t>"
+                 "<t>\"a'</t>"
+                 "<t>'a\"</t>"
+                 "<t>\"a'\"</t>"
+                 "<t>'a\"'</t>"
+                 "a\"b <tag>c'd</tag>"
+                 "<tag>c>'d</tag>"
+                 "<t><!-- \" --></t>"
+                 "<t><!-- ' --></t>"
+                 "<t>(')</t>"
+                 "<t>(\")</t>"
+                 ))
+   (with-temp-buffer
+     (sgml-mode)
+     (insert str)
+     (ert-info ((format "%S" str) :prefix "Test case: ")
+       ;; Check that last tag is parsed as a tag.
+       (should (= 1 (car (syntax-ppss (1- (point-max))))))
+       (should (= 0 (car (syntax-ppss (point-max)))))))))
+
+(ert-deftest sgml-mode-quote-in-long-text ()
+  (with-temp-buffer
+    (sgml-mode)
+    (insert "<t>"
+            ;; `syntax-propertize-wholelines' extends chunk size based
+            ;; on line length, so newlines are significant!
+            (make-string syntax-propertize-chunk-size ?a) "\n"
+            "'"
+            (make-string syntax-propertize-chunk-size ?a) "\n"
+            "</t>")
+    ;; If we just check (syntax-ppss (point-max)) immediately, then
+    ;; we'll end up propertizing the whole buffer in one chunk (so the
+    ;; test is useless).  Simulate something more like what happens
+    ;; when the buffer is viewed normally.
+    (cl-loop for pos from (point-min) to (point-max)
+             by syntax-propertize-chunk-size
+             do (syntax-ppss pos))
+    (syntax-ppss (point-max))
+    ;; Check that last tag is parsed as a tag.
+    (should (= 1 (- (car (syntax-ppss (1- (point-max))))
+                    (car (syntax-ppss (point-max))))))))
+
+(ert-deftest sgml-test-brackets ()
+  "Test fontification of apostrophe preceded by paired-bracket character."
+  (let (brackets)
+    (map-char-table
+     (lambda (key value)
+       (setq brackets (cons (list
+			     (if (consp key)
+				 (list (car key) (cdr key))
+			       key)
+			     value)
+			    brackets)))
+     (unicode-property-table-internal 'paired-bracket))
+    (setq brackets (delete-dups (flatten-tree brackets)))
+    (setq brackets (append brackets (list ?$ ?% ?& ?* ?+ ?/)))
+    (with-temp-buffer
+      (while brackets
+	(let ((char (string (pop brackets))))
+	  (insert (concat "<p>" char "'s</p>\n"))))
+      (html-mode)
+      (font-lock-ensure (point-min) (point-max))
+      (goto-char (point-min))
+      (while (not (eobp))
+	(goto-char (next-single-char-property-change (point) 'face))
+	(let ((val (get-text-property (point) 'face)))
+	  (when val
+	    (should-not (eq val 'font-lock-string-face))))))))
 
 (provide 'sgml-mode-tests)
 ;;; sgml-mode-tests.el ends here

@@ -1,21 +1,21 @@
 /* euidaccess -- check if effective user id can access file
 
-   Copyright (C) 1990-1991, 1995, 1998, 2000, 2003-2006, 2008-2018 Free
+   Copyright (C) 1990-1991, 1995, 1998, 2000, 2003-2006, 2008-2026 Free
    Software Foundation, Inc.
 
    This file is part of the GNU C Library.
 
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 3 of the License, or
-   (at your option) any later version.
+   This file is free software: you can redistribute it and/or modify
+   it under the terms of the GNU Lesser General Public License as
+   published by the Free Software Foundation; either version 2.1 of the
+   License, or (at your option) any later version.
 
-   This program is distributed in the hope that it will be useful,
+   This file is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU Lesser General Public License for more details.
 
-   You should have received a copy of the GNU General Public License
+   You should have received a copy of the GNU Lesser General Public License
    along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* Written by David MacKenzie and Torbjorn Granlund.
@@ -29,9 +29,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined _WIN32 && ! defined __CYGWIN__
-# include <io.h>
-#else
+#if !(defined _WIN32 && ! defined __CYGWIN__)
 # include "root-uid.h"
 #endif
 
@@ -81,14 +79,14 @@ euidaccess (const char *file, int mode)
 {
 #if HAVE_FACCESSAT                   /* glibc, AIX 7, Solaris 11, Cygwin 1.7 */
   return faccessat (AT_FDCWD, file, mode, AT_EACCESS);
-#elif defined EFF_ONLY_OK               /* IRIX, OSF/1, Interix */
+#elif defined EFF_ONLY_OK               /* Interix */
   return access (file, mode | EFF_ONLY_OK);
 #elif defined ACC_SELF                  /* AIX */
   return accessx (file, mode, ACC_SELF);
 #elif HAVE_EACCESS                      /* FreeBSD */
   return eaccess (file, mode);
 #elif defined _WIN32 && ! defined __CYGWIN__  /* mingw */
-  return _access (file, mode);
+  return access (file, mode);
 #else              /* Mac OS X, NetBSD, OpenBSD, HP-UX, Solaris, Cygwin, BeOS */
 
   uid_t uid = getuid ();
@@ -107,19 +105,19 @@ euidaccess (const char *file, int mode)
      safe.  */
 
   if (mode == F_OK)
-    return stat (file, &stats);
+    {
+      int result = stat (file, &stats);
+      return result != 0 && errno == EOVERFLOW ? 0 : result;
+    }
   else
     {
-      int result;
-      int saved_errno;
-
       if (uid != euid)
         setreuid (euid, uid);
       if (gid != egid)
         setregid (egid, gid);
 
-      result = access (file, mode);
-      saved_errno = errno;
+      int result = access (file, mode);
+      int saved_errno = errno;
 
       /* Restore them.  */
       if (uid != euid)
@@ -137,13 +135,12 @@ euidaccess (const char *file, int mode)
      correct on systems that have ACLs or the like.  However, it's
      better than nothing, and it is reentrant.  */
 
-  unsigned int granted;
   if (uid == euid && gid == egid)
     /* If we are not set-uid or set-gid, access does the same.  */
     return access (file, mode);
 
-  if (stat (file, &stats) != 0)
-    return -1;
+  if (stat (file, &stats) == -1)
+    return mode == F_OK && errno == EOVERFLOW ? 0 : -1;
 
   /* The super-user can read and write any file, and execute any file
      that anyone can execute.  */
@@ -164,6 +161,7 @@ euidaccess (const char *file, int mode)
     return 0;                   /* The file exists.  */
 
   /* Convert the file's permission bits to traditional form.  */
+  unsigned int granted;
   if (S_IRUSR == (4 << 6) && S_IWUSR == (2 << 6) && S_IXUSR == (1 << 6)
       && S_IRGRP == (4 << 3) && S_IWGRP == (2 << 3) && S_IXGRP == (1 << 3)
       && S_IROTH == (4 << 0) && S_IWOTH == (2 << 0) && S_IXOTH == (1 << 0))
@@ -205,16 +203,12 @@ weak_alias (__euidaccess, euidaccess)
 int
 main (int argc, char **argv)
 {
-  char *file;
-  int mode;
-  int err;
-
   if (argc < 3)
     abort ();
-  file = argv[1];
-  mode = atoi (argv[2]);
+  char *file = argv[1];
+  int mode = atoi (argv[2]);
 
-  err = euidaccess (file, mode);
+  int err = euidaccess (file, mode);
   printf ("%d\n", err);
   if (err != 0)
     error (0, errno, "%s", file);

@@ -3,6 +3,7 @@
 @comment %**start of header
 @setfilename ../../info/ebrowse.info
 @settitle A Class Browser for C++
+@documentlanguage en
 @include docstyle.texi
 @setchapternewpage odd
 @syncodeindex fn cp
@@ -11,7 +12,7 @@
 @copying
 This file documents Ebrowse, a C++ class browser for GNU Emacs.
 
-Copyright @copyright{} 2000--2018 Free Software Foundation, Inc.
+Copyright @copyright{} 2000--2026 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document
@@ -513,8 +514,8 @@ practical than to clutter up the buffer list with dozens of member
 buffers.
 
 If you want to display more than one member list at a time you can
-@dfn{freeze} its member buffer. Freezing a member buffer prevents it
-from being overwritten the next time you display a member list. You can
+@dfn{freeze} its member buffer.  Freezing a member buffer prevents it
+from being overwritten the next time you display a member list.  You can
 toggle this buffer status at any time.
 
 Every member list display command in the tree buffer can be used with a
@@ -735,7 +736,7 @@ context menu.
 
 Classes can be marked for operations similar to the standard Emacs
 commands @kbd{M-x tags-search} and @kbd{M-x tags-query-replace} (see
-also @xref{Tags-like Functions}.)
+also @pxref{Tags-like Functions}.)
 
 @table @kbd
 @cindex toggle mark
@@ -747,7 +748,7 @@ menu.
 @cindex unmark all
 @item M a
 Unmark all classes.  With prefix argument @kbd{C-u}, mark all classes in
-the tree. Since this command operates on the whole buffer, it can also be
+the tree.  Since this command operates on the whole buffer, it can also be
 found in the buffer's object menu.
 @end table
 

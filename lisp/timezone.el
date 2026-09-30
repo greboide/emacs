@@ -1,10 +1,9 @@
-;;; timezone.el --- time zone package for GNU Emacs
+;;; timezone.el --- time zone package for GNU Emacs  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1990-1993, 1996, 1999, 2001-2018 Free Software
+;; Copyright (C) 1990-1993, 1996, 1999, 2001-2026 Free Software
 ;; Foundation, Inc.
 
-;; Author: Masanobu Umeda
-;; Maintainer: umerin@mse.kyutech.ac.jp
+;; Author: Masanobu Umeda <umerin@mse.kyutech.ac.jp>
 ;; Keywords: news
 
 ;; This file is part of GNU Emacs.
@@ -52,9 +51,12 @@
     ("GMT-7"  .  -700) ("GMT-8"  .  -800) ("GMT-9"  .  -900)
     ("GMT-10" . -1000) ("GMT-11" . -1100) ("GMT-12" . -1200))
   "Time differentials of timezone from GMT in +-HHMM form.
-This list is obsolescent, and is present only for backwards compatibility,
-because time zone names are ambiguous in practice.
-Use `current-time-zone' instead.")
+This list is obsolete, and is present only for backwards compatibility,
+because time zone names are ambiguous in practice; for example, abbreviations
+like \"PST\" can change meaning with time.")
+(make-obsolete-variable
+ 'timezone-world-timezones
+ "use numeric time zone abbreviations or `current-time-zone' instead." "32.1")
 
 (defvar timezone-months-assoc
   '(("JAN" .  1)("FEB" .  2)("MAR" .  3)
@@ -73,8 +75,7 @@ if nil, the local time zone is assumed."
     (timezone-make-arpa-date (aref new 0) (aref new 1) (aref new 2)
 			     (timezone-make-time-string
 			      (aref new 3) (aref new 4) (aref new 5))
-			     (aref new 6))
-    ))
+			     (aref new 6))))
 
 (defun timezone-make-date-sortable (date &optional local timezone)
   "Convert DATE to a sortable date string.
@@ -85,8 +86,7 @@ if nil, the local time zone is assumed."
   (let ((new (timezone-fix-time date local timezone)))
     (timezone-make-sortable-date (aref new 0) (aref new 1) (aref new 2)
 				 (timezone-make-time-string
-				  (aref new 3) (aref new 4) (aref new 5)))
-    ))
+				  (aref new 3) (aref new 4) (aref new 5)))))
 
 
 ;;
@@ -98,10 +98,7 @@ if nil, the local time zone is assumed."
 Optional argument TIMEZONE specifies a time zone."
   (let ((zone
 	 (if (listp timezone)
-	     (let* ((m (timezone-zone-to-minute timezone))
-		    (absm (if (< m 0) (- m) m)))
-	       (format "%c%02d%02d"
-		       (if (< m 0) ?- ?+) (/ absm 60) (% absm 60)))
+	     (format-time-string "%z" 0 (or timezone 0))
 	   timezone)))
     (format "%02d %s %04d %s %s"
 	    day
@@ -287,14 +284,14 @@ or an integer of the form +-HHMM, or a time zone name."
 
 (defun timezone-time-from-absolute (date seconds)
   "Compute the UTC time equivalent to DATE at time SECONDS after midnight.
-Return a list suitable as an argument to `current-time-zone',
+Return a Lisp timestamp suitable as an argument to `current-time-zone',
 or nil if the date cannot be thus represented.
 DATE is the number of days elapsed since the (imaginary)
 Gregorian date Sunday, December 31, 1 BC."
   (let* ((current-time-origin 719163)
 	    ;; (timezone-absolute-from-gregorian 1 1 1970)
 	 (days (- date current-time-origin))
-	 (seconds-per-day (float 86400))
+	 (seconds-per-day 86400)
 	 (day-seconds (* days seconds-per-day)))
     (condition-case nil (time-add day-seconds seconds)
       (range-error))))
@@ -305,11 +302,10 @@ Return a list in the same format as `current-time-zone's result,
 or nil if the local time zone could not be computed.
 DATE is the number of days elapsed since the (imaginary)
 Gregorian date Sunday, December 31, 1 BC."
-   (and (fboundp 'current-time-zone)
-	(let ((utc-time (timezone-time-from-absolute date seconds)))
-	  (and utc-time
-	       (let ((zone (current-time-zone utc-time)))
-		 (and (car zone) zone))))))
+  (let ((utc-time (timezone-time-from-absolute date seconds)))
+    (and utc-time
+	 (let ((zone (current-time-zone utc-time)))
+	   (and (car zone) zone)))))
 
 (defun timezone-fix-time (date local timezone)
   "Convert DATE (default timezone LOCAL) to YYYY-MM-DD-HH-MM-SS-ZONE vector.

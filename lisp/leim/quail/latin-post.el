@@ -1,6 +1,6 @@
-;;; latin-post.el --- Quail packages for inputting various European characters  -*-coding: utf-8;-*-
+;;; latin-post.el --- Quail packages for inputting various European characters  -*-coding: utf-8; lexical-binding: t -*-
 
-;; Copyright (C) 1997-1998, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1997-1998, 2001-2026 Free Software Foundation, Inc.
 ;; Copyright (C) 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005,
 ;;   2006, 2007, 2008, 2009, 2010, 2011
 ;;   National Institute of Advanced Industrial Science and Technology (AIST)
@@ -215,7 +215,15 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
   others     |    /    | s/ -> ß
 
 Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
-" nil t nil nil nil nil nil nil nil nil t)
+"
+ '(("\C-?" . quail-delete-last-char)
+   (">" . quail-next-translation)
+   ("\C-f" . quail-next-translation)
+   ([right] . quail-next-translation)
+   ("<" . quail-prev-translation)
+   ("\C-b" . quail-prev-translation)
+   ([left] . quail-prev-translation))
+ t nil nil nil nil nil nil nil nil t)
 
 (quail-define-rules
  ("A'" ?Á)
@@ -246,9 +254,9 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("R'" ?Ŕ)
  ("R~" ?Ř)
  ("S'" ?Ś)
- ("S," ?Ş)
+ ("S," "ŞȘ") ; the second variant is for Romanian
  ("S~" ?Š)
- ("T," ?Ţ)
+ ("T," "ŢȚ") ; the second variant is for Romanian
  ("T~" ?Ť)
  ("U'" ?Ú)
  ("U:" ?Ű)
@@ -286,10 +294,10 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("r'" ?ŕ)
  ("r~" ?ř)
  ("s'" ?ś)
- ("s," ?ş)
+ ("s," "şș") ; the second variant is for Romanian
  ("s/" ?ß)
  ("s~" ?š)
- ("t," ?ţ)
+ ("t," "ţț") ; the second variant is for Romanian
  ("t~" ?ť)
  ("u'" ?ú)
  ("u:" ?ű)
@@ -739,6 +747,54 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("z~~" ["z~"])
  )
 
+;;; Hawaiian postfix input method.  It's a small subset of Latin-4
+;;; with the addition of an ʻokina mapping.  Hopefully the ʻokina shows
+;;; correctly on most displays.
+
+;;; This reference is an authoritative guide to Hawaiian orthography:
+;;; https://www2.hawaii.edu/~strauch/tips/HawaiianOrthography.html
+
+;;; Initial coding 2018-09-08 Bob Newell, Honolulu, Hawaiʻi
+;;; Comments to bobnewell@bobnewell.net
+
+(quail-define-package
+ "hawaiian-postfix" "Hawaiian Postfix" "H<" t
+ "Hawaiian characters input method with postfix modifiers
+
+             | postfix | examples
+ ------------+---------+----------
+  ʻokina     |    \\=`    | \\=` -> ʻ
+  kahakō     |    -    | a- -> ā
+
+Doubling the postfix separates the letter and postfix. a-- -> a-
+" nil t nil nil nil nil nil nil nil nil t)
+
+(quail-define-rules
+ ("A-" ?Ā)
+ ("E-" ?Ē)
+ ("I~" ?Ĩ)
+ ("O-" ?Ō)
+ ("U-" ?Ū)
+ ("a-" ?ā)
+ ("e-" ?ē)
+ ("i-" ?ī)
+ ("o-" ?ō)
+ ("u-" ?ū)
+ ("`" ?ʻ)
+
+ ("A--" ["A-"])
+ ("E--" ["E-"])
+ ("I--" ["I-"])
+ ("O--" ["O-"])
+ ("U--" ["U-"])
+ ("a--" ["a-"])
+ ("e--" ["e-"])
+ ("i--" ["i-"])
+ ("o--" ["o-"])
+ ("u--" ["u-"])
+ ("``"  ["`"])
+ )
+
 (quail-define-package
  "latin-5-postfix" "Latin-5" "5<" t
  "Latin-5 characters input method with postfix modifiers
@@ -889,7 +945,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
 
 (quail-define-package
  "danish-postfix" "Latin-1" "DA<" t
- "Danish input method (rule: AE -> Æ, OE -> Ø, AA -> Å, E\\=' -> É)
+ "Danish input method (rule: AE -> Æ, OE -> Ø, AA -> Å, E\\=' -> É, E= -> €)
 
 Doubling the postfix separates the letter and postfix: e.g. aee -> ae
 "
@@ -903,6 +959,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("AA" ?Å)
  ("aa" ?å)
  ("E'" ?É)
+ ("E=" ?€)
  ("e'" ?é)
 
  ("AEE" ["AE"])
@@ -912,6 +969,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("AAA" ["AA"])
  ("aaa" ["aa"])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e''" ["e'"])
  )
 
@@ -986,6 +1044,7 @@ AE  -> Ä
 AEE -> AE
 OE  -> Ö
 OEE -> OE
+E= -> €
 "
  nil t nil nil nil nil nil nil nil nil t)
 
@@ -994,11 +1053,13 @@ OEE -> OE
  ("ae" ?ä)
  ("OE" ?Ö)
  ("oe" ?ö)
+ ("E=" ?€)
 
  ("AEE" ["AE"])
  ("aee" ["ae"])
  ("OEE" ["OE"])
  ("oee" ["oe"])
+ ("E==" ["E="])
  )
 
 (quail-define-package
@@ -1013,6 +1074,8 @@ Par exemple: a\\=` -> à   e\\=' -> é.
 En doublant la frappe des diacritiques, ils s'isoleront de la lettre.
 Par exemple: e\\='\\=' -> e\\='
 
+€ est produit par E=.
+
 Œ est produit par O/."
  nil t nil nil nil nil nil nil nil nil t)
 
@@ -1025,6 +1088,7 @@ Par exemple: e\\='\\=' -> e\\='
  ("E'" ?É)
  ("E^" ?Ê)
  ("E\"" ?Ë)
+ ("E=" ?€)
  ("e`" ?è)
  ("e'" ?é)
  ("e^" ?ê)
@@ -1056,6 +1120,7 @@ Par exemple: e\\='\\=' -> e\\='
  ("E''" ["E'"])
  ("E^^" ["E^"])
  ("E\"\"" ["E\""])
+ ("E==" ["E="])
  ("e``" ["e`"])
  ("e''" ["e'"])
  ("e^^" ["e^"])
@@ -1092,6 +1157,7 @@ ue  -> ü (not after a/e/q)
 uee -> ue
 sz  -> ß
 szz -> sz
+E= -> €
 "
  nil t nil nil nil nil nil nil nil nil t)
 
@@ -1104,6 +1170,7 @@ szz -> sz
  ("ue" ?ü)
  ("sz" ?ß)
  ("SZ" ?ẞ)
+ ("E=" ?€)
 
  ("AEE" ["AE"])
  ("aee" ["ae"])
@@ -1120,6 +1187,7 @@ szz -> sz
  ("Aue" ["Aue"])
  ("que" ["que"])
  ("Que" ["Que"])
+ ("E==" ["E="])
 )
 
 (quail-define-package
@@ -1136,6 +1204,7 @@ AE -> Æ
 OE -> Ö
 D/ -> Ð (eth)
 T/ -> Þ (thorn)
+E= -> €
 
 Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
 " nil t nil nil nil nil nil nil nil nil t)
@@ -1190,7 +1259,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
 
 a\\=` -> à    A\\=` -> À    e\\=' -> é    << -> «
 e\\=` -> è    E\\=` -> È    E\\=' -> É    >> -> »
-i\\=` -> ì    I\\=` -> Ì               o_ -> º
+i\\=` -> ì    I\\=` -> Ì    E= -> €       o_ -> º
 o\\=` -> ò    O\\=` -> Ò               a_ -> ª
 u\\=` -> ù    U\\=` -> Ù
 
@@ -1204,6 +1273,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\=`\\=` -> a\\=`
  ("a`" ?à)
  ("E`" ?È)
  ("E'" ?É)
+ ("E=" ?€)
  ("e`" ?è)
  ("e'" ?é)
  ("I`" ?Ì)
@@ -1221,6 +1291,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\=`\\=` -> a\\=`
  ("a``" ["a`"])
  ("E``" ["E`"])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e``" ["e`"])
  ("e''" ["e'"])
  ("I``" ["I`"])
@@ -1235,9 +1306,68 @@ Doubling the postfix separates the letter and postfix: e.g. a\\=`\\=` -> a\\=`
  ("a__" ["a_"])
  )
 
+;; Input modes of various orthographies for the Lakota language.
+;; I'd like to acknowledge the elders and ancestors who fought
+;; to keep the language and culture alive.
+;; Grant Shangreaux <grant@churls.world> 2021-05-23
+
+(quail-define-package
+ "lakota-white-hat-postfix" "Lakota" "Lak " t
+ "Lakota White Hat orthography input method with postfix modifiers.
+The `f' key produces the nasal ŋ while unused letters `r' and `v' add
+the combining dot above and macron diacritics respectively.  This allows
+production of all the consonants:
+
+cv -> c̄    hr -> ḣ    pv -> p̄    tv -> t̄
+cr -> ċ    kv -> k̄    pr -> ṗ    tr -> ṫ
+gr -> ġ    kr -> k̇    sr -> ṡ    zr -> ż
+
+The glottal stop is produced by repeating the ' character.  This orthography
+does not use stress diacritics on vowels. Mit̄ak̄uyep̄i p̄ilamayayap̄ilo."
+nil t nil nil nil nil nil nil nil nil t)
+
+(quail-define-rules
+ ("f" ?ŋ)
+ ("''" ?’)
+ ;; using hex representation as these characters combine with the ? syntax
+ ("r" #x307)                            ; COMBINING DOT ABOVE
+ ("v" #x304))                            ; COMBINING MACRON
+
+
+
+(quail-define-package
+ "lakota-slo-postfix" "Lakota" "SLO " t
+ "Suggested Lakota Orthography input method with postfix modifier.
+To add stress to a vowel, simply type the single quote ' after the vowel.
+The glottal stop is produced by repeating the ' character.  All other
+characters are bound to a single key.  Mitákuyepi philámayayapi ló."
+nil t nil nil nil nil nil nil nil nil t)
+
+(quail-define-rules
+ ;; accented vowels
+ ("a'" ?á) ("A'" ?Á)
+ ("e'" ?é) ("E'" ?É)
+ ("i'" ?í) ("I'" ?Í)
+ ("o'" ?ó) ("O'" ?Ó)
+ ("u'" ?ú) ("U'" ?Ú)
+
+ ;; consonants with caron
+ ("c" ?č) ("C" ?Č)
+ ("j" ?ȟ) ("J" ?Ȟ)
+ ("q" ?ǧ) ("Q" ?Ǧ)
+ ("x" ?ž) ("X" ?Ž)
+ ("r" ?š) ("R" ?Š)
+
+ ;; velar nasal n
+ ("f" ?ŋ)
+
+ ;; glottal stop
+ ("''" ?’))
+
 (quail-define-package
  "norwegian-postfix" "Latin-1" "NO<" t
- "Norwegian (Norsk) input method (rule: AE->Æ   OE->Ø   AA->Å   E\\='->É)
+ "Norwegian (Norsk) input method (rule: AE->Æ   OE->Ø   AA->Å   E\\='->É
+  E= -> €)
 
 Doubling the postfix separates the letter and postfix: e.g. aee -> ae
 "
@@ -1251,6 +1381,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("AA" ?Å)
  ("aa" ?å)
  ("E'" ?É)
+ ("E=" ?€)
  ("e'" ?é)
 
  ("AEE" ["AE"])
@@ -1260,6 +1391,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("AAA" ["AA"])
  ("aaa" ["aa"])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e''" ["e'"])
  )
 
@@ -1274,6 +1406,7 @@ aa -> å
 a\" -> ä
 o\" -> ö
 e\\=' -> é
+E= -> €
 
 Doubling the postfix separates the letter and postfix:
 aee -> ae   o\"\" -> o\"   etc.
@@ -1291,6 +1424,7 @@ aee -> ae   o\"\" -> o\"   etc.
  ("O\"" ?Ö)
  ("o\"" ?ö)
  ("E'" ?É)
+ ("E=" ?€)
  ("e'" ?é)
 
  ("AEE" ["AE"])
@@ -1304,6 +1438,7 @@ aee -> ae   o\"\" -> o\"   etc.
  ("O\"\"" ["O\""])
  ("o\"\"" ["o\""])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e''" ["e'"])
  )
 
@@ -1313,6 +1448,7 @@ aee -> ae   o\"\" -> o\"   etc.
 
 A\\=' -> Á
 E\\=' -> É
+E= -> €
 I\\=' -> Í
 O\\=' -> Ó
 U\\=' -> Ú
@@ -1328,6 +1464,7 @@ a\\='\\=' -> a\\='   n~~ -> n~, etc.
  ("A'" ?Á)
  ("a'" ?á)
  ("E'" ?É)
+ ("E=" ?€)
  ("e'" ?é)
  ("I'" ?Í)
  ("i'" ?í)
@@ -1345,6 +1482,7 @@ a\\='\\=' -> a\\='   n~~ -> n~, etc.
  ("A''" ["A'"])
  ("a''" ["a'"])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e''" ["e'"])
  ("I''" ["I'"])
  ("i''" ["i'"])
@@ -1362,7 +1500,8 @@ a\\='\\=' -> a\\='   n~~ -> n~, etc.
 
 (quail-define-package
  "swedish-postfix" "Latin-1" "SV<" t
- "Swedish (Svenska) input method (rule: AA -> Å   AE -> Ä   OE -> Ö   E\\=' -> É)
+ "Swedish (Svenska) input method
+(rule: AA -> Å   AE -> Ä   OE -> Ö   E\\=' -> É  E= -> €)
 
 Doubling the postfix separates the letter and postfix: e.g. aee -> ae
 " nil t nil nil nil nil nil nil nil nil t)
@@ -1375,6 +1514,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("OE" ?Ö)
  ("oe" ?ö)
  ("E'" ?É)
+ ("E=" ?€)
  ("e'" ?é)
 
  ("AAA" ["AA"])
@@ -1384,6 +1524,7 @@ Doubling the postfix separates the letter and postfix: e.g. aee -> ae
  ("OEE" ["OE"])
  ("oee" ["oe"])
  ("E''" ["E'"])
+ ("E==" ["E="])
  ("e''" ["e'"])
  )
 
@@ -1475,6 +1616,7 @@ Doubling the postfix separates the letter and postfix: e.g. a^^ -> a^
 ;; Italian	(itln)
 ;; Spanish	(spnsh)
 ;; Dvorak	(dvorak)
+;; Colemak	(colemak)
 ;;
 ;;; 92.12.15  created for Mule Ver.0.9.6 by Takahashi N. <ntakahas@etl.go.jp>
 ;;; 92.12.29  modified by Takahashi N. <ntakahas@etl.go.jp>
@@ -2083,6 +2225,55 @@ Dead accent is right to æ." nil t t t t nil nil nil nil nil t)
  ("?" ?Z)
  )
 
+;;
+(quail-define-package
+ "english-colemak" "English" "CM@" t
+ "English (ASCII) input method simulating Colemak keyboard"
+ nil t t t t nil nil nil nil nil t)
+
+;; 1!  2@  3#  4$  5%  6^  7&  8*  9(  0)  -_ =+  `~
+;;  qQ  wW  fF  pP  gG  jJ  lL  uU  yY  ;:  [{  ]}
+;;   aA  rR  sS  tT  dD  hH  nN  eE  iI  oO  '"  \|
+;;    zZ  xX  cC  vV  bB  kK  mM  ,<  .>  /?
+
+(quail-define-rules
+ ("e" ?f)
+ ("r" ?p)
+ ("t" ?g)
+ ("y" ?j)
+ ("u" ?l)
+ ("i" ?u)
+ ("o" ?y)
+ ("p" ?\;)
+ ("s" ?r)
+ ("d" ?s)
+ ("f" ?t)
+ ("g" ?d)
+ ("j" ?n)
+ ("k" ?e)
+ ("l" ?i)
+ (";" ?o)
+ ("n" ?k)
+
+ ("E" ?F)
+ ("R" ?P)
+ ("T" ?G)
+ ("Y" ?J)
+ ("U" ?L)
+ ("I" ?U)
+ ("O" ?Y)
+ ("P" ?\:)
+ ("S" ?R)
+ ("D" ?S)
+ ("F" ?T)
+ ("G" ?D)
+ ("J" ?N)
+ ("K" ?E)
+ ("L" ?I)
+ (":" ?O)
+ ("N" ?K)
+ )
+
 (quail-define-package
  "latin-postfix" "Latin" "L<" t
  "Latin character input method with postfix modifiers.
@@ -2098,6 +2289,7 @@ of characters from a single Latin-N charset.
   tilde      |    ~    | a~ -> ã
   cedilla    |    ,    | c, -> ç
   ogonek     |    ,    | a, -> ą
+  macron     |    -    | a- -> ā   g- -> ḡ   e/- -> ǣ   -- -> ¯
   breve      |    ~    | a~ -> ă
   caron      |    ~    | c~ -> č
   dbl. acute |    :    | o: -> ő
@@ -2105,19 +2297,61 @@ of characters from a single Latin-N charset.
   dot        |    .    | z. -> ż
   stroke     |    /    | d/ -> đ
   nordic     |    /    | d/ -> ð   t/ -> þ   a/ -> å   e/ -> æ   o/ -> ø
+  symbols    |    ^    | r^ -> ®   t^ -> ™
+  super      |    ^    | 0^ -> ⁰   1^ -> ¹   +^ -> ⁺   -^ -> ⁻
+  subscript  |    _    | 0_ -> ₀   1_ -> ₁   +_ -> ₊   -_ -> ₋
   others     |    /    | s/ -> ß   ?/ -> ¿   !/ -> ¡   // -> °   o/ -> œ
+             |    /    | 2/ -> ½   3/ -> ¾   4/ -> ?¼
+             |    [    | \\='[ -> ‘  \"[ -> “
+             |    ]    | \\='] -> ’  \"] -> ”
+             |    ,    | \\=', -> ‚  \", -> „
              | various | << -> «   >> -> »   o_ -> º   a_ -> ª
 
 Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
 " nil t nil nil nil nil nil nil nil nil t)
 
-;; Fixme: ¦ § ¨ © ¬ ­ ® ¯ ± ² ³ ´ µ ¶ · ¸ ¹ ¼ ½ ¾ × ÷
+;; Fixme: ¦ § ¨ © ¬ ± ´ µ ¶ · ¸ × ÷
 (quail-define-rules
+ ("'[" ?‘)
+ ("']" ?’)
+ ("\"[" ?“)
+ ("\"]" ?”)
+ ("\"," ?„)
+ ("'," ?‚)
+ ("2/" ?½)
+ ("3/" ?¾)
+ ("4/" ?¼)
+ ("0^" ?⁰)
+ ("1^" ?¹)
+ ("2^" ?²)
+ ("3^" ?³)
+ ("4^" ?⁴)
+ ("5^" ?⁵)
+ ("6^" ?⁶)
+ ("7^" ?⁷)
+ ("8^" ?⁸)
+ ("9^" ?⁹)
+ ("+^" ?⁺)
+ ("-^" ?⁻)
+ ("0_" ?₀)
+ ("1_" ?₁)
+ ("2_" ?₂)
+ ("3_" ?₃)
+ ("4_" ?₄)
+ ("5_" ?₅)
+ ("6_" ?₆)
+ ("7_" ?₇)
+ ("8_" ?₈)
+ ("9_" ?₉)
+ ("+_" ?₊)
+ ("-_" ?₋)
  (" _" ? )
  ("!/" ?¡)
  ("//" ?°)
  ("<<" ?\«)
  (">>" ?\»)
+ ("<~" ?\‹)
+ (">~" ?\›)
  ("?/" ?¿)
  ("$/" ?£)
  ("$/" ?¤)
@@ -2143,11 +2377,13 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("E-" ?Ē)
  ("E." ?Ė)
  ("E/" ?Æ)
+ ("E/-" ?Ǣ)
  ("E\"" ?Ë)
  ("E^" ?Ê)
  ("E`" ?È)
  ("E~" ?Ě)
  ("G," ?Ģ)
+ ("G-" ?Ḡ)
  ("G." ?Ġ)
  ("G^" ?Ĝ)
  ("G~" ?Ğ)
@@ -2203,6 +2439,13 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("U`" ?Ù)
  ("U~" ?Ũ)
  ("U~" ?Ŭ)
+ ("W^" ?Ŵ)
+ ("W`" ?Ẁ)
+ ("W'" ?Ẃ)
+ ("W\"" ?Ẅ)
+ ("W." ?Ẇ)
+ ("W-." ?Ẉ)
+ ("W-'" ?Ⱳ)
  ("Y'" ?Ý)
  ("Y\"" ?Ÿ)
  ("Y=" ?¥)
@@ -2233,12 +2476,14 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("e-" ?ē)
  ("e." ?ė)
  ("e/" ?æ)
+ ("e/-" ?ǣ)
  ("e\"" ?ë)
  ("e^" ?ê)
  ("e`" ?è)
  ("e~" ?ě)
  ("e=" ?€)
  ("g," ?ģ)
+ ("g-" ?ḡ)
  ("g." ?ġ)
  ("g^" ?ĝ)
  ("g~" ?ğ)
@@ -2276,6 +2521,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("o~" ?õ)
  ("r'" ?ŕ)
  ("r," ?ŗ)
+ ("r^" ?®)
  ("r~" ?ř)
  ("s'" ?ś)
  ("s," ?ş)
@@ -2285,6 +2531,7 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("t," ?ţ)
  ("t/" ?þ)
  ("t/" ?ŧ)
+ ("t^" ?™)
  ("t~" ?ť)
  ("u'" ?ú)
  ("u," ?ų)
@@ -2296,17 +2543,61 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("u`" ?ù)
  ("u~" ?ũ)
  ("u~" ?ŭ)
+ ("w^" ?ŵ)
+ ("w`" ?ẁ)
+ ("w'" ?ẃ)
+ ("w\"" ?ẅ)
+ ("w." ?ẇ)
+ ("w-." ?ẉ)
+ ("w/" ?ẘ)
+ ("w-'" ?ⱳ)
  ("y'" ?ý)
  ("y\"" ?ÿ)
  ("z'" ?ź)
  ("z." ?ż)
  ("z~" ?ž)
+ ("--" ?¯)
 
+ ("'[[" ["'["])
+ ("']]" ["']"])
+ ("\"[[" ["\"["])
+ ("\"]]" ["\"]"])
+ ("\",," ["\","])
+ ("',," ["',"])
+ ("2//" ["2/"])
+ ("3//" ["3/"])
+ ("4//" ["4/"])
+ ("0^^" ["0^"])
+ ("1^^" ["1^"])
+ ("2^^" ["2^"])
+ ("3^^" ["3^"])
+ ("4^^" ["4^"])
+ ("5^^" ["5^"])
+ ("6^^" ["6^"])
+ ("7^^" ["7^"])
+ ("8^^" ["8^"])
+ ("9^^" ["9^"])
+ ("+^^" ["+^"])
+ ("-^^" ["-^"])
+ ("0__" ["0_"])
+ ("1__" ["1_"])
+ ("2__" ["2_"])
+ ("3__" ["3_"])
+ ("4__" ["4_"])
+ ("5__" ["5_"])
+ ("6__" ["6_"])
+ ("7__" ["7_"])
+ ("8__" ["8_"])
+ ("9__" ["9_"])
+ ("+__" ["+_"])
+ ("-__" ["-_"])
  (" __" [" _"])
  ("!//" ["!/"])
  ("///" ["//"])
  ("<<<" ["<<"])
  (">>>" [">>"])
+ ("<~~" ["<~"])
+ (">~~" [">~"])
  ("?//" ["?/"])
  ("$//" ["$/"])
  ("A''" ["A'"])
@@ -2329,11 +2620,13 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("E--" ["E-"])
  ("E.." ["E."])
  ("E//" ["E/"])
+ ("E/--" ["E/-"])
  ("E\"\"" ["E\""])
  ("E^^" ["E^"])
  ("E``" ["E`"])
  ("E~~" ["E~"])
  ("G,," ["G,"])
+ ("G--" ["G-"])
  ("G.." ["G."])
  ("G^^" ["G^"])
  ("G~~" ["G~"])
@@ -2384,6 +2677,13 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("U^^" ["U^"])
  ("U``" ["U`"])
  ("U~~" ["U~"])
+ ("W^^" ["W^"])
+ ("W``" ["W`"])
+ ("W''" ["W'"])
+ ("W\"\"" ["W\""])
+ ("W.." ["W."])
+ ("W-.." ["W-."])
+ ("W-''" ["W-'"])
  ("Y''" ["Y'"])
  ("Y\"\"" ["Y\""])
  ("Y==" ["Y="])
@@ -2412,12 +2712,14 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("e--" ["e-"])
  ("e.." ["e."])
  ("e//" ["e/"])
+ ("e/--" ["e/-"])
  ("e\"\"" ["e\""])
  ("e^^" ["e^"])
  ("e``" ["e`"])
  ("e==" ["e="])
  ("e~~" ["e~"])
  ("g,," ["g,"])
+ ("g--" ["g-"])
  ("g.." ["g."])
  ("g^^" ["g^"])
  ("g~~" ["g~"])
@@ -2471,11 +2773,20 @@ Doubling the postfix separates the letter and postfix: e.g. a\\='\\=' -> a\\='
  ("u^^" ["u^"])
  ("u``" ["u`"])
  ("u~~" ["u~"])
+ ("w^^" ["w^"])
+ ("w``" ["w`"])
+ ("w''" ["w'"])
+ ("w\"\"" ["w\""])
+ ("w.." ["w."])
+ ("w-.." ["w-."])
+ ("w-''" ["w-'"])
+ ("w//" ["w/"])
  ("y''" ["y'"])
  ("y\"\"" ["y\""])
  ("z''" ["z'"])
  ("z.." ["z."])
  ("z~~" ["z~"])
+ ("---" ["--"])
  )
 
 ;; Derived from Slovenian.kmap from Yudit

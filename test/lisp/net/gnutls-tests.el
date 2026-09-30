@@ -1,6 +1,6 @@
-;;; gnutls-tests.el --- Test suite for gnutls.el
+;;; gnutls-tests.el --- Test suite for gnutls.el  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2017-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2017-2026 Free Software Foundation, Inc.
 
 ;; Author: Ted Zlatanov <tzz@lifelogs.com>
 
@@ -30,6 +30,14 @@
 (require 'gnutls)
 (require 'hex-util)
 
+(declare-function gnutls-symmetric-decrypt "gnutls.c")
+(declare-function gnutls-symmetric-encrypt "gnutls.c")
+(declare-function gnutls-hash-mac "gnutls.c")
+(declare-function gnutls-hash-digest "gnutls.c")
+(declare-function gnutls-ciphers "gnutls.c")
+(declare-function gnutls-digests "gnutls.c")
+(declare-function gnutls-macs "gnutls.c")
+
 (defvar gnutls-tests-message-prefix "")
 
 (defsubst gnutls-tests-message (format-string &rest args)
@@ -42,7 +50,12 @@
 
 (defvar gnutls-tests-internal-macs-upcased
   (mapcar (lambda (sym) (cons sym (intern (upcase (symbol-name sym)))))
-          (secure-hash-algorithms)))
+          ;; Remove the SHA-3 algorithms.  Currently, the GNUTLS_MAC_SHA3_*
+          ;; macros are reserved, but unimplemented.  See:
+          ;; <https://www.gnutls.org/manual/html_node/Hash-and-MAC-functions.html>.
+          (seq-remove (lambda (sym)
+                        (string-prefix-p "sha3-" (symbol-name sym)))
+                      (secure-hash-algorithms))))
 
 (defvar gnutls-tests-tested-macs
   (when (gnutls-available-p)
@@ -241,6 +254,7 @@
 
 (ert-deftest test-gnutls-005-aead-ciphers ()
   "Test the GnuTLS AEAD ciphers"
+  :tags '(:expensive-test)
   (skip-unless (memq 'AEAD-ciphers (gnutls-available-p)))
   (setq gnutls-tests-message-prefix "AEAD verification: ")
   (let ((keys '("mykey" "mykey2"))

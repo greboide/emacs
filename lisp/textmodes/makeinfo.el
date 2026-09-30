@@ -1,6 +1,6 @@
-;;; makeinfo.el --- run makeinfo conveniently
+;;; makeinfo.el --- run makeinfo conveniently  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1991, 1993, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1991, 1993, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Robert J. Chassell
 ;; Maintainer: emacs-devel@gnu.org
@@ -34,10 +34,10 @@
 ;;; Keybindings (defined in `texinfo.el')
 
 ;; makeinfo bindings
-; (define-key texinfo-mode-map "\C-c\C-m\C-r" 'makeinfo-region)
-; (define-key texinfo-mode-map "\C-c\C-m\C-b" 'makeinfo-buffer)
-; (define-key texinfo-mode-map "\C-c\C-m\C-k" 'kill-compilation)
-; (define-key texinfo-mode-map "\C-c\C-m\C-l"
+; (keymap-set texinfo-mode-map "C-c C-m C-r" 'makeinfo-region)
+; (keymap-set texinfo-mode-map "C-c C-m C-b" 'makeinfo-buffer)
+; (keymap-set texinfo-mode-map "C-c C-m C-k" 'kill-compilation)
+; (keymap-set texinfo-mode-map "C-c C-m C-l"
 ;   'makeinfo-recenter-compilation-buffer)
 
 ;;; Code:
@@ -56,19 +56,21 @@
   :group 'docs)
 
 
-(defcustom makeinfo-run-command "makeinfo"
+(defcustom makeinfo-run-command
+  (cond ((executable-find "makeinfo") "makeinfo")
+        ((executable-find "texi2any") "texi2any")
+        (t "makeinfo"))
   "Command used to run `makeinfo' subjob.
 The name of the file is appended to this string, separated by a space."
   :type 'string
-  :group 'makeinfo)
+  :version "31.1")
 
 (defcustom makeinfo-options "--fill-column=70"
   "String containing options for running `makeinfo'.
 Do not include `--footnote-style' or `--paragraph-indent';
 the proper way to specify those is with the Texinfo commands
 `@footnotestyle' and `@paragraphindent'."
-  :type 'string
-  :group 'makeinfo)
+  :type 'string)
 
 (require 'texinfo)
 
@@ -87,6 +89,7 @@ the proper way to specify those is with the Texinfo commands
 
 ;;; The `makeinfo' function definitions
 
+;;;###autoload
 (defun makeinfo-region (region-beginning region-end)
   "Make Info file from region of current Texinfo file, and switch to it.
 
@@ -95,7 +98,7 @@ apply to a temporary file, not the original; use the `makeinfo-buffer'
 command to gain use of `next-error'."
 
   (interactive "r")
-  (let (filename-or-header
+  (let (;; filename-or-header
         filename-or-header-beginning
         filename-or-header-end)
     ;; Cannot use `let' for makeinfo-temp-file or
@@ -175,11 +178,10 @@ command to gain use of `next-error'."
 	     t
              'makeinfo-compilation-sentinel-region)))))))
 
-(defun makeinfo-next-error (arg reset)
-  "This function is used to disable `next-error' if the user has
-used `makeinfo-region'.  Since the compilation process is used on
-a temporary file in that case, calling `next-error' would give
-nonsensical results."
+(defun makeinfo-next-error (_arg _reset)
+  "This is used to disable `next-error' if the user has used `makeinfo-region'.
+Since the compilation process is used on a temporary file in that
+case, calling `next-error' would give nonsensical results."
   (error "Use `makeinfo-buffer' to gain use of the `next-error' command"))
 
 ;; Actually run makeinfo.  COMMAND is the command to run.  If
@@ -224,6 +226,7 @@ nonsensical results."
         (match-string 1)
       "Top")))
 
+;;;###autoload
 (defun makeinfo-buffer ()
   "Make Info file from current buffer.
 
@@ -268,6 +271,7 @@ Use the \\[next-error] command to move to the next error
       (Info-revert-find-node
        makeinfo-output-file-name makeinfo-output-node-name))))
 
+;;;###autoload
 (defun makeinfo-recenter-compilation-buffer (linenum)
   "Redisplay `*compilation*' buffer so most recent output can be seen.
 The last line of the buffer is displayed on
@@ -286,7 +290,10 @@ line LINE of the window, or centered if LINE is nil."
       (pop-to-buffer old-buffer)
       )))
 
-;;; Place `provide' at end of file.
 (provide 'makeinfo)
+
+;; Local Variables:
+;; generated-autoload-file: "texinfo-loaddefs.el"
+;; End:
 
 ;;; makeinfo.el ends here

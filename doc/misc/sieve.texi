@@ -1,9 +1,8 @@
 \input texinfo                  @c -*-texinfo-*-
 
-@include gnus-overrides.texi
-
 @setfilename ../../info/sieve.info
 @settitle Emacs Sieve Manual
+@documentlanguage en
 @include docstyle.texi
 @synindex fn cp
 @synindex vr cp
@@ -12,7 +11,7 @@
 @copying
 This file documents the Emacs Sieve package, for server-side mail filtering.
 
-Copyright @copyright{} 2001--2018 Free Software Foundation, Inc.
+Copyright @copyright{} 2001--2026 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document
@@ -127,7 +126,7 @@ bindings to manage Sieve scripts remotely. @xref{Managing Sieve}.
 @kindex C-c RET
 @findex sieve-manage
 @cindex manage remote sieve script
-Open a connection to a remote server using the Managesieve protocol.
+Open a connection to a remote server using the Manage Sieve protocol.
 
 @item C-c C-l
 @kindex C-c C-l
@@ -215,6 +214,12 @@ Bury the Manage Sieve buffer without closing the connection.
 @findex sieve-help
 Displays help in the minibuffer.
 
+@item g
+@kindex g
+@findex sieve-refresh-scriptlist
+Refresh list of scripts found on the currently opened server.
+Update contents of the current sieve buffer.
+
 @item Q
 @kindex Q
 @findex sieve-manage-quit
@@ -238,8 +243,8 @@ the @code{fileinto} command.
 @example
 require "fileinto";
 
-if address "sender" "owner-w3-beta@@xemacs.org" @{
-        fileinto "INBOX.w3-beta";
+if address "sender" "emacs-devel@@gnu.org" @{
+        fileinto "INBOX.emacs-devel";
 @}
 @end example
 
@@ -341,7 +346,7 @@ Indicate which script on the server should be active.
 The Emacs Sieve package implements all or parts of a small but
 hopefully growing number of RFCs and drafts documents.  This chapter
 lists the relevant ones.  They can all be fetched from
-@uref{http://quimby.gnus.org/notes/}.
+@uref{https://quimby.gnus.org/notes/}.
 
 @table @dfn
 

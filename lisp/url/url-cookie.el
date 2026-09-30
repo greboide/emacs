@@ -1,6 +1,6 @@
 ;;; url-cookie.el --- URL cookie support  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1996-1999, 2004-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996-1999, 2004-2026 Free Software Foundation, Inc.
 
 ;; Keywords: comm, data, processes, hypermedia
 
@@ -26,6 +26,8 @@
 (require 'url-util)
 (require 'url-parse)
 (require 'url-domsuf)
+(require 'generate-lisp-file)
+(require 'subr-x)
 
 (eval-when-compile (require 'cl-lib))
 
@@ -37,6 +39,7 @@
 
 ;; A cookie is stored internally as a vector of 7 slots
 ;; [ url-cookie NAME VALUE EXPIRES LOCALPART DOMAIN SECURE ]
+;; LOCALPART corresponds to the Path attribute.
 
 (cl-defstruct (url-cookie
             (:constructor url-cookie-create)
@@ -55,16 +58,14 @@
 
 (defcustom url-cookie-confirmation nil
   "If non-nil, confirmation by the user is required to accept HTTP cookies."
-  :type 'boolean
-  :group 'url-cookie)
+  :type 'boolean)
 
 (defcustom url-cookie-multiple-line nil
   "If nil, HTTP requests put all cookies for the server on one line.
-Some web servers, such as http://www.hotmail.com/, only accept cookies
+Some web servers, such as https://www.hotmail.com/, only accept cookies
 when they are on one line.  This is broken behavior, but just try
 telling Microsoft that."
-  :type 'boolean
-  :group 'url-cookie)
+  :type 'boolean)
 
 (defvar url-cookies-changed-since-last-save nil
   "Whether the cookies list has changed since the last save operation.")
@@ -72,7 +73,8 @@ telling Microsoft that."
 (defun url-cookie-parse-file (&optional fname)
   "Load FNAME, default `url-cookie-file'."
   ;; It's completely normal for the cookies file not to exist yet.
-  (load (or fname url-cookie-file) t t))
+  (let ((warning-inhibit-types '((files missing-lexbind-cookie))))
+    (load (or fname url-cookie-file) t t)))
 
 (defun url-cookie-parse-file-netscape (filename &optional long-session)
   "Load cookies from FILENAME in Netscape/Mozilla format.
@@ -103,19 +105,21 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 		    ;; reuse a browser session, so to prevent the
 		    ;; cookie from being detected as expired straight
 		    ;; away, make it expire a year from now
-		    (expires (format-time-string
-			      "%d %b %Y %T [GMT]"
-			      (seconds-to-time
-			       (let ((s (string-to-number (nth 4 fields))))
-				 (if (and (= s 0) long-session)
-				     (seconds-to-time (+ (* 365 24 60 60) (float-time)))
-				   s)))))
+		    (expires (let ((system-time-locale "C"))
+                               (format-time-string
+			        "%d %b %Y %T [GMT]"
+			        (let ((s (string-to-number (nth 4 fields))))
+				  (if (and (zerop s) long-session)
+				      (time-add nil (* 365 24 60 60))
+				    s)))))
 		    (key (nth 5 fields))
 		    (val (nth 6 fields)))
-		(cl-incf n)
-		;;(message "adding <%s>=<%s> exp=<%s> dom=<%s> path=<%s> sec=%S" key val expires dom path secure)
-		(url-cookie-store key val expires dom path secure)
-		))
+                (incf n)
+                (if (string-empty-p dom)
+                    (error "Invalid cookie: empty host/domain")
+                  ;;(message "adding <%s>=<%s> exp=<%s> dom=<%s> path=<%s> sec=%S" key val expires dom path secure)
+                  (let ((inhibit-message t))
+                    (url-cookie-store key val expires dom path secure)))))
 	     (t
 	      (message "ignoring malformed cookie line <%s>" line)))))
 	(forward-line))
@@ -151,7 +155,7 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
     (url-cookie-clean-up)
     (url-cookie-clean-up t)
     (with-temp-buffer
-      (insert ";; Emacs-W3 HTTP cookies file\n"
+      (insert ";; Emacs-W3 HTTP cookies file  -*- lexical-binding: t -*-\n"
 	      ";; Automatically generated file!!! DO NOT EDIT!!!\n\n"
 	      "(setq url-cookie-storage\n '")
       (let ((print-length nil) (print-level nil))
@@ -159,11 +163,8 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 	(insert ")\n(setq url-cookie-secure-storage\n '")
 	(pp url-cookie-secure-storage (current-buffer)))
       (insert ")\n")
-      (insert "\n;; Local Variables:\n"
-              ";; version-control: never\n"
-              ";; no-byte-compile: t\n"
-              ";; End:\n")
-      (set (make-local-variable 'version-control) 'never)
+      (generate-lisp-file-trailer fname :inhibit-provide t :autoloads t)
+      (setq-local version-control 'never)
       (write-file fname))
     (setq url-cookies-changed-since-last-save nil))))
 
@@ -171,12 +172,19 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
   "Store a cookie."
   (when (> (length name) 0)
     (let ((storage (if secure url-cookie-secure-storage url-cookie-storage))
-          tmp found-domain)
-      ;; First, look for a matching domain.
-      (if (setq found-domain (assoc domain storage))
-          ;; Need to either stick the new cookie in existing domain storage
+          (host
+           (condition-case nil
+               (url-host url-current-object)
+             (wrong-type-argument
+              (url-lazy-message "url-cookie-store: failed to get host \
+from url-current-object; falling back to domain: %s" domain)
+              domain)))
+          tmp found-host)
+      ;; First, look for a matching host.
+      (if (setq found-host (assoc host storage))
+          ;; Need to either stick the new cookie in existing host storage
           ;; or possibly replace an existing cookie if the names match.
-          (unless (dolist (cur (setq storage (cdr found-domain)) tmp)
+          (unless (dolist (cur (setq storage (cdr found-host)) tmp)
                     (and (equal localpart (url-cookie-localpart cur))
                          (equal name (url-cookie-name cur))
                          (progn
@@ -184,15 +192,15 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
                            (setf (url-cookie-value cur) value)
                            (setq tmp t))))
             ;; New cookie.
-            (setcdr found-domain (cons
-                                  (url-cookie-create :name name
-                                                     :value value
-                                                     :expires expires
-                                                     :domain domain
-                                                     :localpart localpart
-                                                     :secure secure)
-                                  (cdr found-domain))))
-        ;; Need to add a new top-level domain.
+            (setcdr found-host (cons
+                                (url-cookie-create :name name
+                                                   :value value
+                                                   :expires expires
+                                                   :domain domain
+                                                   :localpart localpart
+                                                   :secure secure)
+                                  (cdr found-host))))
+        ;; Need to add a new top-level host.
         (setq tmp (url-cookie-create :name name
                                      :value value
                                      :expires expires
@@ -200,11 +208,11 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
                                      :localpart localpart
                                      :secure secure))
         (cond (storage
-               (setcdr storage (cons (list domain tmp) (cdr storage))))
+               (setcdr storage (cons (list host tmp) (cdr storage))))
               (secure
-               (setq url-cookie-secure-storage (list (list domain tmp))))
+               (setq url-cookie-secure-storage (list (list host tmp))))
               (t
-               (setq url-cookie-storage (list (list domain tmp)))))))))
+               (setq url-cookie-storage (list (list host tmp)))))))))
 
 (defun url-cookie-expired-p (cookie)
   "Return non-nil if COOKIE is expired."
@@ -220,29 +228,27 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 		     (append url-cookie-secure-storage url-cookie-storage)
 		   url-cookie-storage))
 	(case-fold-search t)
-	cookies retval localpart-match)
+        retval localpart-match)
     (dolist (cur storage)
-      (setq cookies (cdr cur))
-      (if (and (car cur)
-	       (string-match
-                (concat "^.*"
-                        (regexp-quote
-                         ;; Remove the dot from wildcard domains
-                         ;; before matching.
-			 (if (eq ?. (aref (car cur) 0))
-                             (substring (car cur) 1)
-                           (car cur)))
-                        "$") host))
-	  ;; The domains match - a possible hit!
-	  (dolist (cur cookies)
-	    (and (if (and (stringp
-			   (setq localpart-match (url-cookie-localpart cur)))
-			  (stringp localpart))
-		     (string-match (concat "^" (regexp-quote localpart-match))
-				   localpart)
-		   (equal localpart localpart-match))
-		 (not (url-cookie-expired-p cur))
-		 (setq retval (cons cur retval))))))
+      (and-let* ((cookies (cdr cur))
+                 ;; Remove the dot from wildcard hosts before matching.
+                 (found-host (string-remove-prefix "." (car cur))))
+        (if (string-match
+             (concat "^.*" (regexp-quote found-host) "$")
+             host)
+            ;; The hosts match - a possible hit!
+            (dolist (cur cookies)
+              (and (if (and (stringp
+                             (setq localpart-match (url-cookie-localpart cur)))
+                            (stringp localpart))
+                       (string-match (concat "^" (regexp-quote localpart-match))
+                                     localpart)
+                     (equal localpart localpart-match))
+                   (not (url-cookie-expired-p cur))
+                   ;; Host-only cookies require exact match for host.
+                   (or (not (string-empty-p (url-cookie-domain cur)))
+                       (string= host found-host))
+                   (setq retval (cons cur retval)))))))
     retval))
 
 (defun url-cookie-generate-header-lines (host localpart secure)
@@ -268,26 +274,18 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 
 (defcustom url-cookie-trusted-urls nil
   "A list of regular expressions matching URLs to always accept cookies from."
-  :type '(repeat regexp)
-  :group 'url-cookie)
+  :type '(repeat regexp))
 
 (defcustom url-cookie-untrusted-urls nil
   "A list of regular expressions matching URLs to never accept cookies from."
-  :type '(repeat regexp)
-  :group 'url-cookie)
+  :type '(repeat regexp))
 
 (defun url-cookie-host-can-set-p (host domain)
-  (cond
-   ((string= host domain)	; Apparently netscape lets you do this
-    t)
-   ((zerop (length domain))
-    nil)
-   (t
-    ;; Remove the dot from wildcard domains before matching.
-    (when (eq ?. (aref domain 0))
-      (setq domain (substring domain 1)))
-    (and (url-domsuf-cookie-allowed-p domain)
-         (string-suffix-p domain host 'ignore-case)))))
+  (or (string= host domain)      ; Apparently netscape lets you do this
+      (let       ; Remove the dot from wildcard domains before matching
+          ((dom (string-remove-prefix "." domain)))
+        (and (url-domsuf-cookie-allowed-p dom)
+             (string-suffix-p dom host 'ignore-case)))))
 
 (defun url-cookie-handle-set-cookie (str)
   (setq url-cookies-changed-since-last-save t)
@@ -305,9 +303,11 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 			 (url-filename url-current-object))))
 	 (expires nil))
     (if (and max-age (string-match "\\`-?[0-9]+\\'" max-age))
-	(setq expires (format-time-string "%a %b %d %H:%M:%S %Y GMT"
-					  (time-add nil (read max-age))
-					  t))
+	(setq expires (ignore-errors
+                        (let ((system-time-locale "C"))
+                          (format-time-string "%a %b %d %H:%M:%S %Y GMT"
+					      (time-add nil (read max-age))
+					      t))))
       (setq expires (cdr-safe (assoc-string "expires" args t))))
     (while (consp trusted)
       (if (string-match (car trusted) current-url)
@@ -319,7 +319,7 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 	(pop untrusted)))
     (and trusted untrusted
 	 ;; Choose the more specific match.
-	 (set (if (> trusted untrusted) 'untrusted 'trusted) nil))
+	 (if (> trusted untrusted) (setq untrusted nil) (setq trusted nil)))
     (cond
      (untrusted
       ;; The site was explicitly marked as untrusted by the user.
@@ -354,23 +354,24 @@ i.e. 1970-1-1) are loaded as expiring one year from now instead."
 (defvar url-cookie-timer nil)
 
 (defcustom url-cookie-save-interval 3600
-  "The number of seconds between automatic saves of cookies.
-Default is 1 hour.  Note that if you change this variable outside of
-the `customize' interface after `url-do-setup' has been run, you need
-to run the `url-cookie-setup-save-timer' function manually."
-  :set #'(lambda (var val)
-	   (set-default var val)
-	   (if (bound-and-true-p url-setup-done)
-	       (url-cookie-setup-save-timer)))
-  :type 'integer
-  :group 'url-cookie)
+  "If non-nil, the number of seconds between automatic saves of cookies.
+Default is 1 hour; set to nil to disable automatic saving of cookies.
+Note that if you change this variable outside of the `customize'
+interface after `url-do-setup' has been run, you need to run
+the `url-cookie-setup-save-timer' function manually."
+  :set (lambda (var val)
+         (set-default var val)
+         (if (bound-and-true-p url-setup-done)
+             (url-cookie-setup-save-timer)))
+  :type '(choice (const :tag "Disable automatic saving of cookies" :value nil)
+                 (natnum :tag "Interval in seconds for auto-saving cookies")))
 
 (defun url-cookie-setup-save-timer ()
   "Reset the cookie saver timer."
   (interactive)
   (ignore-errors (cancel-timer url-cookie-timer))
   (setq url-cookie-timer nil)
-  (if url-cookie-save-interval
+  (if (natnump url-cookie-save-interval)
       (setq url-cookie-timer (run-at-time url-cookie-save-interval
 					  url-cookie-save-interval
 					  #'url-cookie-write-file))))
@@ -494,12 +495,10 @@ Use \\<url-cookie-mode-map>\\[url-cookie-delete] to remove cookies."
       (url-cookie--generate-buffer)
       (goto-char point))))
 
-(defvar url-cookie-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [delete] 'url-cookie-delete)
-    (define-key map [(control k)] 'url-cookie-delete)
-    (define-key map [(control _)] 'url-cookie-undo)
-    map))
+(defvar-keymap url-cookie-mode-map
+  "<delete>" #'url-cookie-delete
+  "C-k"      #'url-cookie-delete
+  "C-_"      #'url-cookie-undo)
 
 (define-derived-mode url-cookie-mode special-mode "URL Cookie"
   "Mode for listing cookies.

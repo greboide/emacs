@@ -1,6 +1,6 @@
-;;; cc-awk.el --- AWK specific code within cc-mode.
+;;; cc-awk.el --- AWK specific code within cc-mode. -*- lexical-binding: t -*-
 
-;; Copyright (C) 1988, 1994, 1996, 2000-2018 Free Software Foundation,
+;; Copyright (C) 1988, 1994, 1996, 2000-2026 Free Software Foundation,
 ;; Inc.
 
 ;; Author: Alan Mackenzie <acm@muc.de> (originally based on awk-mode.el)
@@ -49,11 +49,16 @@
     (load "cc-bytecomp" nil t)))
 
 (cc-require 'cc-defs)
+(cc-require-when-compile 'cc-langs)
+(cc-require-when-compile 'cc-fonts)
+(cc-require 'cc-engine)
 
 ;; Silence the byte compiler.
-(cc-bytecomp-defvar font-lock-mode)	; Checked with boundp before use.
 (cc-bytecomp-defvar c-new-BEG)
 (cc-bytecomp-defvar c-new-END)
+(cc-bytecomp-defvar c-open-string-opener)
+(cc-bytecomp-defun c-restore-string-fences)
+(cc-bytecomp-defun c-clear-string-fences)
 
 ;; Some functions in cc-engine that are used below.  There's a cyclic
 ;; dependency so it can't be required here.  (Perhaps some functions
@@ -95,7 +100,7 @@
 ;; Emacs has in the past used \r to mark hidden lines in some fashion (and
 ;; maybe still does).
 
-(defconst c-awk-esc-pair-re "\\\\\\(.\\|\n\\|\r\\|\\'\\)")
+(defconst c-awk-esc-pair-re "\\\\\\(.\\|\n\\|\\'\\)")
 ;;   Matches any escaped (with \) character-pair, including an escaped newline.
 (defconst c-awk-non-eol-esc-pair-re "\\\\\\(.\\|\\'\\)")
 ;;   Matches any escaped (with \) character-pair, apart from an escaped newline.
@@ -130,7 +135,7 @@
 ;; REGEXPS FOR "HARMLESS" STRINGS/LINES.
 (defconst c-awk-harmless-_ "_\\([^\"]\\|\\'\\)")
 ;;   Matches an underline NOT followed by ".
-(defconst c-awk-harmless-char-re "[^_#/\"{}();\\\\\n\r]")
+(defconst c-awk-harmless-char-re "[^_#/\"{}();\\\n\r]")
 ;;   Matches any character not significant in the state machine applying
 ;; syntax-table properties to "s and /s.
 (defconst c-awk-harmless-string*-re
@@ -141,7 +146,7 @@
   (concat "\\=" c-awk-harmless-string*-re))
 ;; Matches the (possibly empty) sequence of "insignificant" chars at point.
 
-(defconst c-awk-harmless-line-char-re "[^_#/\"\\\\\n\r]")
+(defconst c-awk-harmless-line-char-re "[^_#/\"\\\n\r]")
 ;;   Matches any character but a _, #, /, ", \, or newline.  N.B. _" starts a
 ;; localization string in gawk 3.1
 (defconst c-awk-harmless-line-string*-re
@@ -188,8 +193,8 @@
   "\\[:[a-z]+:\\]")
   ;; Matches a character class spec (e.g. [:alpha:]).
 (defconst c-awk-regexp-char-list-re
-  (concat "\\[" c-awk-escaped-newlines*-re "^?" c-awk-escaped-newlines*-re "]?"
-          "\\(" c-awk-esc-pair-re "\\|" c-awk-regexp-char-class-re
+  (concat "\\[\\(" c-awk-escaped-newlines*-re "\\^\\)?" c-awk-escaped-newlines*-re "]?"
+	  "\\(" c-awk-esc-pair-re "\\|" c-awk-regexp-char-class-re
 	  "\\|" "[^]\n\r]" "\\)*" "\\(]\\|$\\)"))
 ;;   Matches a regexp char list, up to (but not including) EOL if the ] is
 ;;   missing.
@@ -215,10 +220,10 @@
 (defconst c-awk-neutrals*-re
   (concat "\\(" c-awk-neutral-re "\\)*"))
 ;;   A (possibly empty) string of neutral characters (or character pairs).
-(defconst c-awk-var-num-ket-re "[])0-9a-zA-Z_$.\x80-\xff]+")
+(defconst c-awk-var-num-ket-re "[])0-9a-zA-Z_$.]+")
 ;;   Matches a char which is a constituent of a variable or number, or a ket
-;; (i.e. closing bracKET), round or square.  Assume that all characters \x80 to
-;; \xff are "letters".
+;; (i.e. closing bracKET), round or square.  (2019-07): No longer assume that
+;; all characters \x80 to \xff are "letters".
 (defconst c-awk-div-sign-re
   (concat c-awk-var-num-ket-re c-awk-neutrals*-re "/"))
 ;;   Will match a piece of AWK buffer ending in / which is a division sign, in
@@ -239,9 +244,7 @@
 ;; will only work when there won't be a preceding " or / before the sought /
 ;; to foul things up.
 (defconst c-awk-pre-exp-alphanum-kwd-re
-  (concat "\\(^\\|\\=\\|[^_\n\r]\\)\\<"
-	  (regexp-opt '("print" "return" "case") t)
-	  "\\>\\([^_\n\r]\\|$\\)"))
+  (regexp-opt '("print" "return" "case") 'symbols))
 ;;   Matches all AWK keywords which can precede expressions (including
 ;; /regexp/).
 (defconst c-awk-kwd-regexp-sign-re
@@ -250,7 +253,7 @@
 ;; which can precede an expression.
 
 ;; REGEXPS USED FOR FINDING THE POSITION OF A "virtual semicolon"
-(defconst c-awk-_-harmless-nonws-char-re "[^#/\"\\\\\n\r \t]")
+(defconst c-awk-_-harmless-nonws-char-re "[^#/\"\\\n\r \t]")
 (defconst c-awk-non-/-syn-ws*-re
   (concat
    "\\(" c-awk-escaped-nls*-with-space*
@@ -338,12 +341,12 @@
    (save-excursion
      (let ((par-pos (c-safe (scan-lists (point) -1 0))))
        (when par-pos
-         (goto-char par-pos)            ; back over "(...)"
-         (c-backward-token-1)           ; BOB isn't a problem.
-         (or (looking-at "\\(if\\|for\\)\\>\\([^_]\\|$\\)")
-             (and (looking-at "while\\>\\([^_]\\|$\\)") ; Ensure this isn't a do-while.
-                  (not (eq (c-beginning-of-statement-1 do-lim)
-                           'beginning)))))))))
+        (goto-char par-pos)            ; back over "(...)"
+        (c-backward-token-1)           ; BOB isn't a problem.
+	 (or (looking-at "\\(if\\|for\\)\\_>")
+	     (and (looking-at "while\\_>") ; Ensure this isn't a do-while.
+                 (not (eq (c-beginning-of-statement-1 do-lim)
+                          'beginning)))))))))
 
 (defun c-awk-after-function-decl-param-list ()
   ;; Are we just after the ) in "function foo (bar)" ?
@@ -355,9 +358,10 @@
            (when par-pos
              (goto-char par-pos)        ; back over "(...)"
              (c-backward-token-1)       ; BOB isn't a problem
-             (and (looking-at "[_a-zA-Z][_a-zA-Z0-9]*\\>")
+	     (and (looking-at "[_a-zA-Z][_a-zA-Z0-9]*\\_>"
+			      )
                   (progn (c-backward-token-1)
-                         (looking-at "func\\(tion\\)?\\>"))))))))
+			 (looking-at "func\\(tion\\)?\\_>"))))))))
 
 ;; 2002/11/8:  FIXME!  Check c-backward-token-1/2 for success (0 return code).
 (defun c-awk-after-continue-token ()
@@ -369,7 +373,7 @@
     (c-backward-token-1)              ; FIXME 2002/10/27.  What if this fails?
     (if (and (looking-at "[&|]") (not (bobp)))
         (backward-char)) ; c-backward-token-1 doesn't do this :-(
-    (looking-at "[,{?:]\\|&&\\|||\\|do\\>\\|else\\>")))
+    (looking-at "[,{?:]\\|&&\\|||\\|do\\_>\\|else\\_>")))
 
 (defun c-awk-after-rbrace-or-statement-semicolon ()
   ;; Are we just after a } or a ; which closes a statement?
@@ -385,7 +389,7 @@
              (goto-char par-pos) ; go back to containing (
              (not (and (looking-at "(")
                        (c-backward-token-1) ; BOB isn't a problem
-                       (looking-at "for\\>")))))))))
+		       (looking-at "for\\_>")))))))))
 
 (defun c-awk-back-to-contentful-text-or-NL-prop ()
   ;;  Move back to just after the first found of either (i) an EOL which has
@@ -649,6 +653,46 @@
 ;; several lines back.  The elisp "advice" feature is used on these functions
 ;; to allow this.
 
+(defun c-awk-font-lock-invalid-namespace-separators (limit)
+  ;; This function will be called from font-lock for a region bounded by POINT
+  ;; and LIMIT, as though it were to identify a keyword for
+  ;; font-lock-keyword-face.  It always returns NIL to inhibit this and
+  ;; prevent a repeat invocation.  See elisp/lispref page "Search-based
+  ;; Fontification".
+  ;;
+  ;; This function gives invalid GAWK namespace separators (::)
+  ;; font-lock-warning-face.  "Invalid" here means there are spaces, etc.,
+  ;; around a separator, or there are more than one of them in an identifier.
+  ;; Invalid separators inside function declaration parentheses are handled
+  ;; elsewhere.
+  (while (and
+	  (< (point) limit)
+	  (c-syntactic-re-search-forward
+	   (eval-when-compile
+	     (concat "\\([^" (c-lang-const c-symbol-chars awk) "]::\\)"
+		     "\\|"
+		     ;; "\\(::[^" (c-lang-const c-symbol-start awk) "]\\)"
+		     "\\(::[^" c-alpha "_" "]\\)"
+		     "\\|"
+		     "\\(::[" (c-lang-const c-symbol-chars awk) "]*::\\)"))
+	   limit 'bound))
+    (cond
+     ((match-beginning 1) 		; " ::"
+      (c-put-font-lock-face (1+ (match-beginning 1)) (match-end 1)
+			    'font-lock-warning-face)
+      (goto-char (- (match-end 1) 2)))
+     ((match-beginning 2)		; ":: "
+      (c-put-font-lock-face (match-beginning 2) (1- (match-end 2))
+			    'font-lock-warning-face)
+      (goto-char (1- (match-end 2))))
+     (t					; "::foo::"
+      (c-put-font-lock-face (match-beginning 3) (+ 2 (match-beginning 3))
+			    'font-lock-warning-face)
+      (c-put-font-lock-face (- (match-end 3) 2) (match-end 3)
+			    'font-lock-warning-face)
+      (goto-char (- (match-end 3) 2)))))
+    nil)
+
 (defun c-awk-beginning-of-logical-line (&optional pos)
 ;; Go back to the start of the (apparent) current line (or the start of the
 ;; line containing POS), returning the buffer position of that point.  I.e.,
@@ -709,21 +753,21 @@
   (if (eq (char-after beg) ?_) (setq beg (1+ beg)))
 
   ;; First put the properties on the delimiters.
-  (cond ((eq end (point-max))           ; string/regexp terminated by EOB
-         (c-put-char-property beg 'syntax-table '(15))) ; (15) = "string fence"
-        ((/= (char-after beg) (char-after end)) ; missing end delimiter
-         (c-put-char-property beg 'syntax-table '(15))
-         (c-put-char-property end 'syntax-table '(15)))
-        ((eq (char-after beg) ?/)       ; Properly bracketed regexp
-         (c-put-char-property beg 'syntax-table '(7)) ; (7) = "string"
-         (c-put-char-property end 'syntax-table '(7)))
-        (t))                       ; Properly bracketed string: Nothing to do.
+  (cond ((eq end (point-max))		; string/regexp terminated by EOB
+	 (c-put-string-fence-trim-caches beg))
+	((/= (char-after beg) (char-after end)) ; missing end delimiter
+	 (c-put-string-fence-trim-caches beg)
+	 (c-put-string-fence end))
+	((eq (char-after beg) ?/)	; Properly bracketed regexp
+	 (c-put-syntax-table-trim-caches beg '(7)) ; (7) = "string"
+	 (c-put-char-property end 'syntax-table '(7)))
+	(t))			; Properly bracketed string: Nothing to do.
   ;; Now change the properties of any escaped "s in the string to punctuation.
   (save-excursion
     (goto-char (1+ beg))
     (or (eobp)
-        (while (search-forward "\"" end t)
-          (c-put-char-property (1- (point)) 'syntax-table '(1))))))
+	(while (search-forward "\"" end t)
+	  (c-put-syntax-table-trim-caches (1- (point)) '(1))))))
 
 (defun c-awk-syntax-tablify-string ()
   ;; Point is at the opening " or _" of a string.  Set the syntax-table
@@ -733,16 +777,20 @@
   ;; opener, t if it would be a division sign.
   ;;
   ;; This function does hidden buffer changes.
-  (search-forward-regexp c-awk-string-without-end-here-re nil t) ; a (possibly unterminated) string
-  (c-awk-set-string-regexp-syntax-table-properties
-   (match-beginning 0) (match-end 0))
-  (cond ((looking-at "\"")
-         (forward-char)
-         t)                             ; In AWK, ("15" / 5) gives 3 ;-)
-        ((looking-at "[\n\r]")          ; Unterminated string with EOL.
-         (forward-char)
-         nil)                           ; / on next line would start a regexp
-        (t nil)))                       ; Unterminated string at EOB
+  (let ((string-start (if (eq (char-after) ?_) (1+ (point)) (point))))
+    (search-forward-regexp c-awk-string-without-end-here-re nil t) ; a (possibly unterminated) string
+    (c-awk-set-string-regexp-syntax-table-properties
+     (match-beginning 0) (match-end 0))
+    (cond ((looking-at "\"")
+	   (forward-char)
+	   t)				; In AWK, ("15" / 5) gives 3 ;-)
+	  ((looking-at "[\n\r]")	; Unterminated string with EOL.
+	   (setq c-open-string-opener string-start)
+	   (forward-char)
+	   nil)				; / on next line would start a regexp
+	  (t				; Unterminated string at EOB
+	   (setq c-open-string-opener string-start)
+	   nil))))
 
 (defun c-awk-syntax-tablify-/ (anchor anchor-state-/div)
   ;; Point is at a /.  Determine whether this is a division sign or a regexp
@@ -812,7 +860,7 @@
   (let (anchor
 	(anchor-state-/div nil)) ; t means a following / would be a div sign.
     (c-awk-beginning-of-logical-line) ; ACM 2002/7/21.  This is probably redundant.
-    (c-clear-char-properties (point) lim 'syntax-table)
+    (c-clear-syntax-table-properties-trim-caches (point) lim)
     ;; Once round the next loop for each string, regexp, or div sign
     (while (progn
              ;; Skip any "harmless" lines before the next tricky one.
@@ -843,7 +891,7 @@
 ;; subsequent use of movement functions, etc.  However, it seems that if font
 ;; lock _is_ enabled, we can always leave it to do the job.
 (defvar c-awk-old-ByLL 0)
-(make-variable-buffer-local 'c-awk-old-Byll)
+(make-variable-buffer-local 'c-awk-old-ByLL)
 ;; Just beyond logical line following the region which is about to be changed.
 ;; Set in c-awk-record-region-clear-NL and used in c-awk-after-change.
 
@@ -892,7 +940,7 @@
   ;; It prepares the buffer for font
   ;; locking, hence must get called before `font-lock-after-change-function'.
   ;;
-  ;; This function is the AWK value of `c-before-font-lock-function'.
+  ;; This function is the AWK value of `c-before-font-lock-functions'.
   ;; It does hidden buffer changes.
   (c-save-buffer-state ()
     (setq c-new-END (c-awk-end-of-change-region beg end old-len))
@@ -900,28 +948,52 @@
     (goto-char c-new-BEG)
     (c-awk-set-syntax-table-properties c-new-END)))
 
+(defun c-awk-context-expand-fl-region (beg end)
+  ;; Return a cons (NEW-BEG . NEW-END), where NEW-BEG is the beginning of the
+  ;; logical line BEG is on, and NEW-END is the beginning of the line after
+  ;; the end of the logical line that END is on.
+  (cons (save-excursion (c-awk-beginning-of-logical-line beg))
+	(c-awk-beyond-logical-line end)))
+
 ;; Awk regexps written with help from Peter Galbraith
 ;; <galbraith@mixing.qc.dfo.ca>.
 ;; Take GNU Emacs's 'words out of the following regexp-opts.  They don't work
 ;; in XEmacs 21.4.4.  acm 2002/9/19.
 (defconst awk-font-lock-keywords
   (eval-when-compile
-    (list
-     ;; Function names.
-     '("^\\s *\\(func\\(tion\\)?\\)\\>\\s *\\(\\sw+\\)?"
-       (1 font-lock-keyword-face) (3 font-lock-function-name-face nil t))
-     ;;
-     ;; Variable names.
-     (cons
-      (concat "\\<"
-	      (regexp-opt
-	       '("ARGC" "ARGIND" "ARGV" "BINMODE" "CONVFMT" "ENVIRON"
-		 "ERRNO" "FIELDWIDTHS" "FILENAME" "FNR" "FS" "IGNORECASE"
-		 "LINT" "NF" "NR" "OFMT" "OFS" "ORS" "PROCINFO" "RLENGTH"
-		 "RS" "RSTART" "RT" "SUBSEP" "TEXTDOMAIN") t) "\\>")
-      'font-lock-variable-name-face)
+    `(
+      ;; Function declarations.
+      (,(c-make-font-lock-search-function
+	 "^\\s *\\(func\\(tion\\)?\\)\\s +\\(\\(\\sw+\\(::\\sw+\\)?\\)\\s *\\)?\\(([^()]*)\\)?"
+	 '(1 'font-lock-keyword-face t)
+	 ;; We can't use LAXMATCH in `c-make-font-lock-search-function', so....
+	 '((when (match-beginning 4)
+	     (c-put-font-lock-face
+	      (match-beginning 4) (match-end 4) 'font-lock-function-name-face)
+	     nil))
+	 ;; Put warning face on any use of :: inside the parens.
+	 '((when (match-beginning 6)
+	     (goto-char (1+ (match-beginning 6)))
+	     (let ((end (1- (match-end 6))))
+	       (while (and (< (point) end)
+			   (c-syntactic-re-search-forward "::" end t))
+		 (c-put-font-lock-face (- (point) 2) (point)
+				       'font-lock-warning-face)))
+	     nil))))
 
-     ;; Special file names.  (acm, 2002/7/22)
+
+     ;; Variable names.
+     ,(cons
+	(regexp-opt
+	 '("ARGC" "ARGIND" "ARGV" "BINMODE" "CONVFMT" "ENVIRON"
+	   "ERRNO" "FIELDWIDTHS" "FILENAME" "FNR" "FPAT" "FS" "FUNCTAB"
+	   "IGNORECASE" "LINT" "NF" "NR" "OFMT" "OFS" "ORS" "PREC"
+	   "PROCINFO" "RLENGTH" "ROUNDMODE" "RS" "RSTART" "RT" "SUBSEP"
+	   "SYNTAB" "TEXTDOMAIN")
+	 'symbols)
+        'font-lock-variable-name-face)
+
+      ;; Special file names.  (acm, 2002/7/22)
      ;; The following regexp was created by first evaluating this in GNU Emacs 21.1:
      ;; (regexp-opt '("/dev/stdin" "/dev/stdout" "/dev/stderr" "/dev/fd/n" "/dev/pid"
      ;;                 "/dev/ppid" "/dev/pgrpid" "/dev/user") 'words)
@@ -931,64 +1003,71 @@
      ;; regexp so that a " must come before, and either a " or heuristic stuff after.
      ;; The surrounding quotes are fontified along with the filename, since, semantically,
      ;; they are an indivisible unit.
-     '("\\(\"/dev/\\(fd/[0-9]+\\|p\\(\\(\\(gr\\)?p\\)?id\\)\\|\
-std\\(err\\|in\\|out\\)\\|user\\)\\)\\>\
+     ("\\(\"/dev/\\(fd/[0-9]+\\|p\\(\\(\\(gr\\)?p\\)?id\\)\\|\
+std\\(err\\|in\\|out\\)\\|user\\)\\)\\_>\
 \\(\\(\"\\)\\|\\([^\"/\n\r][^\"\n\r]*\\)?$\\)"
        (1 font-lock-variable-name-face t)
        (8 font-lock-variable-name-face t t))
      ;; Do the same (almost) with
      ;; (regexp-opt '("/inet/tcp/lport/rhost/rport" "/inet/udp/lport/rhost/rport"
      ;;                 "/inet/raw/lport/rhost/rport") 'words)
+     ;; , replacing "inet" with "inet[46]?"
+     ;; , replacing "lport", "rhost", and "rport" with "[[:alnum:]]+".
      ;; This cannot be combined with the above pattern, because the match number
      ;; for the (optional) closing \" would then exceed 9.
-     '("\\(\"/inet/\\(\\(raw\\|\\(tc\\|ud\\)p\\)/lport/rhost/rport\\)\\)\\>\
+     ("\\(\"/inet[46]?/\\(\\(raw\\|\\(tc\\|ud\\)p\\)/[[:alnum:]]+/[[:alnum:]]+/[[:alnum:]]+\\)\\)\\_>\
 \\(\\(\"\\)\\|\\([^\"/\n\r][^\"\n\r]*\\)?$\\)"
        (1 font-lock-variable-name-face t)
        (6 font-lock-variable-name-face t t))
 
      ;; Keywords.
-     (concat "\\<"
-	     (regexp-opt
-	      '("BEGIN" "END" "break" "case" "continue" "default" "delete"
-		"do" "else" "exit" "for" "getline" "if" "in" "next"
-		"nextfile" "return" "switch" "while")
-	      t) "\\>")
+     ,(regexp-opt
+       '("BEGIN" "BEGINFILE" "END" "ENDFILE"
+	 "break" "case" "continue" "default" "delete"
+	 "do" "else" "exit" "for" "getline" "if" "in" "next"
+	 "nextfile" "return" "switch" "while")
+       'symbols)
 
      ;; Builtins.
-     `(eval . (list
-	       ,(concat
-		 "\\<"
-		 (regexp-opt
-		  '("adump" "and" "asort" "atan2" "bindtextdomain" "close"
-		    "compl" "cos" "dcgettext" "exp" "extension" "fflush"
-		    "gensub" "gsub" "index" "int" "length" "log" "lshift"
-		    "match" "mktime" "or" "print" "printf" "rand" "rshift"
-		    "sin" "split" "sprintf" "sqrt" "srand" "stopme"
-		    "strftime" "strtonum" "sub" "substr"  "system"
-		    "systime" "tolower" "toupper" "xor") t)
-		 "\\>")
+     (eval . (list
+	      ,(regexp-opt
+		'("adump" "and" "asort" "asorti" "atan2" "bindtextdomain" "close"
+		  "compl" "cos" "dcgettext" "dcngettext" "exp" "extension" "fflush"
+		  "gensub" "gsub" "index" "int" "isarray" "length" "log" "lshift"
+		  "match" "mkbool" "mktime" "or" "patsplit" "print" "printf" "rand"
+		  "rshift" "sin" "split" "sprintf" "sqrt" "srand" "stopme"
+		  "strftime" "strtonum" "sub" "substr"  "system"
+		  "systime" "tolower" "toupper" "typeof" "xor")
+		'symbols)
 	       0 c-preprocessor-face-name))
 
-     ;; gawk debugging keywords.  (acm, 2002/7/21)
-     ;; (Removed, 2003/6/6.  These functions are now fontified as built-ins)
-     ;;	(list (concat "\\<" (regexp-opt '("adump" "stopme") t) "\\>")
-     ;;	   0 'font-lock-warning-face)
+      ;; Directives
+      (eval . '("@\\(include\\|load\\|namespace\\)\\_>" 0 ,c-preprocessor-face-name))
 
-     ;; User defined functions with an apparent spurious space before the
-     ;; opening parenthesis.  acm, 2002/5/30.
-     `(,(concat "\\(\\w\\|_\\)" c-awk-escaped-nls* "\\s "
+      ;; gawk debugging keywords.  (acm, 2002/7/21)
+      ;; (Removed, 2003/6/6.  These functions are now fontified as built-ins)
+      ;;	(list (concat "\\<" (regexp-opt '("adump" "stopme") t) "\\>")
+      ;;	   0 'font-lock-warning-face)
+
+      ;; User defined functions with an apparent spurious space before the
+      ;; opening parenthesis.  acm, 2002/5/30.
+      (,(concat "\\(\\w\\|_\\)" c-awk-escaped-nls* "\\s "
 		c-awk-escaped-nls*-with-space* "(")
        (0 'font-lock-warning-face))
 
-     ;; Space after \ in what looks like an escaped newline.  2002/5/31
-     '("\\\\\\s +$" 0 font-lock-warning-face t)
+      ;; Double :: tokens, or the same with space(s) around them.
+      c-awk-font-lock-invalid-namespace-separators
 
-     ;; Unbalanced string (") or regexp (/) delimiters.  2002/02/16.
-     '("\\s|" 0 font-lock-warning-face t nil)
-     ;; gawk 3.1 localizable strings ( _"translate me!").  2002/5/21
-     '("\\(_\\)\\s|" 1 font-lock-warning-face)
-     '("\\(_\\)\\s\"" 1 font-lock-string-face) ; FIXME! not for XEmacs. 2002/10/6
-     ))
+      ;; Space after \ in what looks like an escaped newline.  2002/5/31
+      ("\\\\\\s +$" 0 font-lock-warning-face t)
+
+      ;; Unbalanced string (") or regexp (/) delimiters.  2002/02/16.
+      ("\\s|" 0 font-lock-warning-face t nil)
+      ;; gawk 3.1 localizable strings ( _"translate me!").  2002/5/21
+      ("\\(_\\)\\s|" 1 font-lock-warning-face)
+      ,@(unless (featurep 'xemacs)
+	  '(("\\(_\\)\\s\"" 1 font-lock-string-face)))
+      ))
   "Default expressions to highlight in AWK mode.")
 
 ;; ACM 2002/9/29.  Movement functions, e.g. for C-M-a and C-M-e
@@ -1003,7 +1082,7 @@ std\\(err\\|in\\|out\\)\\|user\\)\\)\\>\
 ;; Matches an unterminated string/regexp, NOT including the eol at the end.
 
 (defconst c-awk-harmless-pattern-characters*
-  (concat "\\([^{;#/\"\\\\\n\r]\\|" c-awk-esc-pair-re "\\)*"))
+  (concat "\\([^{;#/\"\\\n\r]\\|" c-awk-esc-pair-re "\\)*"))
 ;; Matches any "harmless" character in a pattern or an escaped character pair.
 
 (defun c-awk-at-statement-end-p ()
@@ -1022,9 +1101,10 @@ std\\(err\\|in\\|out\\)\\|user\\)\\)\\>\
 			     "[#\n\r]"))))))))
 
 (defun c-awk-beginning-of-defun (&optional arg)
-  "Move backward to the beginning of an AWK \"defun\".  With ARG, do it that
-many times.  Negative arg -N means move forward to Nth following beginning of
-defun.  Returns t unless search stops due to beginning or end of buffer.
+  "Move backward to the beginning of an AWK \"defun\".
+With ARG, do it that many times.  Negative arg -N means move
+forward to Nth following beginning of defun.  Returns t unless
+search stops due to beginning or end of buffer.
 
 By a \"defun\" is meant either a pattern-action pair or a function.  The start
 of a defun is recognized as code starting at column zero which is neither a
@@ -1035,29 +1115,30 @@ nor helpful.
 Note that this function might do hidden buffer changes.  See the
 comment at the start of cc-engine.el for more info."
   (interactive "p")
-  (or arg (setq arg 1))
-  (save-match-data
-    (c-save-buffer-state                ; ensures the buffer is writable.
-     nil
-     (let ((found t))     ; Has the most recent regexp search found b-of-defun?
-       (if (>= arg 0)
-           ;; Go back one defun each time round the following loop. (For +ve arg)
-           (while (and found (> arg 0) (not (eq (point) (point-min))))
-             ;; Go back one "candidate" each time round the next loop until one
-             ;; is genuinely a beginning-of-defun.
-             (while (and (setq found (search-backward-regexp
-                                      "^[^#} \t\n\r]" (point-min) 'stop-at-limit))
-                         (not (memq (c-awk-get-NL-prop-prev-line) '(?\$ ?\} ?\#)))))
-             (setq arg (1- arg)))
-         ;; The same for a -ve arg.
-         (if (not (eq (point) (point-max))) (forward-char 1))
-         (while (and found (< arg 0) (not (eq (point) (point-max)))) ; The same for -ve arg.
-           (while (and (setq found (search-forward-regexp
-                                    "^[^#} \t\n\r]" (point-max) 'stop-at-limit))
-                       (not (memq (c-awk-get-NL-prop-prev-line) '(?\$ ?\} ?\#)))))
-           (setq arg (1+ arg)))
-         (if found (goto-char (match-beginning 0))))
-       (eq arg 0)))))
+  (c-with-string-fences
+   (or arg (setq arg 1))
+   (save-match-data
+     (c-save-buffer-state	     ; ensures the buffer is writable.
+	 nil
+       (let ((found t))	; Has the most recent regexp search found b-of-defun?
+	 (if (>= arg 0)
+             ;; Go back one defun each time round the following loop. (For +ve arg)
+             (while (and found (> arg 0) (not (eq (point) (point-min))))
+               ;; Go back one "candidate" each time round the next loop until one
+               ;; is genuinely a beginning-of-defun.
+               (while (and (setq found (search-backward-regexp
+					"^[^#} \t\n\r]" (point-min) 'stop-at-limit))
+                           (not (memq (c-awk-get-NL-prop-prev-line) '(?\$ ?\} ?\#)))))
+               (setq arg (1- arg)))
+           ;; The same for a -ve arg.
+           (if (not (eq (point) (point-max))) (forward-char 1))
+           (while (and found (< arg 0) (not (eq (point) (point-max)))) ; The same for -ve arg.
+             (while (and (setq found (search-forward-regexp
+                                      "^[^#} \t\n\r]" (point-max) 'stop-at-limit))
+			 (not (memq (c-awk-get-NL-prop-prev-line) '(?\$ ?\} ?\#)))))
+             (setq arg (1+ arg)))
+           (if found (goto-char (match-beginning 0))))
+	 (eq arg 0))))))
 
 (defun c-awk-forward-awk-pattern ()
   ;; Point is at the start of an AWK pattern (which may be null) or function
@@ -1113,39 +1194,40 @@ no explicit action; see function `c-awk-beginning-of-defun'.
 Note that this function might do hidden buffer changes.  See the
 comment at the start of cc-engine.el for more info."
   (interactive "p")
-  (or arg (setq arg 1))
-  (save-match-data
-    (c-save-buffer-state
-     nil
-     (let ((start-point (point)) end-point)
-       ;; Strategy: (For +ve ARG): If we're not already at a beginning-of-defun,
-       ;; move backwards to one.
-       ;; Repeat [(i) move forward to end-of-current-defun (see below);
-       ;;         (ii) If this isn't it, move forward to beginning-of-defun].
-       ;; We start counting ARG only when step (i) has passed the original point.
-       (when (> arg 0)
-         ;; Try to move back to a beginning-of-defun, if not already at one.
-         (if (not (c-awk-beginning-of-defun-p))
-             (when (not (c-awk-beginning-of-defun 1)) ; No bo-defun before point.
-               (goto-char start-point)
-               (c-awk-beginning-of-defun -1))) ; if this fails, we're at EOB, tough!
-         ;; Now count forward, one defun at a time
-         (while (and (not (eobp))
-                     (c-awk-end-of-defun1)
-                     (if (> (point) start-point) (setq arg (1- arg)) t)
-                     (> arg 0)
-                     (c-awk-beginning-of-defun -1))))
+  (c-with-string-fences
+   (or arg (setq arg 1))
+   (save-match-data
+     (c-save-buffer-state
+	 nil
+       (let ((start-point (point)) end-point)
+	 ;; Strategy: (For +ve ARG): If we're not already at a beginning-of-defun,
+	 ;; move backwards to one.
+	 ;; Repeat [(i) move forward to end-of-current-defun (see below);
+	 ;;         (ii) If this isn't it, move forward to beginning-of-defun].
+	 ;; We start counting ARG only when step (i) has passed the original point.
+	 (when (> arg 0)
+           ;; Try to move back to a beginning-of-defun, if not already at one.
+           (if (not (c-awk-beginning-of-defun-p))
+               (when (not (c-awk-beginning-of-defun 1)) ; No bo-defun before point.
+		 (goto-char start-point)
+		 (c-awk-beginning-of-defun -1))) ; if this fails, we're at EOB, tough!
+           ;; Now count forward, one defun at a time
+           (while (and (not (eobp))
+                       (c-awk-end-of-defun1)
+                       (if (> (point) start-point) (setq arg (1- arg)) t)
+                       (> arg 0)
+                       (c-awk-beginning-of-defun -1))))
 
-       (when (< arg 0)
-         (setq end-point start-point)
-         (while (and (not (bobp))
-                     (c-awk-beginning-of-defun 1)
-                     (if (< (setq end-point (if (bobp) (point)
-                                              (save-excursion (c-awk-end-of-defun1))))
-                            start-point)
-                         (setq arg (1+ arg)) t)
-                     (< arg 0)))
-         (goto-char (min start-point end-point)))))))
+	 (when (< arg 0)
+           (setq end-point start-point)
+           (while (and (not (bobp))
+                       (c-awk-beginning-of-defun 1)
+                       (if (< (setq end-point (if (bobp) (point)
+						(save-excursion (c-awk-end-of-defun1))))
+                              start-point)
+                           (setq arg (1+ arg)) t)
+                       (< arg 0)))
+           (goto-char (min start-point end-point))))))))
 
 
 (cc-provide 'cc-awk)			; Changed from 'awk-mode, ACM 2002/5/21
@@ -1154,4 +1236,4 @@ comment at the start of cc-engine.el for more info."
 ;; indent-tabs-mode: t
 ;; tab-width: 8
 ;; End:
-;;; awk-mode.el ends here
+;;; cc-awk.el ends here

@@ -1,8 +1,8 @@
-;;; eieio-test-persist.el --- Tests for eieio-persistent class
+;;; eieio-test-persist.el --- Tests for eieio-persistent class  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2011-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2011-2026 Free Software Foundation, Inc.
 
-;; Author: Eric M. Ludlam <eric@siege-engine.com>
+;; Author: Eric M. Ludlam <zappo@gnu.org>
 
 ;; This file is part of GNU Emacs.
 
@@ -40,7 +40,7 @@ This is usually a symbol that starts with `:'."
 	(car tuple)
       nil)))
 
-(defun hash-equal (hash1 hash2)
+(defun eieio-test--hash-equal (hash1 hash2)
   "Compare two hash tables to see whether they are equal."
   (and (= (hash-table-count hash1)
           (hash-table-count hash2))
@@ -78,7 +78,7 @@ This is usually a symbol that starts with `:'."
 	(if initarg-p
 	    (unless
 		(cond ((and (hash-table-p origvalue) (hash-table-p fromdiskvalue))
-		       (hash-equal origvalue fromdiskvalue))
+		       (eieio-test--hash-equal origvalue fromdiskvalue))
 		      (t (equal origvalue fromdiskvalue)))
 	      (error "Slot %S Original Val %S != Persistent Val %S"
 		     oneslot origvalue fromdiskvalue))
@@ -87,7 +87,7 @@ This is usually a symbol that starts with `:'."
 		(diskval fromdiskvalue))
 	    (unless
 		(cond ((and (hash-table-p origval) (hash-table-p diskval))
-		       (hash-equal origval diskval))
+		       (eieio-test--hash-equal origval diskval))
 		      (t (equal origval diskval)))
 	    (error "Slot %S Persistent Val %S != Default Value %S"
 		   oneslot diskval origvalue))))))))
@@ -99,7 +99,7 @@ This is usually a symbol that starts with `:'."
 (defclass persist-simple (eieio-persistent)
   ((slot1 :initarg :slot1
 	  :type symbol
-	  :initform moose)
+          :initform 'moose)
    (slot2 :initarg :slot2
 	  :initform "foo")
    (slot3 :initform 2))
@@ -165,9 +165,9 @@ Assume SLOTVALUE is a symbol of some sort."
   ((slot1 :initarg :slot1
 	  :initform 1)
    (slot2 :initform 2))
-  "Class for testing persistent saving of an object that isn't
-persistent.  This class is instead used as a slot value in a
-persistent class.")
+  "Class for testing persistent saving of an object that isn't persistent.
+This class is instead used as a slot value in a persistent
+class.")
 
 (defclass persistent-with-objs-slot (eieio-persistent)
   ((pnp :initarg :pnp
@@ -274,7 +274,7 @@ persistent class.")
     :type vector
     :initarg :random-vector)))
 
-(ert-deftest eieio-test-persist-hash-and-vector ()
+(defun eieio-test-persist-hash-and-vector ()
   (let* ((jane (make-instance 'person :name "Jane"))
          (bob  (make-instance 'person :name "Bob"))
          (hans (make-instance 'person :name "Hans"))
@@ -294,9 +294,17 @@ persistent class.")
     (aset (car (slot-value class 'janitors)) 1 hans)
     (aset (nth 1 (slot-value class 'janitors)) 1 dierdre)
     (unwind-protect
-        ;; FIXME: This should not error.
-        (should-error (persist-test-save-and-compare class))
+        (persist-test-save-and-compare class)
       (delete-file (oref class file)))))
+
+(ert-deftest eieio-persist-hash-and-vector-backward-compatibility ()
+  (let ((eieio-backward-compatibility t)) ; The default.
+    (eieio-test-persist-hash-and-vector)))
+
+(ert-deftest eieio-persist-hash-and-vector-no-backward-compatibility ()
+  :expected-result :failed ;; Bug#29220.
+  (let ((eieio-backward-compatibility nil))
+    (eieio-test-persist-hash-and-vector)))
 
 ;; Extra quotation of lists inside other objects (Gnus registry), also
 ;; bug#29220.
@@ -312,7 +320,7 @@ persistent class.")
     :initarg :htab
     :type hash-table)))
 
-(ert-deftest eieio-test-persist-interior-lists ()
+(defun eieio-test-persist-interior-lists ()
   (let* ((thing (make-instance
                  'eieio-container
                  :vec [nil]
@@ -321,8 +329,8 @@ persistent class.")
                                "container-" emacs-version ".eieio")))
          (john (make-instance 'person :name "John"))
          (alexie (make-instance 'person :name "Alexie"))
-         (alst '(("first" (one two three))
-                 ("second" (four five six)))))
+         (alst (list (list "first" (list 'one 'two 'three))
+                     (list "second" (list 'four 'five 'six)))))
     (setf (slot-value thing 'alist) alst)
     (puthash "alst" alst (slot-value thing 'htab))
     (aset (slot-value thing 'vec) 0 alst)
@@ -332,8 +340,16 @@ persistent class.")
     (setf (nth 2 (cadar alst)) john
           (nth 2 (cadadr alst)) alexie)
     (unwind-protect
-        ;; FIXME: Should not error.
-        (should-error (persist-test-save-and-compare thing))
+        (persist-test-save-and-compare thing)
       (delete-file (slot-value thing 'file)))))
+
+(ert-deftest eieio-test-persist-interior-lists-backward-compatibility ()
+  (let ((eieio-backward-compatibility t)) ; The default.
+    (eieio-test-persist-interior-lists)))
+
+(ert-deftest eieio-test-persist-interior-lists-no-backward-compatibility ()
+  :expected-result :failed ;; Bug#29220.
+  (let ((eieio-backward-compatibility nil))
+    (eieio-test-persist-interior-lists)))
 
 ;;; eieio-test-persist.el ends here

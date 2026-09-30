@@ -4,6 +4,7 @@
 @set TITLE SRecoder Manual
 @set AUTHOR Eric M. Ludlam
 @settitle @value{TITLE}
+@documentlanguage en
 @include docstyle.texi
 
 @c Merge all indexes into a single index for now.
@@ -16,7 +17,7 @@
 @c %**end of header
 
 @copying
-Copyright @copyright{} 2007--2018 Free Software Foundation, Inc.
+Copyright @copyright{} 2007--2026 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document
@@ -121,7 +122,7 @@ or add
 into a language hook function to force it on (which is the default) or
 pass in @code{-1} to force it off.
 
-See @ref{SRecode Minor Mode} for more on using the minor mode.
+@xref{SRecode Minor Mode}, for more on using the minor mode.
 
 Use the menu to insert templates into the current file.
 
@@ -169,7 +170,7 @@ Each template file you write is dedicated to a single major mode.  In
 it, you can write templates within the same context and with the same
 name as core templates.  You can force your templates to override the
 core templates for a particular major mode by setting the
-priority.  See @ref{Special Variables}.
+priority.  @xref{Special Variables}.
 
 To get going quickly, open a new @file{.srt} file.  It will start in
 the @srecode{} template writing mode.  Use the @srecode{} minor mode
@@ -237,8 +238,8 @@ used in macros in a template.  Variables are what allows a generic
 template such as a function to be made specific, such as a function
 named foo.  The value of a variable can be one of three things; a
 string, a list of more dictionaries, or a special
-@code{srecode-dictionary-compound-value} object subclass.  See
-@ref{Variables} for more.
+@code{srecode-dictionary-compound-value} object subclass.
+@xref{Variables}, for more about this.
 
 @section Template Insertion
 The template insertion layer involves extensions to the basic template
@@ -259,7 +260,7 @@ contexts to have the same name.  Some standard contexts are
 @code{file}, @code{declaration}, and @code{classdecl}.
 
 A context can be automatically derived as well based on the parsing
-state from @i{Semantic}.  @inforef{Top, Semantic Manual, semantic}.
+state from @i{Semantic}.  @xref{Top, Semantic Manual,, semantic}.
 
 @section Applications
 Commands that do a particular user task which involves also writing
@@ -293,14 +294,14 @@ If the variable @code{srecode-takeover-INS-key} is set, then the key
 The most important key is bound to @code{srecode-insert} which is
 @kbd{C-c / /}, or @kbd{@key{INSERT} @key{INSERT}}.  @ref{Quick Start}.
 
-Major keybindings are:
+Major key bindings are:
 
 @table @kbd
 @item C-c / /
 Insert a template whose name is typed into the minibuffer.
 @item C-c / <lower case letter>
 Reserved for direct binding of simple templates to keys using a
-keybinding command in the template file.
+key binding command in the template file.
 @item C-c / <upper case letter>
 Reserved for template applications (Such as comment or get/set inserter.)
 @item C-c / E
@@ -330,8 +331,6 @@ Prompt in the minibuffer as the value is inserted.
 Use the dictionary macro name as the inserted value,
 and place a field there.  Matched fields change together.
 @end table
-
-@b{NOTE}: The field feature does not yet work with XEmacs.
 @end defun
 
 Field editing mode is supported in newer versions of Emacs.  You
@@ -591,8 +590,8 @@ A variable can also have a compound value.  This means the value of
 the variable is an @EIEIO{} object, which is a subclass of
 @code{srecode-dictionary-compound-value}.
 
-New compound variables can only be setup from Lisp code.  See
-@ref{Compound Dictionary Values} for details on setting up compound
+New compound variables can only be setup from Lisp code.
+@xref{Compound Dictionary Values}, for details on setting up compound
 variables from Lisp.
 
 @node Templates
@@ -709,7 +708,7 @@ major mode.
 
 Template macros occur in the template text.  The default escape
 characters are ``@{@{`` and ``@}@}'', though they can be changed
-in the top-level variables.  See @ref{Variables}.
+in the top-level variables.  @xref{Variables}.
 
 Thus, if you have the template code that looks like this:
 
@@ -1072,9 +1071,9 @@ Here is an example of wrapping a semantic tag in a compound value:
   "Wrap up a collection of semantic tag information.
 This class will be used to derive dictionary values.")
 
-(defmethod srecode-compound-toString((cp srecode-semantic-tag)
-                                     function
-                                     dictionary)
+(cl-defmethod srecode-compound-toString ((cp srecode-semantic-tag)
+                                         function
+                                         dictionary)
   "Convert the compound dictionary value CP to a string.
 If FUNCTION is non-nil, then FUNCTION is somehow applied to an
 aspect of the compound value."
@@ -1474,7 +1473,7 @@ to write your own function in order to provide your dictionaries with
 the values needed for custom templates.
 
 In this way, you can build your own code generator for any language
-based on a set of predefined macros whos values you need to derive
+based on a set of predefined macros whose values you need to derive
 from Emacs Lisp code yourself.
 
 For example:
@@ -1597,7 +1596,7 @@ from a user perspective during basic interactive insertion via
 
 NOTES ON THIS CHAPTER:
 
-These conventions are being worked on.  Check w/ CEDET-DEVEL mailing
+These conventions are being worked on.  Check with CEDET-DEVEL mailing
 list if you want to support a language, or write an application and
 provide your opinions on this topic.  Any help is appreciated.
 

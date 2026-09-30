@@ -1,6 +1,6 @@
-;;; mouse-copy.el --- one-click text copy and move
+;;; mouse-copy.el --- one-click text copy and move  -*- lexical-binding: t -*-
 
-;; Copyright (C) 1996, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: John Heidemann <johnh@ISI.EDU>
 ;; Keywords: mouse
@@ -36,14 +36,15 @@
 ;; for ``one-click scrolling''.
 ;;
 ;; To use mouse-copy, place the following in your init file:
-;;	(require 'mouse-copy)
-;;     (global-set-key [M-down-mouse-1] 'mouse-drag-secondary-pasting)
-;;     (global-set-key [M-S-down-mouse-1] 'mouse-drag-secondary-moving)
+;;     (autoload 'mouse-drag-secondary-pasting "mouse-copy")
+;;     (autoload 'mouse-drag-secondary-moving "mouse-copy")
+;;     (keymap-global-set "M-<down-mouse-1>" #'mouse-drag-secondary-pasting)
+;;     (keymap-global-set "M-S-<down-mouse-1>" #'mouse-drag-secondary-moving)
 ;;
-;; (These definitions override the old binding of M-mouse-1 to
-;; mouse-drag-secondary.  I find I don't use that command much so its
-;; loss is not important, and it can be made up with a M-mouse-1
-;; followed by a M-mouse-3.  I personally reserve M-mouse bindings
+;; (These definitions override the old binding of `M-<mouse-1>' to
+;; `mouse-drag-secondary'.  I find I don't use that command much so its
+;; loss is not important, and it can be made up with a `M-<mouse-1>'
+;; followed by a `M-mouse-3'.  I personally reserve M-mouse bindings
 ;; for my window manager and bind everything to C-mouse.)
 ;;
 ;;
@@ -54,9 +55,6 @@
 ;; mouse-2 scrolling.  The package mouse-scroll.el by Tom Wurgler
 ;; <twurgler@goodyear.com> is similar to mouse-drag-throw, but
 ;; doesn't pass clicks through.
-;;
-;; These functions have been tested in emacs version 19.30,
-;; and this package has run in the past on 19.25-19.29.
 ;;
 ;; Originally mouse-copy was part of a larger package.
 ;; As of 11 July 96 the scrolling functions were split out
@@ -78,7 +76,7 @@
 ;; <http://www.zip.com.au/~cs/app/wily/auug.html>.  I'd like
 ;; to incorporate some of these ideas into mouse-copy.  The only
 ;; lose is that this is not the current Emacs Way Of Doing Things, so
-;; there would be a learning curve for existing emacs users.
+;; there would be a learning curve for existing Emacs users.
 ;;
 ;;
 ;; Thanks:
@@ -113,7 +111,7 @@ The problem occurs under XFree86-3.1.1 (X11R6pl11) but not under X11R5,
 and under post-19.29 but not early versions of Emacs.
 
 19.29 and 19.30 seems to drop mouse drag events
-sometimes. (Reproducible under XFree86-3.1.1 (X11R6pl11) and
+sometimes.  (Reproducible under XFree86-3.1.1 (X11R6pl11) and
 XFree86-3.1.2 under Linux 1.2.x.  Doesn't occur under X11R5 and SunOS
 4.1.1.)
 
@@ -154,7 +152,8 @@ If you have the bug (or the real fix :-), please let me know."
   "Drag out a secondary selection, then paste it at the current point.
 
 To test this function, evaluate:
-	(global-set-key [M-down-mouse-1] \\='mouse-drag-secondary-pasting)
+    (keymap-global-set \"M-<down-mouse-1>\"
+                       \\='mouse-drag-secondary-pasting)
 put the point at one place, then click and drag over some other region."
   (interactive "e")
   ;; Work-around: We see and react to each part of a multi-click event
@@ -187,10 +186,9 @@ put the point at one place, then click and drag over some other region."
 
 This command is like \\[mouse-kill-secondary] (that is, the secondary
 selection is deleted and placed in the kill ring), except that it also
-leaves the secondary buffer active on exit.
-
-This command was derived from mouse-kill-secondary in emacs-19.28
-by johnh@ficus.cs.ucla.edu."
+leaves the secondary buffer active on exit."
+  ;; This command was derived from mouse-kill-secondary in emacs-19.28
+  ;; by johnh@ficus.cs.ucla.edu.
   (interactive)
   (let* ((keys (this-command-keys))
 	 (click (elt keys (1- (length keys)))))
@@ -205,7 +203,7 @@ by johnh@ficus.cs.ucla.edu."
   ;; (delete-overlay mouse-secondary-overlay)
   ;; (gui-set-selection 'SECONDARY nil)
   ;; (setq mouse-secondary-overlay nil)
-)
+  )
 
 (defun mouse-drag-secondary-moving (start-event)
   "Sweep out a secondary selection, then move it to the current point."
@@ -216,8 +214,7 @@ by johnh@ficus.cs.ucla.edu."
   (if (mouse-drag-secondary start-event)
       (progn
 	(mouse-kill-preserving-secondary)
-	(insert (gui-get-selection 'SECONDARY))))
-)
+        (insert (gui-get-selection 'SECONDARY)))))
 
 (provide 'mouse-copy)
 

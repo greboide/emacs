@@ -5,6 +5,18 @@ eval 'exec perl -S $0 "$@"' # Portability kludge
 # Author: Martin Buchholz
 # This program is in the public domain.
 
+# NOTE ADDED 2025-02-22:
+#
+# This is an old script that doesn't necessarily work very well with
+# today's sources.  If anyone wants to fix it up, it might be worth the
+# effort, as it could help catch some mistakes that we have overlooked.
+#
+# If you want to work on this, consider fundamentally rethinking the
+# approach.  Instead of flagging anything that *might* be an error,
+# maybe it should flag only things that we are *sure* are an error.
+# That would make it possible to run this as a matter of routine, just
+# as we already do with codespell (see "admin/run-codespell").
+
 use strict;
 use warnings;
 use POSIX;
@@ -59,7 +71,7 @@ sub Check_texi_function {
     $arglist_parm{$parm} = 1;
   }
 
-  foreach my $parm ($docstring =~ /\@var{([^{}]+)}/g) {
+  foreach my $parm ($docstring =~ /\@var\{([^{}]+)\}/g) {
     $docstring_parm{$parm} = 1;
   }
 
@@ -111,7 +123,9 @@ sub Check_function {
   #  $arglist_parm{$parm} = 1;
   #}
   foreach my $parm (@parms) {
-    next if $parm eq '&optional' || $parm eq '&rest';
+    next if $parm eq '&optional'
+      || $parm eq '&rest'
+      || $parm eq 'Lisp-Object';
     $arglist_parm{$parm} = 1;
   }
   my $doc_tmp = $docstring;
@@ -150,6 +164,22 @@ sub Check_function {
     next if $parm eq 'primary';
     next if $parm eq 'secondary';
     next if $parm eq 'clipboard';
+    next if $parm eq 'bbdb';
+    next if $parm eq 'dos';
+    next if $parm eq 'erc';
+    next if $parm eq 'exif';
+    next if $parm eq 'ldap';
+    next if $parm eq 'ime';
+    next if $parm eq 'rfc';
+    next if $parm eq 'ms-dos';
+    next if $parm eq 'url';
+    next if $parm eq 'w32';
+    next if $parm eq 'todo'; # org-mode
+    next if $parm eq 'done'; # org-mode
+    next if $parm eq 'waiting'; #org-mode
+    next if $parm eq 'ordered'; #org-mode
+    next if $parm eq 'deadline'; #org-mode
+    next if $parm eq 'scheduled'; #org-mode
     next if length $parm < 3;
     if (! exists $arglist_parm{$parm}) {
       print "bogus parm: $function: $parm\n";
@@ -228,20 +258,43 @@ open (FIND, "find src -name '*.c' -print |") or die;
 while (my $file = <FIND>) {
   my @matches =
     ((FileContents $file) =~
-     /\bDEFUN\s*\(\s*\"((?:[^\\\"]|\\.)+)\"\s*,\s*\S+\s*,\s*(\S+)\s*,\s*(\S+)\s*,\s*((?:0|\"(?:(?:[^\\\"]|\\.)*)\"))\s*,\s*\/\*(.*?)\*\/\s*\(([^()]*)\)\)/sgo);
+     /\b
+      DEFUN\s*\(\s*
+      ## $function
+      \"((?:[^\\\"]|\\.)+)\"\s*,
+      \s*\S+\s*, \s*\S+\s*,
+      ## $minargs
+      \s*(\S+)\s*,
+      ## $maxargs
+      \s*(\S+)\s*,
+      ## $interactive
+      \s*((?:0|NULL|\"(?:(?:[^\\\"]|\\.)*)\"))\s*,
+      ## $docstring
+      \s*doc:\s*\/\*\s*(.*?)\s*\*\/
+      # attributes -- skip
+      (?:\s*attributes:\s*
+          (?:noreturn|const)
+          \s*)?
+      \s*\)
+      ### $parms
+      \s*\(
+      ([^()]*)
+      \)
+     /sgox);
   while (@matches) {
     my ($function, $minargs, $maxargs, $interactive, $docstring, $parms) = splice (@matches, 0, 6);
     $docstring =~ s/^\n+//s;
     $docstring =~ s/\n+$//s;
     $parms =~ s/,/ /g;
-    my @parms = split (' ',$parms);
+    my @parms = $parms eq 'void' ? () : split (' ', $parms);
     for (@parms) { tr/_/-/; s/-$//; }
     if ($parms !~ /Lisp_Object/) {
       if ($minargs < @parms) {
-	if ($maxargs =~ /^\d+$/) {
-	  die unless $maxargs eq @parms;
-	  splice (@parms, $minargs, 0, '&optional');
-	}
+        if ($maxargs =~ /^\d+$/) {
+          die "$function: $maxargs"
+            unless $maxargs eq @parms;
+          splice (@parms, $minargs, 0, '&optional');
+        }
       }
     }
     my $funtype = ($interactive =~ /\"/ ? 'Command' : 'Function');
@@ -249,20 +302,14 @@ while (my $file = <FIND>) {
   }
 }
 
-my @pkgs;
-if (-d "../xemacs-packages") {
-  @pkgs = qw (libs/edebug libs/xemacs-base comm/eudc oa/edit-utils);
-} else {
-  @pkgs = ();
-}
-for (@pkgs) { s@^@../xemacs-packages/@; }
+my @pkgs = ();
 open (FIND, "find lisp @pkgs -name '*.el' -print |") or die;
 while (my $file = <FIND>) {
   my $contents = FileContents $file;
   $contents =~ s/(?:\s|;);.*//mog;
   my @matches =
     ($contents =~
-     /\((def(?:un|subst|macro))\s+(\S+)\s+\(([^()]*)\)\s+\"((?:[^\\\"]|\\.)+)\"(.*?)\)/sgo);
+     /\((def(?:un|subst|macro)|cl-defun)\s+(\S+)\s+\(([^()]*)\)\s+\"((?:[^\\\"]|\\.)+)\"(.*?)\)/sgo);
   while (@matches) {
     my ($defform, $function, $parms, $docstring, $code_fragment) = splice (@matches, 0, 5);
 
@@ -285,17 +332,21 @@ while (my $file = <FIND>) {
   my $contents = FileContents $file;
   $contents =~ s/(?:\s|;);.*//mog;
 
-  my @matches = ($contents =~ /^\((?:defalias|fset|define-function)\s+\'([A-Za-z0-9_-]+)\s+\'([A-Za-z0-9_-]+)/mog);
+  my @matches = ($contents =~ /^\((?:defalias|fset|define-function)\s+\'([A-Za-z0-9_<>=-]+)\s+[#]?\'([A-Za-z0-9_-]+)/mog);
   while (@matches) {
     my ($alias, $aliasee) = splice (@matches, 0, 2);
     print "alias $alias aliasee $aliasee\n";
     if (exists $code_funtype{$aliasee}) { $code_funtype{$alias} = $code_funtype{$aliasee}; }
+    else {$code_funtype{$alias} = 1;}
     if (exists $code_arglist{$aliasee}) { $code_arglist{$alias} = $code_arglist{$aliasee}; }
   }
 }
 
+# FIXME: Consider cl-defgeneric, minor and major modes.
+
 foreach my $fun (sort keys %texi_funtype) {
   if (not exists $code_funtype{$fun}) {
+    next if $fun eq 'foo';
     print "nuke-this-doc: $fun $texi_funtype{$fun}\n";
   }
 }

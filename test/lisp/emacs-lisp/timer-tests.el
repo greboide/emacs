@@ -1,6 +1,6 @@
 ;;; timer-tests.el --- tests for timers -*- lexical-binding:t -*-
 
-;; Copyright (C) 2013-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2013-2026 Free Software Foundation, Inc.
 
 ;; This file is part of GNU Emacs.
 
@@ -36,7 +36,53 @@
 
 (ert-deftest timer-tests-debug-timer-check ()
   ;; This function exists only if --enable-checking.
-  (if (fboundp 'debug-timer-check)
-      (should (debug-timer-check)) t))
+  (skip-unless (fboundp 'debug-timer-check))
+  (when (fboundp 'debug-timer-check)    ; silence byte-compiler
+    (should (debug-timer-check))))
+
+(ert-deftest timer-test-multiple-of-time ()
+  (should (time-equal-p
+	   (timer-next-integral-multiple-of-time '(0 0 0 1) (1+ (ash 1 53)))
+	   (list (ash 1 (- 53 16)) 1))))
+
+(ert-deftest timer-next-integral-multiple-of-time-2 ()
+  "Test bug#33071."
+  (let* ((tc (current-time))
+         (delta-ticks 1000)
+         (hz 128000)
+         (tce (time-convert tc hz))
+         (tc+delta (time-add tce (cons delta-ticks hz)))
+         (tc+deltae (time-convert tc+delta hz))
+         (tc+delta-ticks (car tc+deltae))
+         (tc-nexte (cons (- tc+delta-ticks (% tc+delta-ticks delta-ticks)) hz))
+         (nt (timer-next-integral-multiple-of-time
+              tc (/ (float delta-ticks) hz)))
+         (nte (time-convert nt hz)))
+    (should (equal tc-nexte nte))))
+
+(ert-deftest timer-next-integral-multiple-of-time-3 ()
+  "Test bug#33071."
+  (let ((nt (timer-next-integral-multiple-of-time '(32770 . 65539) 0.5)))
+    (should (time-equal-p 1 nt))))
+
+(ert-deftest timer-test-repeat-arg ()
+  "Test bug#79227."
+  (should (run-at-time nil nil 'ignore))
+  (should (run-at-time nil 0 'ignore))
+  (should (run-at-time nil 1.5 'ignore))
+  ;; Test REPEAT that is neither nil nor a non-negative number.
+  (let ((err (should-error (run-at-time nil t 'ignore))))
+    (should (equal err '(error . ("Invalid repetition interval: t"))))
+    ;; Test REPEAT that is a negative number.
+    (setq err (should-error (run-at-time nil -1.5 'ignore)))
+    (should (equal err '(error . ("Invalid repetition interval: -1.5")))))
+  ;; Same tests for run-with-timer.
+  (should (run-with-timer 0 nil 'ignore))
+  (should (run-with-timer 0 0 'ignore))
+  (should (run-with-timer 0 1.5 'ignore))
+  (let ((err (should-error (run-with-timer 0 t 'ignore))))
+    (should (equal err '(error . ("Invalid repetition interval: t"))))
+    (setq err (should-error (run-with-timer 0 -1.5 'ignore)))
+    (should (equal err '(error . ("Invalid repetition interval: -1.5"))))))
 
 ;;; timer-tests.el ends here

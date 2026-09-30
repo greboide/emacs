@@ -1,6 +1,6 @@
 ;;; url-parse.el --- Uniform Resource Locator parser -*- lexical-binding: t -*-
 
-;; Copyright (C) 1996-1999, 2004-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996-1999, 2004-2026 Free Software Foundation, Inc.
 
 ;; Keywords: comm, data, processes
 
@@ -83,7 +83,13 @@ If the specified port number is the default, return nil."
 	 ;; port is empty or if its value would be the same as that of
 	 ;; the scheme's default."
 	 (port (url-port-if-non-default urlobj))
-	 (file (url-filename urlobj))
+         ;; For Windows/DOS-like paths, `url-generic-parse-url' strips
+         ;; the leading /, so we need to add it back (bug#76982)
+	 (file (if (and (string= "file" type)
+                        (url-filename urlobj)
+                        (string-match "^[A-Za-z]:[/\\]" (url-filename urlobj)))
+                   (concat "/" (url-filename urlobj))
+                 (url-filename urlobj)))
 	 (frag (url-target urlobj)))
     (concat (if type (concat type ":"))
 	    (if (url-fullness urlobj) "//")
@@ -95,17 +101,6 @@ If the specified port number is the default, return nil."
 	    (if port (format ":%d" (url-port urlobj)))
 	    (or file "/")
 	    (if frag (concat "#" frag)))))
-
-(defun url-recreate-url-attributes (urlobj)
-  "Recreate the attributes of an URL string from the parsed URLOBJ."
-  (declare (obsolete nil "24.3"))
-  (when (url-attributes urlobj)
-    (concat ";"
-	    (mapconcat (lambda (x)
-                         (if (cdr x)
-                             (concat (car x) "=" (cdr x))
-                           (car x)))
-                       (url-attributes urlobj) ";"))))
 
 ;;;###autoload
 (defun url-generic-parse-url (url)
@@ -201,6 +196,12 @@ parses to
 	  ;; authority) at the beginning of the absolute path.
 
           (setq save-pos (point))
+          ;; For file:// URIs, if the path "looks like" Windows/DOS,
+          ;; it makes sense to strip the leading slash (bug#76982)
+          (when (and (string= "file" scheme)
+                     (looking-at "/[A-Za-z]:[/\\]"))
+            (forward-char)
+            (setq save-pos (point)))
           (if (string= "data" scheme)
 	      ;; For the "data" URI scheme, all the rest is the FILE.
 	      (setq file (buffer-substring save-pos (point-max)))
@@ -209,7 +210,7 @@ parses to
 	    ;; 3.3. Path
 	    (skip-chars-forward "^?#")
 	    ;; 3.4. Query
-	    (when (looking-at "?")
+	    (when (looking-at "\\?")
 	      (skip-chars-forward "^#"))
 	    (setq file (buffer-substring save-pos (point)))
 	    ;; 3.5 Fragment
@@ -221,6 +222,7 @@ parses to
 
           (if (and host (string-match "%[0-9][0-9]" host))
               (setq host (url-unhex-string host)))
+
           (url-parse-make-urlobj scheme user pass host port file
 				 fragment nil full))))))
 

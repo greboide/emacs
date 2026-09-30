@@ -1,6 +1,6 @@
-;;; rxvt.el --- define function key sequences and standard colors for rxvt
+;;; rxvt.el --- define function key sequences and standard colors for rxvt  -*- lexical-binding: t -*-
 
-;; Copyright (C) 2002-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2002-2026 Free Software Foundation, Inc.
 
 ;; Author: Eli Zaretskii
 ;; Keywords: terminals
@@ -25,6 +25,16 @@
 ;;; Code:
 
 (require 'term/xterm)
+
+(defgroup rxvt nil
+  "(U)RXVT support."
+  :version "28.1"
+  :group 'terminals)
+
+(defcustom rxvt-set-window-title nil
+  "Whether Emacs should set window titles to an Emacs frame in RXVT."
+  :version "28.1"
+  :type 'boolean)
 
 (defvar rxvt-function-map
   (let ((map (make-sparse-keymap)))
@@ -171,16 +181,32 @@
   (xterm-register-default-colors rxvt-standard-colors)
   (rxvt-set-background-mode)
   ;; This recomputes all the default faces given the colors we've just set up.
-  (tty-set-up-initial-frame-faces))
+  (tty-set-up-initial-frame-faces)
+
+  ;; Unconditionally enable bracketed paste mode: terminals that don't
+  ;; support it just ignore the sequence.
+  (xterm--init-bracketed-paste-mode)
+
+  (when rxvt-set-window-title
+    (xterm--init-frame-title))
+
+  ;; Do not use TAB+BS optimization, as that might produce buggy display.
+  (setq tty-cursor-movement-use-TAB-BS nil)
+
+  (run-hooks 'terminal-init-rxvt-hook))
 
 ;; rxvt puts the default colors into an environment variable
 ;; COLORFGBG.  We use this to set the background mode in a more
 ;; intelligent way than the default guesswork in startup.el.
 (defun rxvt-set-background-mode ()
   "Set background mode as appropriate for the default rxvt colors."
-  (let ((fgbg (getenv "COLORFGBG"))
-	bg rgb)
-    (set-terminal-parameter nil 'background-mode 'light)
+  (set-terminal-parameter nil 'background-mode (rxvt-colorfgbg-background-mode
+                                                (getenv "COLORFGBG"))))
+
+(defun rxvt-colorfgbg-background-mode (fgbg)
+  "Determine background mode.
+FGBG is a string of the same meaning as the COLORFGBG environment variable."
+  (let (bg rgb)
     (when (and fgbg
 	       (string-match ".*;\\([0-9][0-9]?\\)\\'" fgbg))
       (setq bg (string-to-number (substring fgbg (match-beginning 1))))
@@ -193,7 +219,8 @@
 	     ;; The following line assumes that white is the 15th
 	     ;; color in rxvt-standard-colors.
 	     (* (apply '+ (car (cddr (nth 15 rxvt-standard-colors)))) 0.6))
-	  (set-terminal-parameter nil 'background-mode 'dark)))))
+          'dark
+        'light))))
 
 (provide 'term/rxvt)
 

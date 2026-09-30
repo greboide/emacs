@@ -1,6 +1,6 @@
 @c -*-texinfo-*-
 @c This is part of the GNU Emacs Lisp Reference Manual.
-@c Copyright (C) 1990-1995, 1998, 2001-2018 Free Software Foundation,
+@c Copyright (C) 1990--1995, 1998, 2001--2026 Free Software Foundation,
 @c Inc.
 @c See the file elisp.texi for copying conditions.
 @node Macros
@@ -241,7 +241,6 @@ of constants and nonconstant parts.  To make this easier, use the
 @samp{`} syntax (@pxref{Backquote}).  For example:
 
 @example
-@example
 @group
 (defmacro t-becomes-nil (variable)
   `(if (eq ,variable t)
@@ -252,7 +251,6 @@ of constants and nonconstant parts.  To make this easier, use the
 (t-becomes-nil foo)
      @equiv{} (if (eq foo t) (setq foo nil))
 @end group
-@end example
 @end example
 
 @node Problems with Macros
@@ -480,12 +478,16 @@ in expressions ordinarily.
 
   Another problem can happen if the macro definition itself
 evaluates any of the macro argument expressions, such as by calling
-@code{eval} (@pxref{Eval}).  If the argument is supposed to refer to the
-user's variables, you may have trouble if the user happens to use a
-variable with the same name as one of the macro arguments.  Inside the
-macro body, the macro argument binding is the most local binding of this
-variable, so any references inside the form being evaluated do refer to
-it.  Here is an example:
+@code{eval} (@pxref{Eval}).  You have to take into account that macro
+expansion may take place long before the code is executed, when the
+context of the caller (where the macro expansion will be evaluated) is
+not yet accessible.
+
+  Also, if your macro definition does not use @code{lexical-binding}, its
+formal arguments may hide the user's variables of the same name.  Inside
+the macro body, the macro argument binding is the most local binding of
+such variable, so any references inside the form being evaluated do refer
+to it.  Here is an example:
 
 @example
 @group
@@ -508,12 +510,10 @@ it.  Here is an example:
 @code{x}, because @code{a} conflicts with the macro argument variable
 @code{a}.
 
-  Another problem with calling @code{eval} in a macro definition is that
-it probably won't do what you intend in a compiled program.  The
-byte compiler runs macro definitions while compiling the program, when
-the program's own computations (which you might have wished to access
-with @code{eval}) don't occur and its local variable bindings don't
-exist.
+  Also, the expansion of @code{(foo x)} above will return something
+different or signal an error when the code is compiled, since in that case
+@code{(foo x)} is expanded during compilation, whereas the execution of
+@code{(setq x 'b)} will only take place later when the code is executed.
 
   To avoid these problems, @strong{don't evaluate an argument expression
 while computing the macro expansion}.  Instead, substitute the
@@ -640,3 +640,25 @@ indentation is being computed by @kbd{C-M-q}; if the value is a
 number, @kbd{C-M-q} need not recalculate indentation for the following
 lines until the end of the list.
 @end table
+
+@defvar lisp-indent-local-overrides
+This variable can be used to override the indentation specification used
+for certain symbol, as specified using their @code{lisp-indent-function}
+symbol property (@pxref{Symbol Properties}).  It is intended to be used
+as a file-local or directory-local variable; @xref{File Variables, ,
+Local Variables in Files, emacs, The GNU Emacs Manual}.
+
+Each key is a symbol and each value is an indent specification, which
+overrides the value of the symbol's @code{lisp-indent-function}
+property.  The value can take the same forms as the value of the symbol
+property, documented above.  Note that using a function is not safe and
+should be avoided, else all users, who visit the file, would have to
+explicitly approve or decline their use.
+
+This variable is used by the functions @code{lisp-indent-function}
+and @code{common-lisp-indent-function}.  In case of the latter, the
+symbol properties @code{common-lisp-indent-function-for-elisp} and
+@code{common-lisp-indent-function} take precedence not only over the
+@code{lisp-indent-function} property but also over this variable.
+
+@end defvar

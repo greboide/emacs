@@ -1,6 +1,6 @@
-;;; w32-fns.el --- Lisp routines for 32-bit Windows
+;;; w32-fns.el --- Lisp routines for 32-bit Windows  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1994, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1994, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Geoff Voelker <voelker@cs.washington.edu>
 ;; Keywords: internal
@@ -39,6 +39,8 @@
     ;; same buffer.
     (setq find-file-visit-truename t))
 
+;;;; Shells
+
 (defun w32-shell-name ()
   "Return the name of the shell being used."
   (or (bound-and-true-p shell-file-name)
@@ -47,13 +49,15 @@
       (and (fboundp 'w32-using-nt) (w32-using-nt) "cmd.exe")
       "command.com"))
 
+(defvar w32-system-shells)       ;; defined in w32-vars.el
+(defvar w32-allow-system-shell)  ;; defined in w32-vars.el
 (defun w32-system-shell-p (shell-name)
   (and shell-name
        (member (downcase (file-name-nondirectory shell-name))
 	       w32-system-shells)))
 
 (defun w32-shell-dos-semantics ()
-  "Return non-nil if the interactive shell being used expects MS-DOS shell semantics."
+  "Return non-nil if current interactive shell expects MS-DOS shell semantics."
   (or (w32-system-shell-p (w32-shell-name))
       (and (member (downcase (file-name-nondirectory (w32-shell-name)))
 		   '("cmdproxy" "cmdproxy.exe"))
@@ -119,6 +123,8 @@ You should set this to t when using a non-system shell.\n\n"))))
     (set-buffer prev-buffer)))
 
 (add-hook 'after-init-hook 'w32-check-shell-configuration)
+
+;;;; Coding-systems, locales, etc.
 
 ;; Override setting chosen at startup.
 (defun w32-set-default-process-coding-system ()
@@ -187,31 +193,6 @@ You should set this to t when using a non-system shell.\n\n"))))
 ;;	    (setq source-directory (file-name-as-directory
 ;;				     (expand-file-name ".." exec-directory)))))
 
-(defun w32-convert-standard-filename (filename)
-  "Convert a standard file's name to something suitable for MS-Windows.
-This means to guarantee valid names and perhaps to canonicalize
-certain patterns.
-
-This function is called by `convert-standard-filename'.
-
-Replace invalid characters and turn Cygwin names into native
-names."
-  (save-match-data
-    (let ((name
-	   (if (string-match "\\`/cygdrive/\\([a-zA-Z]\\)/" filename)
-               (replace-match "\\1:/" t nil filename)
-             (copy-sequence filename)))
-	  (start 0))
-      ;; leave ':' if part of drive specifier
-      (if (and (> (length name) 1)
-	       (eq (aref name 1) ?:))
-	  (setq start 2))
-      ;; destructively replace invalid filename characters with !
-      (while (string-match "[?*:<>|\"\000-\037]" name start)
-	(aset name (match-beginning 0) ?!)
-	(setq start (match-end 0)))
-      name)))
-
 (defun w32-set-system-coding-system (coding-system)
   "Set the coding system used by the Windows system to CODING-SYSTEM.
 This is used for things like passing font names with non-ASCII
@@ -223,8 +204,7 @@ This function is provided for backward compatibility, since
   (interactive
    (list (let ((default locale-coding-system))
            (read-coding-system
-            (format "Coding system for system calls (default %s): "
-                    default)
+            (format-prompt "Coding system for system calls" default)
             default))))
   (check-coding-system coding-system)
   (setq locale-coding-system coding-system))
@@ -259,29 +239,37 @@ bit output with no translation."
   ;; value from x-select-font etc, so list the most important charsets last.
   (w32-add-charset-info "iso8859-14" 'w32-charset-ansi  28604)
   (w32-add-charset-info "iso8859-15" 'w32-charset-ansi  28605)
+  (w32-add-charset-info "iso8859-16" 'w32-charset-ansi  28606)
   ;; The following two are included for pattern matching.
   (w32-add-charset-info "jisx0201" 'w32-charset-shiftjis 932)
   (w32-add-charset-info "jisx0208" 'w32-charset-shiftjis 932)
   (w32-add-charset-info "jisx0201-latin" 'w32-charset-shiftjis 932)
   (w32-add-charset-info "jisx0201-katakana" 'w32-charset-shiftjis 932)
+  (w32-add-charset-info "jisx0212" 'w32-charset-shiftjis 932)
   (w32-add-charset-info "ksc5601.1989" 'w32-charset-hangeul 949)
+  (w32-add-charset-info "ksx1001" 'w32-charset-hangeul 949)
   (w32-add-charset-info "big5" 'w32-charset-chinesebig5 950)
   (w32-add-charset-info "gb2312.1980" 'w32-charset-gb2312 936)
+  (w32-add-charset-info "gbk" 'w32-charset-gb2312 936)
   (w32-add-charset-info "ms-symbol" 'w32-charset-symbol nil)
   (w32-add-charset-info "ms-oem" 'w32-charset-oem 437)
   (w32-add-charset-info "ms-oemlatin" 'w32-charset-oem 850)
   (w32-add-charset-info "iso8859-2" 'w32-charset-easteurope 28592)
   (w32-add-charset-info "iso8859-3" 'w32-charset-turkish 28593)
   (w32-add-charset-info "iso8859-4" 'w32-charset-baltic 28594)
+  (w32-add-charset-info "iso8859-5" 'w32-charset-russian 28595)
   (w32-add-charset-info "iso8859-6" 'w32-charset-arabic 28596)
   (w32-add-charset-info "iso8859-7" 'w32-charset-greek 28597)
   (w32-add-charset-info "iso8859-8" 'w32-charset-hebrew 1255)
   (w32-add-charset-info "iso8859-9" 'w32-charset-turkish 1254)
   (w32-add-charset-info "iso8859-13" 'w32-charset-baltic 1257)
   (w32-add-charset-info "koi8-r" 'w32-charset-russian 20866)
-  (w32-add-charset-info "iso8859-5" 'w32-charset-russian 28595)
-  (w32-add-charset-info "tis620-2533" 'w32-charset-thai 874)
+  (w32-add-charset-info "microsoft-cp1251" 'w32-charset-russian 1251)
+  (w32-add-charset-info "windows-1251" 'w32-charset-russian 1251)
+  (w32-add-charset-info "tis620-2533" 'w32-charset-russian 28595)
+  (w32-add-charset-info "iso8859-11" 'w32-charset-thai 874)
   (w32-add-charset-info "windows-1258" 'w32-charset-vietnamese 1258)
+  (w32-add-charset-info "viscii" 'w32-charset-vietnamese 1258)
   (w32-add-charset-info "ksc5601.1992" 'w32-charset-johab 1361)
   (w32-add-charset-info "mac-roman" 'w32-charset-mac 10000)
   (w32-add-charset-info "iso10646-1" 'w32-charset-default t)
@@ -297,25 +285,81 @@ bit output with no translation."
   (w32-add-charset-info "tis620-0" 'w32-charset-thai 874)
   (w32-add-charset-info "iso8859-1" 'w32-charset-ansi 1252))
 
+;;;; Standard filenames
+
+(defun w32-convert-standard-filename (filename)
+  "Convert a standard file's name to something suitable for MS-Windows.
+This means to guarantee valid names and perhaps to canonicalize
+certain patterns.
+
+This function is called by `convert-standard-filename'.
+
+Replace invalid characters and turn Cygwin names into native
+names."
+  (save-match-data
+    (let ((name
+	   (if (string-match "\\`/cygdrive/\\([a-zA-Z]\\)/" filename)
+               (replace-match "\\1:/" t nil filename)
+             (copy-sequence filename)))
+	  (start 0))
+      ;; leave ':' if part of drive specifier
+      (if (and (> (length name) 1)
+	       (eq (aref name 1) ?:))
+	  (setq start 2))
+      ;; destructively replace invalid filename characters with !
+      (while (string-match "[?*:<>|\"\000-\037]" name start)
+	(aset name (match-beginning 0) ?!)
+	(setq start (match-end 0)))
+      name)))
+
+;;;; System name and version for emacsbug.el
+
+(declare-function w32-version "term/w32-win" ())
+(declare-function w32-read-registry "w32fns.c" (root key name))
+
+(defun w32--os-description ()
+  "Return a string describing the underlying OS and its version."
+  (let* ((w32ver (car (w32-version)))
+         (w9x-p (< w32ver 5))
+         (key (if w9x-p
+                  "SOFTWARE/Microsoft/Windows/CurrentVersion"
+                "SOFTWARE/Microsoft/Windows NT/CurrentVersion"))
+         (os-name (w32-read-registry 'HKLM key "ProductName"))
+         (os-version (if w9x-p
+                         (w32-read-registry 'HKLM key "VersionNumber")
+                       (let ((vmajor
+                              (w32-read-registry 'HKLM key
+                                                 "CurrentMajorVersionNumber"))
+                             (vminor
+                              (w32-read-registry 'HKLM key
+                                                 "CurrentMinorVersionNumber")))
+                         (if (and vmajor vminor)
+                             (format "%d.%d" vmajor vminor)
+                           (w32-read-registry 'HKLM key "CurrentVersion")))))
+         (os-csd (w32-read-registry 'HKLM key "CSDVersion"))
+         (os-rel (or (w32-read-registry 'HKLM key "ReleaseID")
+                     (w32-read-registry 'HKLM key "CSDBuildNumber")
+                 "0"))  ; No Release ID before Windows Vista
+         (os-build (w32-read-registry 'HKLM key "CurrentBuildNumber"))
+         (os-rev (w32-read-registry 'HKLM key "UBR"))
+         (os-rev (if os-rev (format "%d" os-rev))))
+    (if w9x-p
+        (concat
+         (if (not (string-match "\\`Microsoft " os-name)) "Microsoft ")
+         os-name
+         " (v" os-version ")")
+      (concat
+       (if (not (string-match "\\`Microsoft " os-name)) "Microsoft ")
+       os-name      ; Windows 7 Enterprise
+       " "
+       os-csd       ; Service Pack 1
+       (if (and os-csd (> (length os-csd) 0)) " " "")
+       "(v"
+       os-version "." os-rel "." os-build (if os-rev (concat "." os-rev))
+       ")"))))
+
 
 ;;;; Support for build process
-
-;; From autoload.el
-(defvar autoload-make-program)
-(defvar generated-autoload-file)
-
-(defun w32-batch-update-autoloads ()
-  "Like `batch-update-autoloads', but takes the name of the autoloads file
-from the command line.
-
-This is required because some Windows build environments, such as MSYS,
-munge command-line arguments that include file names to a horrible mess
-that Emacs is unable to cope with."
-  (let ((generated-autoload-file
-	 (expand-file-name (pop command-line-args-left)))
-	;; I can only assume the same considerations may apply here...
-	(autoload-make-program (pop command-line-args-left)))
-    (batch-update-autoloads)))
 
 (defun w32-append-code-lines (orig extra)
   "Append non-empty non-comment lines in the file EXTRA to the file ORIG.
@@ -325,10 +369,10 @@ for any permissions.
 
 This is required because the Windows build environment is not required
 to include Sed, which is used by leim/Makefile.in to do the job."
-  (find-file orig)
-  (goto-char (point-max))
-  (insert-file-contents extra)
-  (delete-matching-lines "^$\\|^;")
-  (save-buffers-kill-emacs t))
+  (with-current-buffer (find-file-noselect orig)
+    (goto-char (point-max))
+    (insert-file-contents extra)
+    (delete-matching-lines "^$\\|^;")
+    (save-buffers-kill-emacs t)))
 
 ;;; w32-fns.el ends here

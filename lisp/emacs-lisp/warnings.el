@@ -1,6 +1,6 @@
-;;; warnings.el --- log and display warnings
+;;; warnings.el --- log and display warnings  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2002-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2002-2026 Free Software Foundation, Inc.
 
 ;; Maintainer: emacs-devel@gnu.org
 ;; Keywords: internal
@@ -26,6 +26,8 @@
 ;; and `display-warning'.
 
 ;;; Code:
+
+(require 'icons)
 
 (defgroup warnings nil
   "Log and display warnings."
@@ -67,26 +69,27 @@ Level :debug is ignored by default (see `warning-minimum-level').")
 Each element looks like (ALIAS . LEVEL) and defines ALIAS as
 equivalent to LEVEL.  LEVEL must be defined in `warning-levels';
 it may not itself be an alias.")
+(make-obsolete-variable 'warning-level-aliases 'warning-levels "28.1")
 
-(defvaralias 'display-warning-minimum-level 'warning-minimum-level)
+(define-obsolete-variable-alias 'display-warning-minimum-level
+  'warning-minimum-level "28.1")
 (defcustom warning-minimum-level :warning
   "Minimum severity level for displaying the warning buffer.
 If a warning's severity level is lower than this,
 the warning is logged in the warnings buffer, but the buffer
 is not immediately displayed.  See also `warning-minimum-log-level'."
-  :group 'warnings
   :type '(choice (const :emergency) (const :error)
                  (const :warning) (const :debug))
   :version "22.1")
 
-(defvaralias 'log-warning-minimum-level 'warning-minimum-log-level)
+(define-obsolete-variable-alias 'log-warning-minimum-level
+  'warning-minimum-log-level "28.1")
 (defcustom warning-minimum-log-level :warning
   "Minimum severity level for logging a warning.
 If a warning severity level is lower than this,
 the warning is completely ignored.
 Value must be lower or equal than `warning-minimum-level',
 because warnings not logged aren't displayed either."
-  :group 'warnings
   :type '(choice (const :emergency) (const :error)
                  (const :warning) (const :debug))
   :version "22.1")
@@ -100,10 +103,10 @@ Thus, (foo bar) as an element matches (foo bar)
 or (foo bar ANYTHING...) as TYPE.
 If TYPE is a symbol FOO, that is equivalent to the list (FOO),
 so only the element (FOO) will match it."
-  :group 'warnings
   :type '(repeat (repeat symbol))
   :version "22.1")
 
+;;;###autoload
 (defcustom warning-suppress-types nil
   "List of warning types not to display immediately.
 If any element of this list matches the TYPE argument to `display-warning',
@@ -115,9 +118,29 @@ or (foo bar ANYTHING...) as TYPE.
 If TYPE is a symbol FOO, that is equivalent to the list (FOO),
 so only the element (FOO) will match it.
 See also `warning-suppress-log-types'."
-  :group 'warnings
   :type '(repeat (repeat symbol))
   :version "22.1")
+
+(defcustom warning-display-at-bottom t
+  "Whether to display the warning buffer at the bottom of the screen.
+If this is non-nil (the default), Emacs will attempt to display the
+window showing the warning buffer at the bottom of the selected
+frame, whether by reusing the bottom-most window or by creating a
+new window at the bottom of the frame.  The resulting window will be
+scrolled to the bottom of the buffer to show the last warning message.
+
+If the value of this variable is nil, Emacs will display the warning
+buffer in some window, as determined by `display-buffer' and its
+customizations.  In particular, the category designated by the
+symbol `warning' can be used in `display-buffer-alist' to customize
+the display of this buffer.
+
+This option affects display of all the buffers shown by `display-warning',
+including warnings from byte-compiler and native-compiler,
+from `check-declare', etc."
+  :type 'boolean
+  :version "30.1")
+
 
 ;; The autoload cookie is so that programs can bind this variable
 ;; safely, testing the existing value, before they call one of the
@@ -153,14 +176,22 @@ also call that function before the next warning.")
 (defvar warning-fill-prefix nil
   "Non-nil means fill each warning text using this string as `fill-prefix'.")
 
+;; I don't see why it can't just use the buffer-local fill-column,
+;; but at least this is better than hard-coding 78.
+(defvar warning-fill-column 78
+  "Value to use for `fill-column' when filling warnings.")
+
 ;; The autoload cookie is so that programs can bind this variable
 ;; safely, testing the existing value, before they call one of the
 ;; warnings functions.
 ;;;###autoload
-(defvar warning-type-format (purecopy " (%s)")
+(defvar warning-type-format " (%s)"
   "Format for displaying the warning type in the warning message.
 The result of formatting the type this way gets included in the
 message under the control of the string in `warning-levels'.")
+;;;###autoload
+(defvar warning-inhibit-types nil
+  "Like `warning-suppress-log-types', but intended for programs to let-bind.")
 
 (defun warning-numeric-level (level)
   "Return a numeric measure of the warning severity level LEVEL."
@@ -197,6 +228,37 @@ SUPPRESS-LIST is the list of kinds of warnings to suppress."
     ;; we return t.
     some-match))
 
+(define-icon warnings-suppress button
+  `((emoji "⛔")
+    ;; Many MS-Windows console fonts don't have good glyphs for U+25A0.
+    (symbol ,(if (and (eq system-type 'windows-nt)
+                      (null window-system))
+                 " » "
+               " ■ "))
+    (text " stop "))
+  "Suppress warnings."
+  :version "29.1"
+  :help-echo "Click to suppress this warning type")
+
+(defun warnings-suppress (type)
+  (pcase (car
+          (read-multiple-choice
+           (format "Suppress `%s' warnings? " type)
+           `((?y ,(format "yes, ignore `%s' warnings completely" type))
+             (?n "no, just disable showing them")
+             (?q "quit and do nothing"))))
+    (?y
+     (customize-save-variable 'warning-suppress-log-types
+                              (if (consp type)
+                                  (cons type warning-suppress-log-types)
+                                (cons (list type) warning-suppress-log-types))))
+    (?n
+     (customize-save-variable 'warning-suppress-types
+                              (if (consp type)
+                                  (cons type warning-suppress-types)
+                                (cons (list type) warning-suppress-types))))
+    (_ (message "Exiting"))))
+
 ;;;###autoload
 (defun display-warning (type message &optional level buffer-name)
   "Display a warning message, MESSAGE.
@@ -222,20 +284,30 @@ has to create the buffer, it disables undo in the buffer.
 
 See the `warnings' custom group for user customization features.
 
-See also `warning-series', `warning-prefix-function' and
-`warning-fill-prefix' for additional programming features."
+See also `warning-series', `warning-prefix-function',
+`warning-fill-prefix', and `warning-fill-column' for additional
+programming features.
+
+This will also display buttons allowing the user to permanently
+disable automatic display of the warning or disable the warning
+entirely by setting `warning-suppress-types' or
+`warning-suppress-log-types' on their behalf."
   (if (not (or after-init-time noninteractive (daemonp)))
-      ;; Ensure warnings that happen early in the startup sequence
-      ;; are visible when startup completes (bug#20792).
-      (delay-warning type message level buffer-name)
+      (or (warning-suppress-p type warning-inhibit-types)
+          ;; Ensure warnings that happen early in the startup sequence
+          ;; are visible when startup completes (bug#20792).
+          (delay-warning type message level buffer-name))
     (unless level
       (setq level :warning))
     (unless buffer-name
       (setq buffer-name "*Warnings*"))
-    (if (assq level warning-level-aliases)
-	(setq level (cdr (assq level warning-level-aliases))))
+    (with-suppressed-warnings ((obsolete warning-level-aliases))
+      (when-let* ((new (cdr (assq level warning-level-aliases))))
+        (warn "Warning level `%s' is obsolete; use `%s' instead" level new)
+        (setq level new)))
     (or (< (warning-numeric-level level)
 	   (warning-numeric-level warning-minimum-log-level))
+        (warning-suppress-p type warning-inhibit-types)
 	(warning-suppress-p type warning-suppress-log-types)
 	(let* ((typename (if (consp type) (car type) type))
 	       (old (get-buffer buffer-name))
@@ -262,6 +334,12 @@ See also `warning-series', `warning-prefix-function' and
 	      (unless (bolp)
 		(funcall newline))
 	      (setq start (point))
+              ;; Don't output the button when doing batch compilation
+              ;; and similar.
+              (unless (or noninteractive (eq type 'bytecomp))
+                (insert (buttonize (icon-string 'warnings-suppress)
+                                   #'warnings-suppress type)
+                        " "))
 	      (if warning-prefix-function
 		  (setq level-info (funcall warning-prefix-function
 					    level level-info)))
@@ -269,9 +347,11 @@ See also `warning-series', `warning-prefix-function' and
 			      (format warning-type-format typename))
 		      message)
               (funcall newline)
-	      (when (and warning-fill-prefix (not (string-match "\n" message)))
+	      (when (and warning-fill-prefix
+                         (not (string-search "\n" message))
+                         (not noninteractive))
 		(let ((fill-prefix warning-fill-prefix)
-		      (fill-column 78))
+		      (fill-column warning-fill-column))
 		  (fill-region start (point))))
 	      (setq end (point)))
 	    (when (and (markerp warning-series)
@@ -292,7 +372,21 @@ See also `warning-series', `warning-prefix-function' and
 		     (if (bolp)
 			 (forward-char -1))
 		     (message "%s" (buffer-substring start (point))))))
-		((and (daemonp) (null after-init-time))
+		;; Interactively, decide whether the warning merits display.
+		((or (< (warning-numeric-level level)
+			(warning-numeric-level warning-minimum-level))
+		     (warning-suppress-p type warning-suppress-types))
+		 ;; Don't display the warning.
+		 nil)
+		;; Use `frame-initial-p'?
+		((and (daemonp) (eq (selected-frame) terminal-frame))
+		 ;; Display daemon startup warnings on the first client frame.
+		 (letrec ((afterfun
+			   (lambda (frame)
+			     (remove-hook 'after-make-frame-functions afterfun)
+			     (with-selected-frame frame
+                               (warning--display-buffer buffer)))))
+		   (add-hook 'after-make-frame-functions afterfun))
 		 ;; Warnings assigned during daemon initialization go into
 		 ;; the messages buffer.
 		 (message "%s"
@@ -303,18 +397,30 @@ See also `warning-series', `warning-prefix-function' and
 				  (forward-char -1))
 			      (buffer-substring start (point))))))
 		(t
-		 ;; Interactively, decide whether the warning merits
-		 ;; immediate display.
-		 (or (< (warning-numeric-level level)
-			(warning-numeric-level warning-minimum-level))
-		     (warning-suppress-p type warning-suppress-types)
-		     (let ((window (display-buffer buffer)))
-		       (when (and (markerp warning-series)
-				  (eq (marker-buffer warning-series) buffer))
-			 (set-window-start window warning-series))
-		       (sit-for 0)))))))))
+		 ;; Display immediately.
+		 (warning--display-buffer buffer)))))))
+
+(defun warning--display-buffer (buffer)
+  (let ((window (display-buffer
+		 buffer
+		 (when warning-display-at-bottom
+		   `(display-buffer--maybe-at-bottom
+		     (window-height
+		      . ,(lambda (window)
+			   (fit-window-to-buffer window 10)))
+		     (category . warning))))))
+    (when (and window (markerp warning-series)
+	       (eq (marker-buffer warning-series) buffer))
+      (set-window-start window warning-series))
+    (when (and window warning-display-at-bottom)
+      (with-selected-window window
+	(goto-char (point-max))
+	(forward-line -1)
+	(recenter -1)))
+    (sit-for 0)))
+
 
-;; Use \\<special-mode-map> so that help-enable-auto-load can do its thing.
+;; Use \\<special-mode-map> so that help-enable-autoload can do its thing.
 ;; Any keymap that is defined will do.
 ;;;###autoload
 (defun lwarn (type level message &rest args)

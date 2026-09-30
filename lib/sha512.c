@@ -1,19 +1,19 @@
 /* sha512.c - Functions to compute SHA512 and SHA384 message digest of files or
    memory blocks according to the NIST specification FIPS-180-2.
 
-   Copyright (C) 2005-2006, 2008-2018 Free Software Foundation, Inc.
+   Copyright (C) 2005-2006, 2008-2026 Free Software Foundation, Inc.
 
-   This program is free software: you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation, either version 3 of the License, or
-   (at your option) any later version.
+   This file is free software: you can redistribute it and/or modify
+   it under the terms of the GNU Lesser General Public License as
+   published by the Free Software Foundation; either version 2.1 of the
+   License, or (at your option) any later version.
 
-   This program is distributed in the hope that it will be useful,
+   This file is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU Lesser General Public License for more details.
 
-   You should have received a copy of the GNU General Public License
+   You should have received a copy of the GNU Lesser General Public License
    along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* Written by David Madore, considerably copypasting from
@@ -22,40 +22,24 @@
 
 #include <config.h>
 
+/* Specification.  */
 #if HAVE_OPENSSL_SHA512
 # define GL_OPENSSL_INLINE _GL_EXTERN_INLINE
 #endif
 #include "sha512.h"
 
-#include <stdalign.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <string.h>
 
-#if USE_UNLOCKED_IO
-# include "unlocked-io.h"
-#endif
-
+#include <byteswap.h>
 #ifdef WORDS_BIGENDIAN
 # define SWAP(n) (n)
 #else
-# define SWAP(n) \
-    u64or (u64or (u64or (u64shl (n, 56),                                \
-                         u64shl (u64and (n, u64lo (0x0000ff00)), 40)),  \
-                  u64or (u64shl (u64and (n, u64lo (0x00ff0000)), 24),   \
-                         u64shl (u64and (n, u64lo (0xff000000)),  8))), \
-           u64or (u64or (u64and (u64shr (n,  8), u64lo (0xff000000)),   \
-                         u64and (u64shr (n, 24), u64lo (0x00ff0000))),  \
-                  u64or (u64and (u64shr (n, 40), u64lo (0x0000ff00)),   \
-                         u64shr (n, 56))))
-#endif
-
-#define BLOCKSIZE 32768
-#if BLOCKSIZE % 128 != 0
-# error "invalid BLOCKSIZE"
+# define SWAP(n) u64bswap (n)
 #endif
 
 #if ! HAVE_OPENSSL_SHA512
+
 /* This array contains the bytes used to pad the buffer to the next
    128-byte boundary.  */
 static const unsigned char fillbuf[128] = { 0x80, 0 /* , 0, 0, ...  */ };
@@ -110,24 +94,22 @@ set_uint64 (char *cp, u64 v)
 /* Put result from CTX in first 64 bytes following RESBUF.
    The result must be in little endian byte order.  */
 void *
-sha512_read_ctx (const struct sha512_ctx *ctx, void *resbuf)
+sha512_read_ctx (struct sha512_ctx const *restrict ctx, void *restrict resbuf)
 {
-  int i;
   char *r = resbuf;
 
-  for (i = 0; i < 8; i++)
+  for (int i = 0; i < 8; i++)
     set_uint64 (r + i * sizeof ctx->state[0], SWAP (ctx->state[i]));
 
   return resbuf;
 }
 
 void *
-sha384_read_ctx (const struct sha512_ctx *ctx, void *resbuf)
+sha384_read_ctx (struct sha512_ctx const *restrict ctx, void *restrict resbuf)
 {
-  int i;
   char *r = resbuf;
 
-  for (i = 0; i < 6; i++)
+  for (int i = 0; i < 6; i++)
     set_uint64 (r + i * sizeof ctx->state[0], SWAP (ctx->state[i]));
 
   return resbuf;
@@ -163,126 +145,25 @@ sha512_conclude_ctx (struct sha512_ctx *ctx)
 }
 
 void *
-sha512_finish_ctx (struct sha512_ctx *ctx, void *resbuf)
+sha512_finish_ctx (struct sha512_ctx *restrict ctx, void *restrict resbuf)
 {
   sha512_conclude_ctx (ctx);
   return sha512_read_ctx (ctx, resbuf);
 }
 
 void *
-sha384_finish_ctx (struct sha512_ctx *ctx, void *resbuf)
+sha384_finish_ctx (struct sha512_ctx *restrict ctx, void *restrict resbuf)
 {
   sha512_conclude_ctx (ctx);
   return sha384_read_ctx (ctx, resbuf);
 }
-#endif
 
-#ifdef GL_COMPILE_CRYPTO_STREAM
-
-#include "af_alg.h"
-
-/* Compute message digest for bytes read from STREAM using algorithm ALG.
-   Write the message digest into RESBLOCK, which contains HASHLEN bytes.
-   The initial and finishing operations are INIT_CTX and FINISH_CTX.
-   Return zero if and only if successful.  */
-static int
-shaxxx_stream (FILE *stream, char const *alg, void *resblock,
-               ssize_t hashlen, void (*init_ctx) (struct sha512_ctx *),
-               void *(*finish_ctx) (struct sha512_ctx *, void *))
-{
-  switch (afalg_stream (stream, alg, resblock, hashlen))
-    {
-    case 0: return 0;
-    case -EIO: return 1;
-    }
-
-  char *buffer = malloc (BLOCKSIZE + 72);
-  if (!buffer)
-    return 1;
-
-  struct sha512_ctx ctx;
-  init_ctx (&ctx);
-  size_t sum;
-
-  /* Iterate over full file contents.  */
-  while (1)
-    {
-      /* We read the file in blocks of BLOCKSIZE bytes.  One call of the
-         computation function processes the whole buffer so that with the
-         next round of the loop another block can be read.  */
-      size_t n;
-      sum = 0;
-
-      /* Read block.  Take care for partial reads.  */
-      while (1)
-        {
-          n = fread (buffer + sum, 1, BLOCKSIZE - sum, stream);
-
-          sum += n;
-
-          if (sum == BLOCKSIZE)
-            break;
-
-          if (n == 0)
-            {
-              /* Check for the error flag IFF N == 0, so that we don't
-                 exit the loop after a partial read due to e.g., EAGAIN
-                 or EWOULDBLOCK.  */
-              if (ferror (stream))
-                {
-                  free (buffer);
-                  return 1;
-                }
-              goto process_partial_block;
-            }
-
-          /* We've read at least one byte, so ignore errors.  But always
-             check for EOF, since feof may be true even though N > 0.
-             Otherwise, we could end up calling fread after EOF.  */
-          if (feof (stream))
-            goto process_partial_block;
-        }
-
-      /* Process buffer with BLOCKSIZE bytes.  Note that
-                        BLOCKSIZE % 128 == 0
-       */
-      sha512_process_block (buffer, BLOCKSIZE, &ctx);
-    }
-
- process_partial_block:;
-
-  /* Process any remaining bytes.  */
-  if (sum > 0)
-    sha512_process_bytes (buffer, sum, &ctx);
-
-  /* Construct result in desired memory.  */
-  finish_ctx (&ctx, resblock);
-  free (buffer);
-  return 0;
-}
-
-int
-sha512_stream (FILE *stream, void *resblock)
-{
-  return shaxxx_stream (stream, "sha512", resblock, SHA512_DIGEST_SIZE,
-                        sha512_init_ctx, sha512_finish_ctx);
-}
-
-int
-sha384_stream (FILE *stream, void *resblock)
-{
-  return shaxxx_stream (stream, "sha384", resblock, SHA384_DIGEST_SIZE,
-                        sha384_init_ctx, sha384_finish_ctx);
-}
-#endif
-
-#if ! HAVE_OPENSSL_SHA512
 /* Compute SHA512 message digest for LEN bytes beginning at BUFFER.  The
    result is always in little endian byte order, so that a byte-wise
    output yields to the wanted ASCII representation of the message
    digest.  */
 void *
-sha512_buffer (const char *buffer, size_t len, void *resblock)
+sha512_buffer (char const *restrict buffer, size_t len, void *restrict resblock)
 {
   struct sha512_ctx ctx;
 
@@ -297,7 +178,7 @@ sha512_buffer (const char *buffer, size_t len, void *resblock)
 }
 
 void *
-sha384_buffer (const char *buffer, size_t len, void *resblock)
+sha384_buffer (char const *restrict buffer, size_t len, void *restrict resblock)
 {
   struct sha512_ctx ctx;
 
@@ -312,7 +193,8 @@ sha384_buffer (const char *buffer, size_t len, void *resblock)
 }
 
 void
-sha512_process_bytes (const void *buffer, size_t len, struct sha512_ctx *ctx)
+sha512_process_bytes (void const *restrict buffer, size_t len,
+                      struct sha512_ctx *restrict ctx)
 {
   /* When we already have some bits in our internal buffer concatenate
      both inputs first.  */
@@ -436,7 +318,8 @@ static u64 const sha512_round_constants[80] = {
    Most of this code comes from GnuPG's cipher/sha1.c.  */
 
 void
-sha512_process_block (const void *buffer, size_t len, struct sha512_ctx *ctx)
+sha512_process_block (void const *restrict buffer, size_t len,
+                      struct sha512_ctx *restrict ctx)
 {
   u64 const *words = buffer;
   u64 const *endp = words + len / sizeof (u64);
@@ -484,9 +367,8 @@ sha512_process_block (const void *buffer, size_t len, struct sha512_ctx *ctx)
 
   while (words < endp)
     {
-      int t;
       /* FIXME: see sha1.c for a better implementation.  */
-      for (t = 0; t < 16; t++)
+      for (int t = 0; t < 16; t++)
         {
           x[t] = SWAP (*words);
           words++;
@@ -583,6 +465,7 @@ sha512_process_block (const void *buffer, size_t len, struct sha512_ctx *ctx)
       h = ctx->state[7] = u64plus (ctx->state[7], h);
     }
 }
+
 #endif
 
 /*

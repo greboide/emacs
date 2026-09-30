@@ -1,6 +1,6 @@
 ;;; cursor-sensor.el --- React to cursor movement  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2015-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2015-2026 Free Software Foundation, Inc.
 
 ;; Author: Stefan Monnier <monnier@iro.umontreal.ca>
 ;; Keywords:
@@ -22,25 +22,59 @@
 
 ;;; Commentary:
 
-;; This package implements the `cursor-intangible' property, which is
-;; meant to replace the old `intangible' property.  To use it, just enable the
-;; `cursor-intangible-mode', after which this package will move point away from
-;; any position that has a non-nil `cursor-intangible' property.  This is only
-;; done just before redisplay happens, contrary to the old `intangible'
-;; property which was done at a much lower level.
+;; This package implements the `cursor-intangible' and
+;; `cursor-sensor-functions' properties, which are meant to replace
+;; the old `intangible', `point-entered', and `point-left' properties.
+
+;; To use `cursor-intangible', just enable the
+;; `cursor-intangible-mode' minor mode, after which this package will
+;; move point away from any position that has a non-nil
+;; `cursor-intangible' property.  This is only done just before
+;; redisplay happens, contrary to the old `intangible' property which
+;; was done at a much lower level.
+
+;; To use `cursor-sensor-functions', enable the `cursor-sensor-mode'
+;; minor mode, after which the `cursor-sensor-functions' will be
+;; called just before redisplay happens, according to the movement of
+;; the cursor since the last redisplay.
+
+;;;; Motivation
+
+;; The old properties were very problematic in practice because they
+;; operate at a much lower level and hence affect all motion
+;; *functions* like goto-char, forward-char, ... hence breaking
+;; invariants like:
+;;
+;;    (forward-char N) == (progn (forward-char N1) (forward-char (- N N1)))
+;;    (point) == (progn (forward-char N) (forward-char -N) (point))
+;;    (+ N (point)) == (progn (forward-char N) (point))
+;;
+;; The problems would usually show up due to interaction between
+;; unrelated code working in the same buffer, where one code used those
+;; properties and the other (unknowingly) assumed those aren't used.
+;; In practice a *lot* of code assumes there's no such funny business.
+;;
+;; Worse: all(?) packages using those properties don't actually want those
+;; properties to affect motion at such a low-level, they only want to
+;; affect the overall effect of commands, but not the effect of every
+;; single point-motion that a given command happened to use internally.
 
 ;;; Code:
 
 ;;;###autoload
-(defvar cursor-sensor-inhibit nil)
+(defvar cursor-sensor-inhibit nil
+  "When non-nil, suspend `cursor-sensor-mode' and `cursor-intangible-mode'.
+By convention, this is a list of symbols where each symbol stands for the
+\"cause\" of the suspension.")
 
-(defun cursor-sensor--intangible-p (pos)
-  (let ((p (get-pos-property pos 'cursor-intangible)))
+(defun cursor-sensor--intangible-p (pos &optional window)
+  (let ((p (get-pos-property pos 'cursor-intangible window)))
     (if p
         (let (a b)
-          (if (and (setq a (get-char-property pos 'cursor-intangible))
+          (if (and (setq a (get-char-property pos 'cursor-intangible window))
                    (setq b (if (> pos (point-min))
-                               (get-char-property (1- pos) 'cursor-intangible)))
+                               (get-char-property (1- pos) 'cursor-intangible
+                                                  window)))
                    (not (eq a b)))
               ;; If we're right between two different intangible thingies,
               ;; we can stop here.  This is not quite consistent with the
@@ -50,40 +84,50 @@
               nil p))
       p)))
 
-(defun cursor-sensor-tangible-pos (curpos window &optional second-chance)
-  (let ((newpos curpos))
-    (when (cursor-sensor--intangible-p newpos)
-      (let ((oldpos (window-parameter window 'cursor-intangible--last-point)))
-        (cond
-         ((or (and (integerp oldpos) (< oldpos newpos))
-              (eq newpos (point-min)))
-          (while
-              (when (< newpos (point-max))
-                (setq newpos
-                      (if (get-char-property newpos 'cursor-intangible)
-                          (next-single-char-property-change
-                           newpos 'cursor-intangible nil (point-max))
-                        (1+ newpos)))
-                (cursor-sensor--intangible-p newpos))))
-         (t ;; (>= oldpos newpos)
-          (while
-              (when (> newpos (point-min))
-                (setq newpos
-                      (if (get-char-property (1- newpos) 'cursor-intangible)
-                          (previous-single-char-property-change
-                           newpos 'cursor-intangible nil (point-min))
-                        (1- newpos)))
-                (cursor-sensor--intangible-p newpos)))))
-        (if (not (and (or (eq newpos (point-min)) (eq newpos (point-max)))
-                      (cursor-sensor--intangible-p newpos)))
-            ;; All clear, we're good to go.
-            newpos
-          ;; We're still on an intangible position because we bumped
-          ;; into an intangible BOB/EOB: try to move in the other direction.
-          (if second-chance
-              ;; Actually, we tried already and that failed!
-              curpos
-            (cursor-sensor-tangible-pos newpos window 'second-chance)))))))
+(defun cursor-sensor-tangible-pos (curpos window)
+  (when (cursor-sensor--intangible-p curpos window)
+    ;; Find the two nearest tangible positions.
+    (let ((nextpos curpos)
+          (prevpos curpos)
+          (oldpos (window-parameter window 'cursor-intangible--last-point)))
+      (while (if (>= nextpos (point-max))
+                 (when (cursor-sensor--intangible-p nextpos window)
+                   (setq nextpos nil))
+               (setq nextpos
+                     (if (get-char-property nextpos 'cursor-intangible window)
+                         (next-single-char-property-change
+                          nextpos 'cursor-intangible nil ;;FIXME: window
+                          (point-max))
+                       (1+ nextpos)))
+               (cursor-sensor--intangible-p nextpos window)))
+      (while (if (<= prevpos (point-min))
+                 (when (cursor-sensor--intangible-p prevpos window)
+                   (setq prevpos nil))
+               (setq prevpos
+                     (if (get-char-property (1- prevpos)
+                                            'cursor-intangible window)
+                         (previous-single-char-property-change
+                          prevpos 'cursor-intangible nil ;;FIXME: window
+                          (point-min))
+                       (1- prevpos)))
+               (cursor-sensor--intangible-p prevpos window)))
+      ;; Pick the preferred one depending on the direction of the motion.
+      ;; Goals, from most important to least important:
+      ;; - Prefer a tangible position.
+      ;; - Preserve the overall direction of the motion.
+      ;; - Prefer shortening the motion over lengthening it.
+      (cond
+       ((< oldpos curpos)
+        (or (and prevpos (< oldpos prevpos) prevpos) ;Prefer shorter motion.
+            nextpos prevpos))
+       ((> oldpos curpos)
+        (or (and nextpos (> oldpos nextpos) nextpos) ;Prefer shorter motion.
+            prevpos nextpos))
+       (t
+        (or (and prevpos nextpos
+                 (< (- nextpos curpos) (- curpos prevpos))
+                 nextpos)
+            prevpos nextpos))))))
 
 (defun cursor-sensor-move-to-tangible (window)
   (let* ((curpos (window-point window))
@@ -99,7 +143,7 @@
 ;;;###autoload
 (define-minor-mode cursor-intangible-mode
   "Keep cursor outside of any `cursor-intangible' text property."
-  nil nil nil
+  :global nil
   (if cursor-intangible-mode
       (add-hook 'pre-redisplay-functions #'cursor-sensor--move-to-tangible
                 nil t)
@@ -107,60 +151,73 @@
 
 ;;; Detect cursor movement.
 
-(defun cursor-sensor--detect (window)
-  (unless cursor-sensor-inhibit
-    (let* ((point (window-point window))
-           ;; It's often desirable to make the cursor-sensor-functions property
-           ;; non-sticky on both ends, but that means get-pos-property might
-           ;; never see it.
-           (new (or (get-char-property point 'cursor-sensor-functions)
-                    (unless (<= (point-min) point)
-                      (get-char-property (1- point) 'cursor-sensor-functions))))
-           (old (window-parameter window 'cursor-sensor--last-state))
-           (oldposmark (car old))
-           (oldpos (or (if oldposmark (marker-position oldposmark))
-                       (point-min)))
-           (start (min oldpos point))
-           (end (max oldpos point)))
-      (unless (or (null old) (eq (marker-buffer oldposmark) (current-buffer)))
-        ;; `window' does not display the same buffer any more!
-        (setcdr old nil))
-      (if (or (and (null new) (null (cdr old)))
-              (and (eq new (cdr old))
-                   (eq (next-single-property-change
-                        start 'cursor-sensor-functions nil end)
-                       end)))
-          ;; Clearly nothing to do.
-          nil
-        ;; Maybe something to do.  Let's see exactly what needs to run.
-        (let* ((missing-p
-                (lambda (f)
-                  "Non-nil if F is missing somewhere between START and END."
-                  (let ((pos start)
-                        (missing nil))
-                    (while (< pos end)
-                      (setq pos (next-single-property-change
-                                 pos 'cursor-sensor-functions
-                                 nil end))
-                      (unless (memq f (get-char-property
-                                       pos 'cursor-sensor-functions))
-                        (setq missing t)))
-                    missing))))
-          (dolist (f (cdr old))
-            (unless (and (memq f new) (not (funcall missing-p f)))
-              (funcall f window oldpos 'left)))
-          (dolist (f new)
-            (unless (and (memq f (cdr old)) (not (funcall missing-p f)))
-              (funcall f window oldpos 'entered)))))
+(defun cursor-sensor--detect (&optional window)
+  (unless window (setq window (selected-window)))
+  ;; We're run from `pre-redisplay-functions' and `post-command-hook'
+  ;; where we can't handle errors very well, so just demote them to make
+  ;; sure they don't get in the way.
+  (with-demoted-errors "cursor-sensor--detect: %S"
+    (with-current-buffer (window-buffer window)
+      (unless cursor-sensor-inhibit
+        (let* ((point (window-point window))
+               ;; It's often desirable to make the
+               ;; cursor-sensor-functions property non-sticky on both
+               ;; ends, so we can't use just `get-pos-property' because it
+               ;; might never see it.
+               ;; FIXME: Combine properties from covering overlays?
+               (new (or (get-pos-property point 'cursor-sensor-functions window)
+                        (get-char-property point
+                                           'cursor-sensor-functions window)
+                        (unless (<= (point-min) point)
+                          (get-char-property (1- point)
+                                             'cursor-sensor-functions window))))
+               (old (window-parameter window 'cursor-sensor--last-state))
+               (oldposmark (car old))
+               (oldpos (or (if oldposmark (marker-position oldposmark))
+                           (point-min)))
+               (start (min oldpos point))
+               (end (max oldpos point)))
+          (unless (or (null old)
+                      (eq (marker-buffer oldposmark) (current-buffer)))
+            ;; `window' does not display the same buffer any more!
+            (setcdr old nil))
+          (if (and (null new) (null (cdr old)))
+              ;; Clearly nothing to do.
+              nil
+            ;; Maybe something to do.  Let's see exactly what needs to run.
+            (let* ((missing-p
+                    (lambda (f)
+                      "Non-nil if F is missing somewhere between START and END."
+                      (let ((pos start)
+                            (missing nil))
+                        (while (< (setq pos (next-single-char-property-change
+                                             pos 'cursor-sensor-functions
+                                             nil ;;FIXME: window
+                                             end))
+                                  end)
+                          (unless (memq f (get-char-property
+                                           pos 'cursor-sensor-functions window))
+                            (setq missing t)))
+                        missing))))
+              (dolist (f (cdr old))
+                (unless (and (memq f new) (not (funcall missing-p f)))
+                  (funcall f window oldpos 'left)))
+              (dolist (f new)
+                (let ((op (cond
+                           ((or (not (memq f (cdr old))) (funcall missing-p f))
+                            'entered)
+                           ((not (= start end)) 'moved))))
+                  (when op
+                    (funcall f window oldpos op))))))
 
-      ;; Remember current state for next time.
-      ;; Re-read cursor-sensor-functions since the functions may have moved
-      ;; window-point!
-      (if old
-          (progn (move-marker (car old) point)
-                 (setcdr old new))
-        (set-window-parameter window 'cursor-sensor--last-state
-                              (cons (copy-marker point) new))))))
+          ;; Remember current state for next time.
+          ;; Re-read cursor-sensor-functions since the functions may have moved
+          ;; window-point!
+          (if old
+              (progn (move-marker (car old) point)
+                     (setcdr old new))
+            (set-window-parameter window 'cursor-sensor--last-state
+                                  (cons (copy-marker point) new))))))))
 
 ;;;###autoload
 (define-minor-mode cursor-sensor-mode
@@ -168,14 +225,24 @@
 This property should hold a list of functions which react to the motion
 of the cursor.  They're called with three arguments (WINDOW OLDPOS DIR)
 where WINDOW is the affected window, OLDPOS is the last known position of
-the cursor and DIR can be `entered' or `left' depending on whether the cursor
-is entering the area covered by the text-property property or leaving it."
-  nil nil nil
-  (if cursor-sensor-mode
-      (add-hook 'pre-redisplay-functions #'cursor-sensor--detect
-                nil t)
+the cursor and DIR can be `entered', `left', or `moved' depending on whether
+the cursor is entering the area covered by the text-property property,
+leaving it, or just moving inside of it."
+  :global nil
+  (cond
+   (cursor-sensor-mode
+    ;; Also add ourselves to `post-command-hook' because
+    ;; `pre-redisplay-functions' are sometimes called too late (after
+    ;; adjust_point_for_property has moved point, which makes it
+    ;; "impossible" for cursor-sensor-functions to do things like
+    ;; revealing invisible text).
+    (add-hook 'post-command-hook #'cursor-sensor--detect nil t)
+    (add-hook 'pre-redisplay-functions #'cursor-sensor--detect
+              nil t))
+   (t
+    (remove-hook 'post-command-hook #'cursor-sensor--detect t)
     (remove-hook  'pre-redisplay-functions #'cursor-sensor--detect
-                t)))
+                t))))
 
 (provide 'cursor-sensor)
 ;;; cursor-sensor.el ends here

@@ -1,6 +1,7 @@
 \input texinfo
 @setfilename ../../info/url.info
 @settitle URL Programmer's Manual
+@documentlanguage en
 @include docstyle.texi
 
 @iftex
@@ -21,7 +22,7 @@
 @copying
 This is the manual for the @code{url} Emacs Lisp library.
 
-Copyright @copyright{} 1993--1999, 2002, 2004--2018 Free Software
+Copyright @copyright{} 1993--1999, 2002, 2004--2026 Free Software
 Foundation, Inc.
 
 @quotation
@@ -90,7 +91,7 @@ can be accessed (usually over a network) in a specific way.
 
 @example
 ftp://ftp.is.co.za/rfc/rfc1808.txt
-http://www.ietf.org/rfc/rfc2396.txt
+https://www.ietf.org/rfc/rfc2396.txt
 ldap://[2001:db8::7]/c=GB?objectClass?one
 mailto:John.Doe@@example.com
 news:comp.infosystems.www.servers.unix
@@ -126,20 +127,21 @@ standard-compliant URI parser, as well as function
 @code{url-recreate-url}, which converts a parsed URI back into a URI
 string.
 
-@defun url-generic-parse-url uri-string
-This function returns a parsed version of the string @var{uri-string}.
+@defun url-generic-parse-url url
+This function returns a parsed version of the string @var{url}.
 @end defun
 
-@defun url-recreate-url uri-obj
+@defun url-recreate-url urlobj
 @cindex unparsing URLs
-Given a parsed URI, this function returns the corresponding URI string.
+Given a parsed URI in @var{urlobj}, this function returns the
+corresponding URI string.
 @end defun
 
 @cindex parsed URI
   The return value of @code{url-generic-parse-url}, and the argument
 expected by @code{url-recreate-url}, is a @dfn{parsed URI}: a CL
 structure whose slots hold the various components of the URI@.
-@xref{Top,the CL Manual,,cl,GNU Emacs Common Lisp Emulation}, for
+@xref{Structures,the CL Manual,,cl,GNU Emacs Common Lisp Emulation}, for
 details about CL structures.  Most of the other functions in the
 @code{url} library act on parsed URIs.
 
@@ -221,6 +223,7 @@ URI's @var{port} slot is @code{nil}.
 @section URI Encoding
 
 @cindex percent encoding
+@findex url-generic-parse-url
   The @code{url-generic-parse-url} parser does not obey RFC 3986 in
 one respect: it allows non-@acronym{ASCII} characters in URI strings.
 
@@ -233,17 +236,20 @@ then percent encoded to @samp{%D3%A7}.  (Certain ``reserved''
 @acronym{ASCII} characters must also be percent encoded when they
 appear in URI components.)
 
+@findex url-encode-url
   The function @code{url-encode-url} can be used to convert a URI
 string containing arbitrary characters to one that is properly
 percent-encoded in accordance with RFC 3986.
 
-@defun url-encode-url url-string
+@cindex URI normalization
+@defun url-encode-url url
 This function return a properly URI-encoded version of
-@var{url-string}.  It also performs @dfn{URI normalization},
+@var{url}.  It also performs @dfn{URI normalization},
 e.g., converting the scheme component to lowercase if it was
 previously uppercase.
 @end defun
 
+@cindex percent-encoding of URL
   To convert between a string containing arbitrary characters and a
 percent-encoded all-@acronym{ASCII} string, use the functions
 @code{url-hexify-string} and @code{url-unhex-string}:
@@ -263,12 +269,12 @@ The allowed characters are specified by @var{allowed-chars}.  If this
 argument is @code{nil}, the allowed characters are those specified as
 @dfn{unreserved characters} by RFC 3986 (see the variable
 @code{url-unreserved-chars}).  Otherwise, @var{allowed-chars} should
-be a vector whose @var{n}-th element is non-@code{nil} if character
-@var{n} is allowed.
+be either a list of allowed chars, or a vector whose Nth element is
+non-@code{nil} if character N is allowed.
 @end defun
 
-@defun url-unhex-string string &optional allow-newlines
-This function replaces percent-encoding sequences in @var{string} with
+@defun url-unhex-string str &optional allow-newlines
+This function replaces percent-encoding sequences in @var{str} with
 their character equivalents, and returns the resulting string.
 
 If @var{allow-newlines} is non-@code{nil}, it allows the decoding of
@@ -289,20 +295,20 @@ string or a parsed URL structure.  If it is a string, that string is
 passed through @code{url-encode-url} before using it, to ensure that
 it is properly URI-encoded (@pxref{URI Encoding}).
 
-@defun url-retrieve-synchronously url &optional silent no-cookies timeout
+@defun url-retrieve-synchronously url &optional silent inhibit-cookies timeout
 This function synchronously retrieves the data specified by @var{url},
 and returns a buffer containing the data.  The return value is
 @code{nil} if there is no data associated with the URL (as is the case
 for @code{dired}, @code{info}, and @code{mailto} URLs).
 
 If the optional argument @var{silent} is non-@code{nil}, progress
-messages are suppressed.  If the optional argument @var{no-cookies} is
+messages are suppressed.  If the optional argument @var{inhibit-cookies} is
 non-@code{nil}, cookies are not stored or sent.  If the optional
 argument @var{timeout} is non-@code{nil}, it should be a number that
 says (in seconds) how long to wait for a response before giving up.
 @end defun
 
-@defun url-retrieve url callback &optional cbargs silent no-cookies
+@defun url-retrieve url callback &optional cbargs silent inhibit-cookies
 This function retrieves @var{url} asynchronously, calling the function
 @var{callback} when the object has been completely retrieved.  The
 return value is the buffer into which the data will be inserted, or
@@ -327,6 +333,29 @@ This means that the request was redirected to the URL
 @item (:error (@var{error-symbol} . @var{data}))
 This means that an error occurred.  If so desired, the error can be
 signaled with @code{(signal @var{error-symbol} @var{data})}.
+
+@cindex status of GnuTLS connection, as provided by @code{url-retrieve}
+@findex gnutls-peer-status-warning-describe
+@findex gnutls-peer-status
+@item (:peer @var{gnutls-information})
+This means that GnuTLS was used for a TLS connection to the peer.  The
+@var{gnutls-information} has the following form:
+
+@lisp
+ ((:warnings @var{warning}@dots{})
+  (:certificates @var{certificate}@dots{} @var{peer-data}))
+@end lisp
+
+@noindent
+where the @var{warning}s are warnings, if any, emitted by GnuTLS for the
+connection, and @var{certificate}s is the list of certificates used for
+the TLS connection followed by the properties of the connection in
+@var{peer-data}.  Both @var{warning}s and @var{peer-data} are in the
+form of a key-value pairs (i.e., they are plists).  The value of each
+key in the @code{:warnings} list is a symbol whose description can be
+obtained by using @code{gnutls-peer-status-warning-describe}, and the
+various keys of the @var{peer-data} list and their values are documented
+in the doc string of @code{gnutls-peer-status}.
 @end table
 
 When the callback function is called, the current buffer is the one
@@ -334,11 +363,11 @@ containing the retrieved data (if any).  The buffer also contains any
 MIME headers associated with the data retrieval.
 
 If the optional argument @var{silent} is non-@code{nil}, progress
-messages are suppressed.  If the optional argument @var{no-cookies} is
+messages are suppressed.  If the optional argument @var{inhibit-cookies} is
 non-@code{nil}, cookies are not stored or sent.
 @end defun
 
-@defun url-queue-retrieve url callback &optional cbargs silent no-cookies
+@defun url-queue-retrieve url callback &optional cbargs silent inhibit-cookies
 This function acts like @code{url-retrieve}, but with limits on the
 number of concurrently-running network processes.  The option
 @code{url-queue-parallel-processes} controls the number of concurrent
@@ -348,7 +377,6 @@ seconds.
 To use this function, you must @code{(require 'url-queue)}.
 @end defun
 
-@vindex url-queue-parallel-processes
 @defopt url-queue-parallel-processes
 The value of this option is an integer specifying the maximum number
 of concurrent @code{url-queue-retrieve} network processes.  If the
@@ -376,7 +404,7 @@ for specific schemes.
 * info::                        Emacs "Info" pages.
 * mailto::                      Sending email.
 * news/nntp/snews::             Usenet news.
-* rlogin/telnet/tn3270::        Remote host connectivity.
+* telnet/tn3270::               Remote host connectivity.
 * irc::                         Internet Relay Chat.
 * data::                        Embedded data URLs.
 * nfs::                         Networked File System.
@@ -423,10 +451,11 @@ cookies, if there are any.  You can remove a cookie using the
 @kbd{C-k} (@code{url-cookie-delete}) command.
 @end defun
 
-@defun url-cookie-delete-cookies &optional regexp
+@defun url-cookie-delete-cookies &optional regexp keep
 This function takes a regular expression as its parameters and deletes
 all cookies from that domain.  If @var{regexp} is @code{nil}, delete
-all cookies.
+all cookies.  If @var{keep} is non-@code{nil}, instead delete all cookies
+that do not match @var{regexp}.
 @end defun
 
 @defopt url-cookie-file
@@ -440,8 +469,7 @@ Specifies whether confirmation is required to accept cookies.
 
 @defopt url-cookie-multiple-line
 Specifies whether to put all cookies for the server on one line in the
-HTTP request to satisfy broken servers like
-@url{http://www.hotmail.com}.
+HTTP request to satisfy broken servers.
 @end defopt
 
 @defopt url-cookie-trusted-urls
@@ -506,7 +534,7 @@ HTTP supports an @samp{OPTIONS} method describing things supported by
 the URL@.
 
 @defun url-http-options url
-Returns a property list describing options available for URL@.  The
+Returns a property list describing options available for @var{url}.  The
 property list members are:
 
 @table @code
@@ -672,9 +700,8 @@ environment variable @samp{NNTPSERVER}, or @samp{news} if that
 environment variable is unset.
 @end defopt
 
-@node rlogin/telnet/tn3270
-@section rlogin, telnet and tn3270
-@cindex rlogin
+@node telnet/tn3270
+@section telnet and tn3270
 @cindex telnet
 @cindex tn3270
 @cindex terminal emulation
@@ -691,10 +718,10 @@ telnet://@var{user}:@var{password}@@@var{host}:@var{port}
 but the @var{password} component is ignored.  By default, the
 @code{telnet} scheme is handled via Tramp (@pxref{Tramp}).
 
-To handle rlogin, telnet and tn3270 URLs, a @code{rlogin},
-@code{telnet} or @code{tn3270} (the program names and arguments are
-hardcoded) session is run in a @code{terminal-emulator} buffer.
-Well-known ports are used if the URL does not specify a port.
+To handle telnet and tn3270 URLs, a @code{telnet} or @code{tn3270}
+(the program names and arguments are hardcoded) session is run in a
+@code{terminal-emulator} buffer.  Well-known ports are used if the URL
+does not specify a port.
 
 @node irc
 @section irc
@@ -705,7 +732,7 @@ Well-known ports are used if the URL does not specify a port.
 @cindex rcirc
 
   The @code{irc} scheme is defined in the Internet Draft at
-@url{http://www.w3.org/Addressing/draft-mirashi-url-irc-01.txt} (which
+@url{https://www.w3.org/Addressing/draft-mirashi-url-irc-01.txt} (which
 was never approved as an RFC).  Such URLs have the form
 
 @example
@@ -894,8 +921,8 @@ Creates a cache file name from @var{url} using MD5 hashing.
 This is creates entries with very few cache collisions and is fast.
 @cindex MD5
 @smallexample
-(url-cache-create-filename-using-md5 "http://www.example.com/foo/bar")
-  @result{} "/home/fx/.url/cache/fx/http/com/example/www/b8a35774ad20db71c7c3409a5410e74f"
+(url-cache-create-filename-using-md5 "https://www.example.com/foo/bar")
+  @result{} "/home/fx/.url/cache/fx/https/com/example/www/b8a35774ad20db71c7c3409a5410e74f"
 @end smallexample
 @end defun
 
@@ -904,15 +931,18 @@ Creates a cache file name from @var{url} more obviously connected to
 @var{url} than for @code{url-cache-create-filename-using-md5}, but
 more likely to conflict with other files.
 @smallexample
-(url-cache-create-filename-human-readable "http://www.example.com/foo/bar")
-  @result{} "/home/fx/.url/cache/fx/http/com/example/www/foo/bar"
+(url-cache-create-filename-human-readable "https://www.example.com/foo/bar")
+  @result{} "/home/fx/.url/cache/fx/https/com/example/www/foo/bar"
 @end smallexample
 @end defun
 
-@defun url-cache-expired
-This function returns non-@code{nil} if a cache entry has expired (or is absent).
-The arguments are a URL and optional expiration delay in seconds
-(default @var{url-cache-expire-time}).
+@defun url-cache-expired url &optional expire-time
+This function returns non-@code{nil} if a cache entry for @var{url} has
+expired (or is absent).  The expiration time is given by the option
+@code{url-cache-expire-time}, but if the optional argument
+@var{expire-time} is non-@code{nil}, its value overrides that option.
+However, if the value of the @code{url-standalone-mode} option is
+non-@code{nil}, cached URLs never expire.
 @end defun
 
 @defopt url-cache-expire-time
@@ -920,7 +950,7 @@ This variable is the default number of seconds to use for the
 expire-time argument of the function @code{url-cache-expired}.
 @end defopt
 
-@defun url-fetch-from-cache
+@defun url-fetch-from-cache url
 This function takes a URL as its argument and returns a buffer
 containing the data cached for that URL.
 @end defun
@@ -947,7 +977,6 @@ containing the data cached for that URL.
 @node Proxies
 @section Proxies and Gatewaying
 
-@c fixme: check/document url-ns stuff
 @cindex proxy servers
 @cindex proxies
 @cindex environment variables
@@ -1012,12 +1041,14 @@ others.@footnote{Proxies (which only operate over HTTP) are
 implemented using this.}  The library's basic function responsible for
 making connections is @code{url-open-stream}.
 
-@defun url-open-stream name buffer host service
 @cindex opening a stream
 @cindex stream, opening
+@defun url-open-stream name buffer host service &optional gateway-method
 Open a stream to @var{host}, possibly via a gateway.  The other
 arguments are as for @code{open-network-stream}.  This will not make a
-connection if @code{url-gateway-unplugged} is non-@code{nil}.
+connection if @code{url-gateway-unplugged} is non-@code{nil}.  Optional
+argument @var{gateway-method} specifies the gateway to be used, and
+defaults to the value of @code{url-gateway-method}, described below.
 @end defun
 
 @defvar url-gateway-local-host-regexp
@@ -1036,12 +1067,6 @@ a list of symbols.  Possible values are:
 @cindex @command{telnet}
 Use this method if you must first telnet and log into a gateway host,
 and then run telnet from that host to connect to outside machines.
-
-@item rlogin
-@cindex @command{rlogin}
-This method is identical to @code{telnet}, but uses @command{rlogin}
-to log into the remote machine without having to send the username and
-password over the wire every time.
 
 @item socks
 @cindex @sc{socks}
@@ -1085,32 +1110,21 @@ The password to send when logging in.
 This is a regular expression that matches the shell prompt.
 @end defopt
 
-@defopt url-gateway-rlogin-host
-Host to @samp{rlogin} to before telnetting out.
-@end defopt
-@defopt url-gateway-rlogin-parameters
-Parameters to pass to @samp{rsh}.
-@end defopt
-@defopt url-gateway-rlogin-user-name
-User name to use when logging in to the gateway.
-@end defopt
-@defopt url-gateway-prompt-pattern
-This is a regular expression that matches the shell prompt.
-@end defopt
-
 @defopt socks-server
 This specifies the default server, it takes the form
 @w{@code{("Default server" @var{server} @var{port} @var{version})}}
-where @var{version} can be either 4 or 5.
+where @var{version} can be 4, 4a, or 5.
 @end defopt
 @defvar socks-password
 If this is @code{nil} then you will be asked for the password,
 otherwise it will be used as the password for authenticating you to
-the @sc{socks} server.
+the @sc{socks} server.  You can often set this to @code{""} for
+servers on your local network.
 @end defvar
 @defvar socks-username
 This is the username to use when authenticating yourself to the
-@sc{socks} server.  By default this is your login name.
+@sc{socks} server.  By default, this is your login name.  In versions
+4 and 4a, ERC uses this for the @samp{ID} field.
 @end defvar
 @defvar socks-timeout
 This controls how long, in seconds, to wait for responses from the
@@ -1166,40 +1180,6 @@ of such processing.
 If this variable is non-@code{nil} new network connections are never
 opened by the URL library.
 @end defvar
-
-@c @node Broken hostname resolution
-@c @subsection Broken Hostname Resolution
-
-@c @cindex hostname resolver
-@c @cindex resolver, hostname
-@c Some C libraries do not include the hostname resolver routines in
-@c their static libraries.  If Emacs was linked statically, and was not
-@c linked with the resolver libraries, it will not be able to get to any
-@c machines off the local network.  This is characterized by being able
-@c to reach someplace with a raw ip number, but not its hostname
-@c (@url{http://129.79.254.191/} works, but
-@c @url{http://www.cs.indiana.edu/} doesn't).  This used to happen on
-@c SunOS4 and Ultrix, but is now probably now rare.  If Emacs can't be
-@c rebuilt linked against the resolver library, it can use the external
-@c @command{nslookup} program instead.
-
-@c @defopt url-gateway-broken-resolution
-@c @cindex @code{nslookup} program
-@c @cindex program, @code{nslookup}
-@c If non-@code{nil}, this variable says to use the program specified by
-@c @code{url-gateway-nslookup-program} program to do hostname resolution.
-@c @end defopt
-
-@c @defopt url-gateway-nslookup-program
-@c The name of the program to do hostname lookup if Emacs can't do it
-@c directly.  This program should expect a single argument on the command
-@c line---the hostname to resolve---and should produce output similar to
-@c the standard Unix @command{nslookup} program:
-@c @example
-@c Name: www.cs.indiana.edu
-@c Address: 129.79.254.191
-@c @end example
-@c @end defopt
 
 @node History
 @section History
@@ -1267,7 +1247,8 @@ files, etc.
 
 The default value specifies a subdirectory named @file{url/} in the
 standard Emacs user data directory specified by the variable
-@code{user-emacs-directory} (normally @file{~/.emacs.d}).  However,
+@code{user-emacs-directory} (normally @file{~/.config/emacs}
+or @file{~/.emacs.d}).  However,
 the old default was @file{~/.url}, and this directory is used instead
 if it exists.
 @end defopt
@@ -1279,8 +1260,6 @@ the @file{*URL-DEBUG*} buffer.
 @code{t} means log all messages.
 A number means log all messages and show them with @code{message}.
 It may also be a list of the types of messages to be logged.
-@end defopt
-@defopt url-personal-mail-address
 @end defopt
 @defopt url-privacy-level
 @end defopt
@@ -1308,8 +1287,6 @@ repeated visits do not require repeated domain lookups.
 @end defopt
 @defopt url-max-password-attempts
 @end defopt
-@defopt url-temporary-directory
-@end defopt
 @defopt url-show-status
 @end defopt
 @defopt url-confirmation-func
@@ -1326,8 +1303,6 @@ from the local machine.  The supported methods are:
 @table @code
 @item telnet
 Run telnet in a subprocess to connect;
-@item rlogin
-Rlogin to another machine to connect;
 @item socks
 Connect through a socks server;
 @item ssl
@@ -1342,7 +1317,7 @@ The User Agent string used for sending @acronym{HTTP}/@acronym{HTTPS}
 requests.  The value should be @code{nil}, which means that no
 @samp{User-Agent} header is generated, @code{default}, which means
 that a string is generated based on the setting of
-@code{url-privacy-leve}, a string or a function of no arguments that
+@code{url-privacy-level}, a string or a function of no arguments that
 returns a string.
 
 The default is @code{default}, which means that the

@@ -1,9 +1,10 @@
-\input texinfo   @c -*-texinfo; coding: utf-8 -*-
+\input texinfo   @c -*- mode: texinfo; coding: utf-8 -*-
 @comment %**start of header
 @setfilename ../../info/flymake.info
-@set VERSION 1.0
-@set UPDATED June 2018
+@set VERSION 1.3.4
+@set UPDATED April 2023
 @settitle GNU Flymake @value{VERSION}
+@documentlanguage en
 @include docstyle.texi
 @syncodeindex pg cp
 @syncodeindex vr cp
@@ -11,10 +12,9 @@
 @comment %**end of header
 
 @copying
-This manual is for GNU Flymake (version @value{VERSION}, @value{UPDATED}),
-which is a universal on-the-fly syntax checker for GNU Emacs.
+This manual is for GNU Flymake (version @value{VERSION}, @value{UPDATED}).
 
-Copyright @copyright{} 2004--2018 Free Software Foundation, Inc.
+Copyright @copyright{} 2004--2026 Free Software Foundation, Inc.
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document
@@ -41,6 +41,7 @@ modify this GNU manual.''
 @page
 @vskip 0pt plus 1filll
 @insertcopying
+
 @end titlepage
 
 @contents
@@ -48,12 +49,29 @@ modify this GNU manual.''
 @ifnottex
 @node Top
 @top GNU Flymake
+@end ifnottex
+
+Flymake is a universal on-the-fly syntax checker for Emacs.  When
+enabled, Flymake contacts one or more source @dfn{backends} to
+collect information about problems in the buffer, called
+@dfn{diagnostics}, and visually annotates them with a special face.
+The mode line displays overall status including totals for different
+types of diagnostics.
+
+To learn about using Flymake, @pxref{Using Flymake}.
+
+When the Emacs LSP support mode Eglot is enabled, Flymake will use that
+as an additional back-end.  @xref{Eglot Features,,, eglot, Eglot: The
+Emacs LSP Client}.  Flymake is also designed to be easily extended to
+support new backends via an Elisp interface.  @xref{Flymake API}.
+
+@ifnottex
 @insertcopying
 @end ifnottex
 
 @menu
 * Using Flymake::
-* Extending Flymake::
+* Flymake API::
 * The legacy Proc backend::
 * GNU Free Documentation License::
 * Index::
@@ -64,74 +82,110 @@ modify this GNU manual.''
 @cindex overview of flymake
 @cindex using flymake
 
-Flymake is a universal on-the-fly buffer checker implemented as an
-Emacs minor mode.  To use Flymake, you must first activate
-@code{flymake-mode} by using the command @kbd{flymake-mode}.
+Flymake is only useful if at least one @dfn{backend} is configured to
+provide the buffer-checking service.  This is done via the hook
+@code{flymake-diagnostic-functions}.  @xref{Hooks,Hooks,, emacs, The
+Emacs Editor}.
 
-When enabled, Flymake collects information about problems in the
-buffer, called @dfn{diagnostics}, from one or more different sources,
-or @dfn{backends}, and then visually annotates the buffer by
-highlighting problematic buffer regions with a special face.
+It's possible that some major modes or a third-party package has
+already setup this hook for you, by adding @dfn{backend functions} to
+@code{flymake-diagnostic-functions}.  If you know Elisp you may also
+write your own Flymake backend functions.  @xref{Backend functions}.
 
-It also displays an overall buffer status in the mode line containing
-totals for different types of diagnostics.
+When the Emacs LSP support mode Eglot is enabled, Flymake will use
+that as an additional back-end automatically.  @xref{Eglot Features,,,
+eglot, Eglot: The Emacs LSP Client}.
 
-Syntax check is done ``on-the-fly''.  It is started whenever
+@menu
+* Starting Flymake::
+* Finding diagnostics::
+* Mode line status::
+* Troubleshooting::
+* Customizable variables::
+@end menu
+
+@node Starting Flymake
+@section Starting Flymake
+@cindex starting Flymake
+
+To use Flymake, activate the minor-mode @code{flymake-mode}.
+Use the command @kbd{flymake-mode} to toggle it on and off.  The
+mode line should indicate its presence via an indicator (@pxref{Mode
+line status}).
+
+Syntax checks happen ``on-the-fly''.  Each check is started whenever:
 
 @itemize @bullet
 @item
 @code{flymake-mode} is started, unless
-@code{flymake-start-on-flymake-mode} is nil;
+@code{flymake-start-on-flymake-mode} is @code{nil};
 
 @item
 the buffer is saved, unless @code{flymake-start-on-save-buffer} is
-nil;
-
-@item
-a newline character is added to the buffer, unless
-@code{flymake-start-syntax-check-on-newline} is nil;
+@code{nil};
 
 @item
 some changes were made to the buffer more than @code{0.5} seconds ago
 (the delay is configurable in @code{flymake-no-changes-timeout}).
+
+@item
+When the user invokes the command @code{flymake-start}.
 @end itemize
 
-Syntax check can also be started manually by typing the @kbd{M-x
-flymake-start @key{RET}} command.
+If the check detected errors or warnings, the respective buffer
+regions are highlighted.  @xref{Finding diagnostics}, for how to
+learn what the problems are.
 
-@code{flymake-goto-next-error} and @code{flymake-goto-prev-error} are
-commands that allow easy navigation to the next/previous erroneous
-line, respectively.  If might be a good idea to map them to @kbd{M-n}
-and @kbd{M-p} in @code{flymake-mode}, by adding to your init file:
+@node Finding diagnostics
+@section Finding diagnostics
+
+@cindex read diagnostic message
+If Flymake has highlighted the buffer, you may hover the mouse on the
+highlighted regions to learn what the specific problem
+is.  Alternatively, place point on the highlighted regions and use the
+commands @code{eldoc} or @code{display-local-help}.
+
+Another easy way to get instant access to the diagnostic text is to
+set @code{flymake-inline-diagnostics} to a non-@code{nil} value.  This
+makes the diagnostic messages appear directly in the buffer, in the
+vicinity of the affected line (@pxref{Customizable variables})
+
+@cindex next and previous diagnostic
+If the diagnostics are outside the visible region of the buffer,
+@code{flymake-goto-next-error} and @code{flymake-goto-prev-error}
+let you navigate to the next/previous erroneous regions,
+respectively.  It might be a good idea to map them to @kbd{M-n} and
+@kbd{M-p} in @code{flymake-mode}, by adding to your init file:
 
 @lisp
 (define-key flymake-mode-map (kbd "M-n") 'flymake-goto-next-error)
 (define-key flymake-mode-map (kbd "M-p") 'flymake-goto-prev-error)
 @end lisp
 
-Flymake is a universal syntax checker in the sense that it's easily
-extended to support new backends (@pxref{Extending Flymake}).
+@cindex listing diagnostics
+Sometimes it is useful to have a detailed overview of the diagnostics
+in your files without having to jump to each one.  The commands
+@code{flymake-show-buffer-diagnostics} and
+@code{flymake-show-project-diagnostics} are designed to handle this
+situation.  When invoked, they bring up a separate buffer containing a
+detailed structured listing of multiple diagnostics in the current
+buffer or for the current project, respectively (@pxref{Projects,,,
+emacs, The Emacs Editor}).
 
-Historically, Flymake used to accept diagnostics from a single
-backend, albeit a reasonably flexible one.
+The listings is continuously updated as you edit source code, adding or
+removing lines as you make or correct mistakes.  Each line of this
+listing includes the type of the diagnostic, its line and column in
+the file, as well as the diagnostic message.  You may sort the listing
+by each of these columns.
 
-This backend isn't (yet) obsolete, and so is still available as a
-fallback and active by default (@pxref{The legacy Proc backend}).  It works by
-selecting a syntax check tool from a preconfigured list (compiler for
-C@t{++} files, @command{perl} for Perl files, etc.), and executing it in the
-background, passing it a temporary file which is a copy of the current
-buffer, and parsing the output for known error/warning message
-patterns.
+When invoked on a diagnostic (either via the keyboard or a mouse click)
+the command @code{flymake-show-buffer-diagnostics} attempts to reveal
+said diagnostic in the listing.
 
-@menu
-* Syntax check statuses::
-* Backend exceptions::
-* Customizable variables::
-@end menu
-
-@node Syntax check statuses
-@section Syntax check statuses
-@cindex Syntax check statuses
+@node Mode line status
+@section Mode line status
+@cindex flymake mode line
+@cindex syntax check status
 
 When enabled, Flymake displays its status in the mode line, which
 provides a visual summary of diagnostic collection.  It may also hint
@@ -144,7 +198,7 @@ The following statuses are defined:
 @item [@var{nerrors} @var{nwarnings} ...]
 @tab Normal operation. @var{nerrors} and @var{nwarnings} are, respectively,
 the total number of errors and warnings found during the last buffer
-check, for all backends. They may be followed by other totals for
+check, for all backends.  They may be followed by other totals for
 other types of diagnostics (@pxref{Flymake error types}).
 
 @item @code{Wait}
@@ -155,26 +209,35 @@ delay and Flymake will resume normal operation soon.
 @item @code{!}
 @tab All the configured Flymake backends have disabled themselves: Flymake
 cannot annotate the buffer and action from the user is needed to
-investigate and remedy the situation (@pxref{Backend exceptions}).
+investigate and remedy the situation (@pxref{Troubleshooting}).
 
 @item @code{?}
 @tab There are no applicable Flymake backends for this buffer, thus Flymake
 cannot annotate it.  To fix this, a user may look to extending Flymake
-and add a new backend (@pxref{Extending Flymake}).
+and add a new backend (@pxref{Flymake API}).
 
 @end multitable
 
-@node Backend exceptions
-@section Backend exceptions
+If you would like to customize the appearance of the mode-line, you
+can use the variables @code{flymake-mode-line-format} and
+@code{flymake-mode-line-counter-format} for that purpose.
+@xref{Customizable variables}.
+
+@node Troubleshooting
+@section Troubleshooting
+@cindex troubleshooting
 @cindex backend exceptions
 
 @cindex disabled backends
 @cindex backends, disabled
-Some backends may take longer than others to respond or complete, and
-some may decide to @emph{disable} themselves if they are not suitable
-for the current buffer or encounter some unavoidable problem.  A
-disabled backend is not tried again for future checks of the current
-buffer.
+As Flymake supports multiple simultaneously active external backends, it
+becomes useful to monitor their status.  For example, some backends may
+take longer than others to respond or complete, and some may decide to
+@emph{disable} themselves if they are not suitable for the current
+buffer or encounter some unavoidable problem.  In addition, most
+backends are disabled by default in buffers with untrusted content
+(@pxref{Backend functions}).  A disabled backend is not tried again for
+future checks of the current buffer.
 
 @findex flymake-reporting-backends
 @findex flymake-running-backends
@@ -184,18 +247,23 @@ The commands @code{flymake-reporting-backends},
 show the backends currently used and those which are disabled.
 
 @cindex reset disabled backends
-Toggling @code{flymake-mode} off and on again, or invoking
-@code{flymake-start} with a prefix argument is one way to reset the
-disabled backend list, so that they will be tried again in the next check.
+Sometimes, re-starting a backend that disabled itself is useful after
+some external roadblock has been removed (for example after the user
+installed a needed syntax-check program).  Invoking
+@code{flymake-start} with a prefix argument is a way to reset the
+disabled backend list, so that they will be tried again in the next
+check.  Manually toggling @code{flymake-mode} off and on again also
+works.
 
 @cindex logging
 @cindex flymake logging
-Flymake also uses a simple logging facility for indicating important
-points in the control flow.  The logging facility sends logging
-messages to the @file{*Flymake log*} buffer.  The information logged
-can be used for resolving various problems related to Flymake.  For
-convenience, a shortcut to this buffer can be found in Flymake's menu,
-accessible from the top menu bar or just left of the status indicator.
+Flymake uses a simple logging facility for indicating important points
+in the control flow.  The logging facility sends logging messages to
+the @file{*Flymake log*} buffer.  The logged information can be used
+for resolving various problems related to Flymake.  For convenience, a
+shortcut to this buffer can be found in Flymake's menu, accessible
+from the top menu bar or just left of the status indicator.  The
+command @code{flymake-switch-to-log-buffer} is another alternative.
 
 @vindex warning-minimum-log-level
 @vindex warning-minimum-level
@@ -211,14 +279,20 @@ This section summarizes customization variables used for the
 configuration of the Flymake user interface.
 
 @vtable @code
+@item flymake-mode-line-lighter
+The name of the mode.  Defaults to @samp{Flymake}.
+
+@item flymake-mode-line-format
+Format to use for the Flymake mode line indicator.
+
+@item flymake-mode-line-counter-format
+mode line construct for formatting Flymake diagnostic counters inside
+the Flymake mode line indicator.
+
 @item flymake-no-changes-timeout
 If any changes are made to the buffer, syntax check is automatically
 started after this many seconds, unless the user makes another change,
 which resets the timer.
-
-@item flymake-start-syntax-check-on-newline
-A boolean flag indicating whether to start syntax check immediately
-after a newline character is inserted into the buffer.
 
 @item flymake-start-on-flymake-mode
 A boolean flag indicating whether to start syntax check immediately
@@ -240,6 +314,13 @@ reported.
 A custom face for highlighting regions for which a note has been
 reported.
 
+@item flymake-indicator-type
+The indicator type which Flymake should use to indicate lines with
+errors or warnings.
+Depending on your preference, this can either use @code{fringes} or
+@code{margins} for indicating errors.  On text terminals, only
+@code{margins} is available.
+
 @item flymake-error-bitmap
 A bitmap used in the fringe to mark lines for which an error has
 been reported.
@@ -251,24 +332,74 @@ been reported.
 @item flymake-fringe-indicator-position
 Which fringe (if any) should show the warning/error bitmaps.
 
+@item flymake-margin-indicators-string
+Specifies the string and face to use for the margin indicators, for
+each error type.
+
+@item flymake-margin-indicator-position
+Which margin (if any) should show the warning/error strings.
+
+@item flymake-autoresize-margins
+If non-@code{nil}, Flymake will resize the margins when
+@code{flymake-mode} is turned on or off.
+Only relevant if @code{flymake-indicator-type} is set to @code{margins}.
+
 @item flymake-wrap-around
-If non-nil, moving to errors with @code{flymake-goto-next-error} and
+If non-@code{nil}, moving to errors with @code{flymake-goto-next-error} and
 @code{flymake-goto-prev-error} wraps around buffer boundaries.
+
+@item flymake-inline-diagnostics
+If non-@code{nil}, annotate lines with diagnostics directly in the
+buffer.  Depending on your preference, this can either be distracting
+and easily confused with actual code, or a significant early aid that
+relieves you from moving around or reaching for the mouse to consult an
+error message.  A number of styles can be used: the value @code{eol}
+shows all diagnostics at the end of the line, @code{short} shows only
+the most severe one, and @code{fancy} lays out the diagnostics below the
+affected line using Unicode graphics to point to the diagnostic locus.
+
+The value can also be an alist, which allows you to have the position of
+point dictate the style used for nearby annotation of nearby
+diagnostics.  The alist keys @code{current} and @code{current-line}
+designate the style affect the appearance of nearby diagnostics, while a
+value keyed by @code{t} is style used for every other diagnostic.  For
+example, to keep a discreet @code{short} annotation on most lines while
+expanding to @code{fancy} only for the diagnostic point in currently on:
+
+@lisp
+(setopt flymake-inline-diagnostics '((current . fancy) (t . short)))
+@end lisp
+
+@item flymake-diagnostic-format-alist
+Control which parts of a diagnostic to show in various situations.
+
+@item flymake-error-inline
+A custom face for inline diagnostic error messages.
+
+@item flymake-warning-inline
+A custom face for inline diagnostic warning messages.
+
+@item flymake-note-inline
+A custom face for inline diagnostic notes.
 @end vtable
 
-@node Extending Flymake
-@chapter Extending Flymake
+@node Flymake API, The legacy Proc backend, Using Flymake, Top
+@chapter Flymake API
 @cindex extending flymake
 
-Flymake can primarily be extended in one of two ways:
+Flymake's API supports the following use cases:
 
 @enumerate
 @item
-By changing the look and feel of the annotations produced by the
-different backends.
+Changing the look and feel of the annotations produced by the
+different backends.  @xref{Flymake error types}.
 
 @item
-By adding a new buffer-checking backend.
+Adding a new buffer-checking backend.  @xref{Backend functions}.
+
+@item
+Writing extension to and process Flymake's output. @xref{Inspecting
+diagnostics}.
 @end enumerate
 
 The following sections discuss each approach in detail.
@@ -276,6 +407,7 @@ The following sections discuss each approach in detail.
 @menu
 * Flymake error types::
 * Backend functions::
+* Inspecting diagnostics::
 @end menu
 
 @node Flymake error types
@@ -283,10 +415,12 @@ The following sections discuss each approach in detail.
 @cindex customizing error types
 @cindex error types, customization
 
-To customize the appearance of error types, set properties on the
-symbols associated with each diagnostic type.  The standard diagnostic
-symbols are @code{:error}, @code{:warning} and @code{:note} (though
-the backend may define more, @pxref{Backend functions}).
+To customize the appearance of error types, the user must set
+properties on the symbols associated with each diagnostic type.
+
+The three standard diagnostic keyword symbols -- @code{:error},
+@code{:warning} and @code{:note} -- have pre-configured appearances.
+However a backend may define more (@pxref{Backend functions}).
 
 The following properties can be set:
 
@@ -299,6 +433,14 @@ The following properties can be set:
 the syntax of @code{flymake-error-bitmap} (@pxref{Customizable
 variables}).  It is overridden by any @code{before-string} overlay
 property.
+
+@item
+@cindex margin of diagnostic
+@code{flymake-margin-string}, a string displayed in the margin
+according to @code{flymake-margin-indicator-position}.
+The value actually follows the syntax of @code{flymake-margin-indicators-string}
+(@pxref{Customizable variables}).  It is overridden by any
+@code{before-string} overlay property.
 
 @item
 @code{flymake-overlay-control}, an alist ((@var{OVPROP} . @var{VALUE})
@@ -332,16 +474,32 @@ its @code{flymake-overlay-control} property:
 
 @item
 @cindex severity of diagnostic
-@code{flymake-severity} is a non-negative integer specifying the
+@code{severity} is a non-negative integer specifying the
 diagnostic's severity.  The higher the value, the more serious is the
 error.  If the overlay property @code{priority} is not specified in
 @code{flymake-overlay-control}, @code{flymake-severity} is used to set
 it and help sort overlapping overlays.
 
 @item
+@vindex flymake-type-name
+@code{flymake-type-name} is a string used to succinctly name the error
+type, in case the name of the symbol associated with it is very long.
+
+@item
 @vindex flymake-category
 @code{flymake-category} is a symbol whose property list is considered
 the default for missing values of any other properties.
+
+@item
+@cindex mode-line appearance of a diagnostic
+@code{mode-line-face} is a face specifier controlling the appearance
+of the indicator of this type of diagnostic in the mode line.
+
+@item
+@cindex summarized appearance of a diagnostic
+@code{echo-face} is a face specifier controlling the appearance of the
+summarized description of this diagnostic when reading diagnostic
+messages (@pxref{Finding diagnostics}).
 @end itemize
 
 @cindex predefined diagnostic types
@@ -454,7 +612,7 @@ function was called for the buffer.  If the list is empty, this
 indicates that no changes have been recorded.  If it is the first time
 that this backend function is called for this activation of
 @code{flymake-mode}, then this argument isn't provided at all
-(i.e. it's not merely nil).
+(in other words, it's not merely nil).
 
 Each element is in the form (@var{beg} @var{end} @var{text}) where
 @var{beg} and @var{end} are buffer positions, and @var{text} is a
@@ -462,7 +620,7 @@ string containing the text contained between those positions (if any),
 after the change was performed.
 
 @item @code{:changes-start} and @code{:changes-end}
-The value is, repectively, the minimum and maximum buffer positions
+The value is, respectively, the minimum and maximum buffer positions
 touched by the recent changes.  These are provided for convenience and
 only if @code{:recent-changes} is also provided.
 
@@ -479,7 +637,7 @@ manual}) or other asynchronous mechanisms.
 
 In any case, backend functions are expected to return quickly or
 signal an error, in which case the backend is disabled
-(@pxref{Backend exceptions}).
+(@pxref{Troubleshooting}).
 
 If the function returns, Flymake considers the backend to be
 @dfn{running}.  If it has not done so already, the backend is expected
@@ -528,8 +686,20 @@ indicating that the report applies to that region and that previous
 reports targeting other parts of the buffer remain valid.
 @end itemize
 
+@cindex flymake-always-safe
+By default, Flymake backends aren't enabled in buffers with untrusted
+content (@pxref{Host Security,,, emacs, The Emacs Editor}).  But if a
+backend takes its own measures to ensure that the user's security won't
+be compromised by the contents of an untrusted file, it can be marked as
+safe, like this:
+
+@example
+(put 'foo-flymake 'flymake-always-safe t)
+@end example
+
 @menu
 * Flymake utility functions::
+* Foreign and list-only diagnostics::
 * An annotated example backend::
 @end menu
 
@@ -541,29 +711,19 @@ reports targeting other parts of the buffer remain valid.
 Before delivering them to Flymake, backends create diagnostic objects
 by calling the function @code{flymake-make-diagnostic}.
 
-@deffn Function flymake-make-diagnostic buffer beg end type text
-Make a Flymake diagnostic for @var{buffer}'s region from @var{beg} to
-@var{end}.  @var{type} is a diagnostic symbol (@pxref{Flymake error
-types}), and @var{text} is a description of the problem detected in
-this region.
-@end deffn
-
-@cindex access diagnostic object
-These objects' properties can be accessed with the functions
-@code{flymake-diagnostic-backend}, @code{flymake-diagnostic-buffer},
-@code{flymake-diagnostic-text}, @code{flymake-diagnostic-beg},
-@code{flymake-diagnostic-end} and @code{flymake-diagnostic-type}.
-
-Additionally, the function @code{flymake-diagnostics} will collect
-such objects in the region you specify.
-
-@cindex collect diagnostic objects
-@deffn Function flymake-diagnostics beg end
-Get a list of Flymake diagnostics in the region determined by
-@var{beg} and @var{end}.  If neither @var{beg} or @var{end} is
-supplied, use the whole buffer, otherwise if @var{beg} is
-non-@code{nil} and @var{end} is @code{nil}, consider only diagnostics
-at @var{beg}.
+@deffn Function flymake-make-diagnostic locus beg end type info &optional data
+Make a Flymake diagnostic for the region of text in @var{locus}'s
+delimited by @var{beg} and @var{end}.  @var{type} is a diagnostic symbol
+(@pxref{Flymake error types}).  @var{text} can be a string or a list
+(@var{origin} @var{code} @var{message}) appropriately categorizing and
+describing the diagnostic.  Most commonly, @var{locus} is the buffer
+object designating for the current buffer being syntax-checked.
+However, it may be a string naming a file relative to the current
+working directory.  @xref{Foreign and list-only diagnostics}, for when
+this may be useful.  Depending on the type of @var{locus}, @var{beg} and
+@var{end} are both either buffer positions or conses (@var{line}
+. @var{col}) which specify the line and column of the diagnostic's start
+and end positions, respectively.
 @end deffn
 
 @cindex buffer position from line and column number
@@ -576,13 +736,14 @@ can use the following function:
 Compute @var{buffer}'s region (@var{beg} .  @var{end}) corresponding
 to @var{line} and @var{col}.  If @var{col} is @code{nil}, return a
 region just for @var{line}.  Return @code{nil} if the region is
-invalid.
+invalid.  This function saves match data (@pxref{Saving Match Data,,,
+elisp, The Emacs Lisp Reference Manual}).
 @end deffn
 
 @cindex add a log message
 For troubleshooting purposes, backends may record arbitrary
 exceptional or erroneous situations into the Flymake log
-buffer (@pxref{Backend exceptions}):
+buffer (@pxref{Troubleshooting}):
 
 @deffn Macro flymake-log level msg &optional args
 Log, at level @var{level}, the message @var{msg} formatted with
@@ -590,6 +751,58 @@ Log, at level @var{level}, the message @var{msg} formatted with
 (@pxref{Warning Basics,,, elisp, The Emacs Lisp reference Manual}), which is
 used to display the warning in Flymake's log buffer.
 @end deffn
+
+@node Foreign and list-only diagnostics
+@subsection Foreign and list-only diagnostics
+@cindex create diagnostic object for other buffer
+
+It is possible for a given backend's implementation to use
+@code{flymake-make-diagnostic} to create diagnostics for buffers or
+files other than the ``source'' buffer where Flymake was enabled.  For
+instance, this is useful when a given backend has access to
+information about the health of neighboring files that are not yet
+visited or whose diagnostics depend on the current buffer's state.
+There are two alternative ways to go about doing this:
+
+@enumerate
+
+@item
+@cindex foreign diagnostics
+@cindex domestic diagnostics
+If the information about neighboring diagnostics is obtained
+regularly, like when each syntax-checking iteration of a @code{.c}
+file also reports a number of associated problems in an neighboring
+@code{.h} file, it is better to create so-called ``foreign''
+diagnostics.
+
+This is done by passing a file name to @code{flymake-make-diagnostic}
+(@pxref{Flymake utility functions}).  Then, the resulting object is
+simply reported along with the other ``domestic'' diagnostics for the
+source buffer (@pxref{Backend functions}).  When the neighboring file
+is visited as a buffer and Flymake is active there, a number of
+supplemental annotations will appear and automatically update whenever
+as the ``source'' buffer is syntax-checked.
+
+@item
+@cindex list-only diagnostics
+@vindex flymake-list-only-diagnostics
+If information about neighboring diagnostics is obtained infrequently,
+like when running a time-consuming and sporadic check of a large
+project, it is easier for the backend to modify the global variable
+@code{flymake-list-only-diagnostics}.
+
+Flymake will look up this variable when asked to compile project-wide
+lists of diagnostics.  The backend should add one or more alist
+entries that look like (@var{file-name} . @var{diags}).
+@var{file-name} is the absolute name of the neighboring file presumed
+not to be visited in Emacs already, as that would mean that that
+buffer contains more up-to-date information on its diagnostics.
+@var{diags} is a list of diagnostic objects.  When the neighboring
+file @var{file-name} is visited as a buffer and Flymake is activated
+there, the ``list-only'' diagnostics will @emph{not} produce
+annotations for @var{diags}, as Flymake assumes that the Flymake
+activation in the new buffer will take care of that.
+@end enumerate
 
 @node An annotated example backend
 @subsection An annotated example backend
@@ -609,9 +822,13 @@ The following code needs lexical binding (@pxref{Using Lexical
 Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
 
 @example
+@group
 ;;; ruby-flymake.el --- A ruby Flymake backend  -*- lexical-binding: t; -*-
+(require 'cl-lib)
 (defvar-local ruby--flymake-proc nil)
+@end group
 
+@group
 (defun ruby-flymake (report-fn &rest _args)
   ;; Not having a ruby interpreter is a serious problem which should cause
   ;; the backend to disable itself, so an @code{error} is signaled.
@@ -625,7 +842,9 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
   ;;
   (when (process-live-p ruby--flymake-proc)
     (kill-process ruby--flymake-proc))
+@end group
 
+@group
   ;; Save the current buffer, the narrowing restriction, remove any
   ;; narrowing restriction.
   ;;
@@ -648,7 +867,7 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
           ;; Check that the process has indeed exited, as it might
           ;; be simply suspended.
           ;;
-          (when (eq 'exit (process-status proc))
+          (when (memq (process-status proc) '(exit signal))
             (unwind-protect
                 ;; Only proceed if `proc' is the same as
                 ;; `ruby--flymake-proc', which indicates that
@@ -663,7 +882,7 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
                       ;;
                       (cl-loop
                        while (search-forward-regexp
-                              "^\\(?:.*.rb\\|-\\):\\([0-9]+\\): \\(.*\\)$"
+                              "^\\(?:.*\\.rb\\|-\\):\\([0-9]+\\): \\(.*\\)$"
                               nil t)
                        for msg = (match-string 2)
                        for (beg . end) = (flymake-diag-region
@@ -672,6 +891,7 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
                        for type = (if (string-match "^warning" msg)
                                       :warning
                                     :error)
+                       when (and beg end)
                        collect (flymake-make-diagnostic source
                                                         beg
                                                         end
@@ -690,12 +910,41 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
       ;;
       (process-send-region ruby--flymake-proc (point-min) (point-max))
       (process-send-eof ruby--flymake-proc))))
+@end group
 
+@group
 (defun ruby-setup-flymake-backend ()
   (add-hook 'flymake-diagnostic-functions 'ruby-flymake nil t))
 
 (add-hook 'ruby-mode-hook 'ruby-setup-flymake-backend)
+@end group
 @end example
+
+@node Inspecting diagnostics
+@section Inspecting diagnostics
+
+When Flymake has called on the backend and collected its diagnostics, it
+will annotate the buffer with it.  After this happens, Elisp programs
+may call @code{flymake-diagnostics} to collect such objects in a
+specified region.
+
+@cindex collect diagnostic objects
+@deffn Function flymake-diagnostics beg end
+Get a list of Flymake diagnostics in the region determined by
+@var{beg} and @var{end}.  If neither @var{beg} or @var{end} is
+supplied, use the whole buffer, otherwise if @var{beg} is
+non-@code{nil} and @var{end} is @code{nil}, consider only diagnostics
+at @var{beg}.
+@end deffn
+
+@cindex access diagnostic object
+A diagnostic object's properties can be accessed with the functions
+@code{flymake-diagnostic-backend}, @code{flymake-diagnostic-buffer},
+@code{flymake-diagnostic-origin}, @code{flymake-diagnostic-code}
+@code{flymake-diagnostic-message}, @code{flymake-diagnostic-beg},
+@code{flymake-diagnostic-end}, @code{flymake-diagnostic-type} and
+@code{flymake-diagnostic-data}.  @code{flymake-diagnostic-text} will
+compose the diagnostic's origin, code and message in a single string.
 
 @node The legacy Proc backend
 @chapter The legacy ``Proc'' backend
@@ -714,10 +963,10 @@ Binding,,, elisp, The Emacs Lisp Reference Manual}) to be active.
 * Interaction with other modes::
 @end menu
 
-@findex flymake-proc-legacy-backend
-The backend @code{flymake-proc-legacy-backend} was originally designed
+@findex flymake-proc-legacy-flymake
+The backend @code{flymake-proc-legacy-flymake} was originally designed
 to be extended for supporting new syntax check tools and error message
-patterns.  It is also controlled by its own set of customization variables
+patterns.  It is also controlled by its own set of customization variables.
 
 @node Proc customization variables
 @section Customization variables for the Proc backend
@@ -746,13 +995,18 @@ Patterns for error/warning messages in the form @code{(regexp file-idx
 line-idx col-idx err-text-idx)}.  @xref{Parsing the output}.
 
 @item flymake-proc-diagnostic-type-pred
-A function to classify a diagnostic text as particular type of error.
-Should be a function taking an error text and returning a diagnostic
-symbol (@pxref{Flymake error types}).  If non-nil is returned but
-there is no such symbol in that table, a warning is assumed.  If nil
-is returned, an error is assumed.  Can also be a regular expression
-that should match only warnings.  This variable replaces the old
-@code{flymake-warning-re} and @code{flymake-warning-predicate}.
+A function to classify a diagnostic text as a particular type of
+error.  The value of this variable should be a function taking an
+error text and returning a diagnostic symbol (@pxref{Flymake error
+types}).  If it returns a non-@code{nil} value but there is no such
+symbol in that table, the text is interpreted as a warning.  If the
+function returns @code{nil}, the text is assumed to be an error.
+
+The value of this variable can alternatively be a regular expression
+that should match only warnings.
+
+This variable replaces the old @code{flymake-warning-re} and
+@code{flymake-warning-predicate}.
 
 @item flymake-proc-compilation-prevents-syntax-check
 A flag indicating whether compilation and syntax check of the same
@@ -923,7 +1177,7 @@ check-syntax:
 @cindex syntax check models
 @cindex master file
 
-@code{flymake-proc-legacy-backend} saves a copy of the buffer in a
+@code{flymake-proc-legacy-flymake} saves a copy of the buffer in a
 temporary file in the buffer's directory (or in the system temporary
 directory, for Java files), creates a syntax check command and
 launches a process with this command.  The output is parsed using a
@@ -1019,13 +1273,13 @@ file are parsed.
 For @file{file.h}, the include directives to look for are
 @code{#include "file.h"}, @code{#include "../file.h"}, etc.  Each
 include is checked against a list of include directories
-(see @ref{Getting the include directories}) to be sure it points to the
+(@pxref{Getting the include directories}) to be sure it points to the
 correct @file{file.h}.
 
 First matching master file found stops the search.  The master file is then
 patched and saved to disk.  In case no master file is found, syntax check is
 aborted, and corresponding status (@samp{!}) is reported in the mode line.
-@xref{Syntax check statuses}.
+@xref{Mode line status}.
 
 @node Getting the include directories
 @section Getting the include directories
@@ -1051,7 +1305,7 @@ of every syntax check attempt.
 @section Locating the buildfile
 @cindex locating the buildfile
 @cindex buildfile, locating
-@cindex Makefile, locating
+@cindex makefile, locating
 
 The Proc backend can be configured to use different tools for
 performing syntax checks.  For example, it can use direct compiler

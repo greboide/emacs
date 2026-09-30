@@ -1,6 +1,6 @@
 @c -*- coding: utf-8 -*-
 @c This is part of the Emacs manual.
-@c Copyright (C) 1985-1987, 1993-1995, 1997, 2000-2018 Free Software
+@c Copyright (C) 1985--1987, 1993--1995, 1997, 2000--2026 Free Software
 @c Foundation, Inc.
 @c See file emacs.texi for copying conditions.
 @node Text
@@ -61,7 +61,7 @@ use Picture mode, a special major mode for editing such pictures.
 @cindex autotyping
 @cindex automatic typing
   The automatic typing features may be useful when writing text.
-@inforef{Top,The Autotype Manual,autotype}.
+@xref{Top, Autotyping, The Autotype Manual, autotype}.
 @end ifinfo
 
 @menu
@@ -253,6 +253,10 @@ value of @code{sentence-end-double-space}.
 of a sentence.  Set the variable @code{sentence-end-without-period} to
 @code{t} in such cases.
 
+  Even though the above mentioned sentence movement commands are based
+on human languages, other Emacs modes can set these command to get
+similar functionality (@pxref{Moving by Sentences}).
+
 @node Paragraphs
 @section Paragraphs
 @cindex paragraphs
@@ -421,17 +425,16 @@ beginning of a line.
 @cindex curved quotes
 @cindex guillemets
 @findex electric-quote-mode
-@c The funny quoting below is to make the printed version look
-@c correct.  FIXME.
+
   One common way to quote is the typewriter convention, which quotes
-using straight apostrophes @t{'like this'} or double-quotes @t{"like
+using straight apostrophes @samp{'like this'} or double-quotes @samp{"like
 this"}.  Another common way is the curved quote convention, which uses
-left and right single or double quotation marks `@t{like this}' or
-``@t{like this}''@footnote{
-The curved single quote characters are U+2018 LEFT SINGLE QUOTATION
-MARK and U+2018 RIGHT SINGLE QUOTATION MARK; the curved double quotes
-are U+201C LEFT DOUBLE QUOTATION MARK and U+201D RIGHT DOUBLE
-QUOTATION MARK.  On text terminals which cannot display these
+left and right single or double quotation marks @t{‘like this’} or
+@t{“like this”}@footnote{
+The curved single quote characters are U+2018 @sc{left single quotation
+mark} and U+2019 @sc{right single quotation mark}; the curved double quotes
+are U+201C @sc{left double quotation mark} and U+201D @sc{right double
+quotation mark}.  On text terminals which cannot display these
 characters, the Info reader might show them as the typewriter ASCII
 quote characters.
 }.  In text files, typewriter quotes are simple and
@@ -439,13 +442,13 @@ portable; curved quotes are less ambiguous and typically look nicer.
 
 @vindex electric-quote-chars
   Electric Quote mode makes it easier to type curved quotes.  As you
-type characters it optionally converts @t{`} to ‘, @t{'} to ',
-@t{``} to ``, and @t{''} to ''.  It's possible to change the
+type characters it optionally converts @kbd{`} to @t{‘}, @kbd{'} to @t{’},
+@kbd{``} to @t{“}, and @kbd{''} to @t{”}.  It's possible to change the
 default quotes listed above, by customizing the variable
 @code{electric-quote-chars}, a list of four characters, where the
 items correspond to the left single quote, the right single quote, the
 left double quote and the right double quote, respectively, whose
-default value is @code{'(?@r{`} ?@r{'} ?@r{``} ?@r{''})}.
+default value is @w{@code{'(@w{?}‘ ?’ ?“ ?”)}}.
 
 @vindex electric-quote-paragraph
 @vindex electric-quote-comment
@@ -461,7 +464,7 @@ variables.
 
 @vindex electric-quote-replace-double
   You can also set the option @code{electric-quote-replace-double} to
-a non-@code{nil} value.  Then, typing @t{"} insert an appropriate
+a non-@code{nil} value.  Then, typing @kbd{"} inserts an appropriate
 curved double quote depending on context: @t{“} at the beginning of
 the buffer or after a line break, whitespace, opening parenthesis, or
 quote character, and @t{”} otherwise.
@@ -473,10 +476,10 @@ To toggle it globally, type
 type @kbd{C-q `} or @kbd{C-q '} instead of @kbd{`} or @kbd{'}.  To
 insert a curved quote even when Electric Quote is disabled or
 inactive, you can type @kbd{C-x 8 [} for @t{‘}, @kbd{C-x 8 ]} for
-@t{’}, @kbd{C-x 8 @{} for ``, and @kbd{C-x 8 @}} for ''.
+@t{’}, @kbd{C-x 8 @{} for @t{“}, and @kbd{C-x 8 @}} for @t{”}.
 @xref{Inserting Text}.  Note that the value of
-@code{electric-quote-chars} does not affect these keybindings, they
-are not keybindings of @code{electric-quote-mode} but bound in
+@code{electric-quote-chars} does not affect these key bindings, they
+are not key bindings of @code{electric-quote-mode} but bound in
 @code{global-map}.
 
 @node Filling
@@ -502,8 +505,8 @@ text.
 @cindex mode, Auto Fill
 
   @dfn{Auto Fill} mode is a buffer-local minor mode (@pxref{Minor
-Modes}) in which lines are broken automatically at spaces when the
-line becomes too wide.
+Modes}) in which lines are broken automatically when the line becomes
+too wide and you type @kbd{@key{SPC}} or @kbd{@key{RET}}.
 
 @table @kbd
 @item M-x auto-fill-mode
@@ -522,12 +525,21 @@ certain major modes, add @code{auto-fill-mode} to the mode hooks
 (@pxref{Major Modes}).  When Auto Fill mode is enabled, the mode
 indicator @samp{Fill} appears in the mode line (@pxref{Mode Line}).
 
-  Auto Fill mode breaks lines automatically at spaces whenever they
-get longer than the desired width.  This line breaking occurs only
-when you type @key{SPC} or @key{RET}.  If you wish to insert a space
-or newline without permitting line-breaking, type @kbd{C-q @key{SPC}}
-or @kbd{C-q C-j} respectively.  Also, @kbd{C-o} inserts a newline
-without line breaking.
+  Auto Fill mode breaks lines automatically at the appropriate places
+whenever lines get longer than the desired width.  This line breaking
+occurs only when you type @kbd{@key{SPC}} or @kbd{@key{RET}}.  If you
+wish to insert a space or newline without permitting line-breaking,
+type @kbd{C-q @key{SPC}} or @kbd{C-q C-j} respectively.  Also,
+@kbd{C-o} inserts a newline without line breaking.
+
+@cindex kinsoku line-breaking rules
+  The place where Auto Fill breaks a line depends on the line's
+characters.  For characters from @acronym{ASCII}, Latin, and most
+other scripts Emacs breaks a line on space characters, to keep the
+words intact.  But for CJK scripts, a line can be broken between any
+two characters.  (If you load the @file{kinsoku} library, Emacs will
+avoid breaking a line between certain pairs of CJK characters, where
+special rules prohibit that.)
 
   When Auto Fill mode breaks a line, it tries to obey the
 @dfn{adaptive fill prefix}: if a fill prefix can be deduced from the
@@ -549,6 +561,9 @@ described in the next section.
 (@pxref{Fill Commands}).
 @end ifnottex
 
+  A similar feature that wraps long lines automatically at display
+time is Visual Line Mode (@pxref{Visual Line Mode}).
+
 @node Fill Commands
 @subsection Explicit Fill Commands
 
@@ -558,10 +573,12 @@ Fill current paragraph (@code{fill-paragraph}).
 @item C-x f
 Set the fill column (@code{set-fill-column}).
 @item M-x fill-region
-Fill each paragraph in the region (@code{fill-region}).
+Fill each paragraph in the region.
 @item M-x fill-region-as-paragraph
 Fill the region, considering it as one paragraph.
-@item M-o M-s
+@item M-x unfill-paragraph
+Unfill current paragraph.
+@item M-x center-line
 Center a line.
 @end table
 
@@ -571,7 +588,11 @@ Center a line.
 current paragraph.  It redistributes the line breaks within the
 paragraph, and deletes any excess space and tab characters occurring
 within the paragraph, in such a way that the lines end up fitting
-within a certain maximum width.
+within a certain maximum width.  Like Auto Fill mode, this and other
+filling commands usually break lines at space characters, but for CJK
+characters these commands can break a line between almost any two
+characters, and they can also obey the kinsoku rules.  @xref{Auto
+Fill}.
 
 @findex fill-region
   Normally, @kbd{M-q} acts on the paragraph where point is, but if
@@ -581,12 +602,15 @@ can also call @kbd{M-x fill-region} to specifically fill the text in
 the region.
 
 @findex fill-region-as-paragraph
+@vindex fill-region-as-paragraph-function
   @kbd{M-q} and @code{fill-region} use the usual Emacs criteria for
 finding paragraph boundaries (@pxref{Paragraphs}).  For more control,
-you can use @kbd{M-x fill-region-as-paragraph}, which refills
-everything between point and mark as a single paragraph.  This command
-deletes any blank lines within the region, so separate blocks of text
-end up combined into one block.
+you can use @kbd{M-x fill-region-as-paragraph}, which refills everything
+between point and mark as a single paragraph.  The behavior of this
+command is controlled by the variable
+@code{fill-region-as-paragraph-function}.  By default, it deletes any
+blank lines within the region, so separate blocks of text end up
+combined into one block.
 
 @cindex justification
   A numeric argument to @kbd{M-q} tells it to @dfn{justify} the text
@@ -604,12 +628,28 @@ variable @code{fill-column}.  The default value (@pxref{Locals}) is
 is to use the command @kbd{C-x f} (@code{set-fill-column}).  With a
 numeric argument, it uses that as the new fill column.  With just
 @kbd{C-u} as argument, it sets @code{fill-column} to the current
-horizontal position of point.
+horizontal position of point.  Note that, by its very nature,
+@code{fill-column} is measured in column units; the actual position of
+that column on a graphical display depends on the font being used.  In
+particular, using variable-pitch fonts will cause the
+@code{fill-column} occupy different horizontal positions on display in
+different lines.
 
-@kindex M-o M-s @r{(Text mode)}
+@cindex unfilling
+@findex unfill-paragraph
+  The command @kbd{M-x unfill-paragraph} is the inverse of @kbd{M-q}.
+It joins up the lines of the current paragraph.  Using this command is
+like starting on the last line of the paragraph and repeatedly typing
+@kbd{M-^} (@pxref{Indentation Commands}) until all the lines are joined.
+With a numeric prefix argument, apply the operation to that many
+paragraphs.  For example, with a numeric prefix argument of 2, join all
+the lines in this paragraph and all the lines in the next paragraph, but
+preserve the separation of the two paragraphs.  When there is no prefix
+argument, it acts on an active region just like @kbd{M-q}.
+
 @cindex centering
 @findex center-line
-  The command @kbd{M-o M-s} (@code{center-line}) centers the current line
+  The command @kbd{M-x center-line} centers the current line
 within the current fill column.  With an argument @var{n}, it centers
 @var{n} lines individually and moves past them.  This binding is
 made by Text mode and is available only in that and related modes
@@ -644,6 +684,10 @@ or before @samp{)}, @samp{:} or @samp{?}); and
 @code{fill-polish-nobreak-p} (don't break after a one letter word,
 even if preceded by a non-whitespace character).
 
+  Emacs can display an indicator in the @code{fill-column} position
+using the Display fill column indicator mode (@pxref{Displaying
+Boundaries, display-fill-column-indicator}).
+
 @node Fill Prefix
 @subsection The Fill Prefix
 
@@ -672,8 +716,9 @@ a new paragraph.
   To specify a fill prefix for the current buffer, move to a line that
 starts with the desired prefix, put point at the end of the prefix,
 and type @w{@kbd{C-x .}}@: (@code{set-fill-prefix}).  (That's a period
-after the @kbd{C-x}.)  To turn off the fill prefix, specify an empty
-prefix: type @w{@kbd{C-x .}}@: with point at the beginning of a line.
+after the @kbd{C-x}.)  To turn off the fill prefix, either type
+@w{@kbd{C-u C-x .}}@: or specify an empty prefix: type @w{@kbd{C-x .}}@:
+with point at the beginning of a line.
 
   When a fill prefix is in effect, the fill commands remove the fill
 prefix from each line of the paragraph before filling, and insert it
@@ -816,10 +861,17 @@ range of text to upper case or to lower case.
 @table @kbd
 @item M-l
 Convert following word to lower case (@code{downcase-word}).
+@item M-- M-l
+Convert previous/last word to lower case.  Note: @kbd{Meta--} is
+Meta-minus.
 @item M-u
 Convert following word to upper case (@code{upcase-word}).
+@item M-- M-u
+Convert previous/last last word to all upper case.
 @item M-c
 Capitalize the following word (@code{capitalize-word}).
+@item M-- M-c
+Convert previous/last last word to lower case with capital initial.
 @item C-x C-l
 Convert region to lower case (@code{downcase-region}).
 @item C-x C-u
@@ -846,10 +898,11 @@ from all upper case to mixed case, because you can move through the
 text using @kbd{M-l}, @kbd{M-u} or @kbd{M-c} on each word as
 appropriate, occasionally using @kbd{M-f} instead to skip a word.
 
-  When given a negative argument, the word case conversion commands apply
-to the appropriate number of words before point, but do not move point.
-This is convenient when you have just typed a word in the wrong case: you
-can give the case conversion command and continue typing.
+  When given a negative argument, as in @w{@kbd{C-u - 5 M-c}}, the
+word case-conversion commands apply to the appropriate number of words
+before point, but do not move point.  This is convenient when you have
+just typed a word in the wrong case: you can give the case conversion
+command, like @kbd{M-- M-u}, and continue typing.
 
   If a word case conversion command is given in the middle of a word,
 it applies only to the part of the word which follows point.  (This is
@@ -916,12 +969,15 @@ situations where you shouldn't change the major mode---in mail
 composition, for instance.
 
 @kindex M-TAB @r{(Text mode)}
-  Text mode binds @kbd{M-@key{TAB}} to @code{ispell-complete-word}.
-This command performs completion of the partial word in the buffer
-before point, using the spelling dictionary as the space of possible
-words.  @xref{Spelling}.  If your window manager defines
-@kbd{M-@key{TAB}} to switch windows, you can type @kbd{@key{ESC}
-@key{TAB}} or @kbd{C-M-i} instead.
+@findex completion-at-point@r{, in Text Mode}
+@vindex text-mode-ispell-word-completion
+  The command @kbd{M-@key{TAB}} (@code{completion-at-point}) performs
+completion of the partial word in the buffer before point, using the
+spelling dictionary as the space of possible words by default.
+@xref{Spelling}.  If your window manager defines @kbd{M-@key{TAB}} to
+switch windows, you can type @kbd{@key{ESC} @key{TAB}} or @kbd{C-M-i}
+instead.  To disable this completion, customize the variable
+@code{text-mode-ispell-word-completion} to the @code{nil} value.
 
 @vindex text-mode-hook
   Entering Text mode runs the mode hook @code{text-mode-hook}
@@ -940,8 +996,6 @@ hooks.
 @cindex invisible lines
 
 @findex outline-mode
-@findex outline-minor-mode
-@vindex outline-minor-mode-prefix
 @vindex outline-mode-hook
   Outline mode is a major mode derived from Text mode, which is
 specialized for editing outlines.  It provides commands to navigate
@@ -964,6 +1018,19 @@ previous visible line.  Killing the ellipsis at the end of a visible
 line really kills all the following invisible text associated with the
 ellipsis.
 
+@menu
+* Outline Minor Mode::  Outline mode to use with other major modes.
+* Outline Format::      What the text of an outline looks like.
+* Outline Motion::      Special commands for moving through outlines.
+* Outline Visibility::  Commands to control what is visible.
+* Outline Views::       Outlines and multiple views.
+* Foldout::             Folding means zooming in on outlines.
+@end menu
+
+@node Outline Minor Mode
+@subsection Outline Minor Mode
+
+@findex outline-minor-mode
   Outline minor mode is a buffer-local minor mode which provides the
 same commands as the major mode, Outline mode, but can be used in
 conjunction with other major modes.  You can type @kbd{M-x
@@ -972,19 +1039,33 @@ buffer, or use a file-local variable setting to enable it in a
 specific file (@pxref{File Variables}).
 
 @kindex C-c @@ @r{(Outline minor mode)}
+@vindex outline-minor-mode-prefix
   The major mode, Outline mode, provides special key bindings on the
 @kbd{C-c} prefix.  Outline minor mode provides similar bindings with
 @kbd{C-c @@} as the prefix; this is to reduce the conflicts with the
 major mode's special commands.  (The variable
 @code{outline-minor-mode-prefix} controls the prefix used.)
 
-@menu
-* Outline Format::      What the text of an outline looks like.
-* Outline Motion::      Special commands for moving through outlines.
-* Outline Visibility::  Commands to control what is visible.
-* Outline Views::       Outlines and multiple views.
-* Foldout::             Folding means zooming in on outlines.
-@end menu
+@vindex outline-minor-mode-use-buttons
+  If @code{outline-minor-mode-use-buttons} is non-@code{nil}, Outline
+minor mode will use buttons at the beginning of the heading lines, in
+addition to ellipsis, to show that a section is hidden.  Clicking the
+mouse on the button toggles display of the section.  If the value of
+this variable is @code{insert}, the buttons are inserted directly into
+the buffer text, so @key{RET} on the button will also toggle display
+of the section, like a mouse click does.  Using the value @code{insert}
+is not recommended in editable buffers because it modifies them.
+If the value is @code{in-margins}, Outline minor mode will use the
+window margins to indicate that a section is hidden.  The buttons are
+customizable as icons (@pxref{Icons}).
+
+@vindex outline-minor-mode-cycle
+  If the @code{outline-minor-mode-cycle} user option is
+non-@code{nil}, the @kbd{TAB} and @kbd{S-@key{TAB}} keys that cycle
+the visibility are enabled on the outline heading lines
+(@pxref{Outline Visibility, outline-cycle}).  @kbd{TAB} cycles hiding,
+showing the sub-heading, and showing all for the current section.
+@kbd{S-@key{TAB}} does the same for the entire buffer.
 
 @node Outline Format
 @subsection Format of Outlines
@@ -1044,6 +1125,12 @@ that the length of the text matched on a chapter heading is shorter,
 so that Outline mode will know that sections are contained in
 chapters.  This works as long as no other command starts with
 @samp{@@chap}.
+
+@vindex outline-search-function
+  Instead of setting the variable @code{outline-regexp}, you can set
+the variable @code{outline-search-function} to a function that
+matches the current heading and searches for the next one
+(@pxref{Outline Minor Mode,,,elisp, the Emacs Lisp Reference Manual}).
 
 @vindex outline-level
   You can explicitly specify a rule for calculating the level of a
@@ -1110,8 +1197,8 @@ header line.
 Make the current heading line's body invisible
 (@code{outline-hide-entry}).
 @item C-c C-e
-Make the current heading line's body visible
-(@code{outline-show-entry}).
+Reveal the current entry and its parent hierarchy
+(@code{outline-show-entry-and-parents}).
 @item C-c C-d
 Make everything under the current heading invisible, not including the
 heading itself (@code{outline-hide-subtree}).
@@ -1139,17 +1226,23 @@ Hide everything except the top @var{n} levels of heading lines
 Hide everything except for the heading or body that point is in, plus
 the headings leading up from there to the top level of the outline
 (@code{outline-hide-other}).
+@item C-c / h @var{regexp} @key{RET}
+Hide bodies of headings that match @var{regexp}
+(@code{outline-hide-by-heading-regexp}).
+@item C-c / s @var{regexp} @key{RET}
+Show bodies of headings that match @var{regexp}
+(@code{outline-show-by-heading-regexp}).
 @end table
 
 @findex outline-hide-entry
-@findex outline-show-entry
+@findex outline-show-entry-and-parents
 @kindex C-c C-c @r{(Outline mode)}
 @kindex C-c C-e @r{(Outline mode)}
   The simplest of these commands are @kbd{C-c C-c}
 (@code{outline-hide-entry}), which hides the body lines directly
 following the current heading line, and @kbd{C-c C-e}
-(@code{outline-show-entry}), which reveals them.  Subheadings and
-their bodies are not affected.
+(@code{outline-show-entry-and-parents}), which reveals the current entry,
+all of its ancestor headings, and their immediate sibling headings.
 
 @findex outline-hide-subtree
 @findex outline-show-subtree
@@ -1184,6 +1277,16 @@ headers leading up from there to top level in the outline) and the top
 level headings.  It also reveals body lines preceding the first
 heading in the buffer.
 
+@findex outline-hide-by-heading-regexp
+@findex outline-show-by-heading-regexp
+@kindex C-c / h @r{(Outline mode)}
+@kindex C-c / s @r{(Outline mode)}
+  The command @kbd{C-c / h} (@code{outline-hide-by-heading-regexp})
+prompts for a regular expression, and hides all the body lines of
+headings which match the regular expression.  The command @kbd{C-c / s}
+likewise prompts for a regular expression, and reveals the bodies of
+matching headings.
+
 @findex outline-hide-body
 @findex outline-show-all
 @kindex C-c C-t @r{(Outline mode)}
@@ -1203,6 +1306,17 @@ everything except the top @var{n} levels of heading lines.  Note that
 it completely reveals all the @var{n} top levels and the body lines
 before the first heading.
 
+@cindex cycle visibility, in Outline mode
+@findex outline-cycle
+@findex outline-cycle-buffer
+  Outline also provides two convenience commands to cycle the
+visibility of each section and the whole buffer.  Typing
+@kbd{@key{TAB}} (@code{outline-cycle}) on a heading cycles the current
+section between ``hide all'', ``subheadings'', and ``show all''
+states.  Typing @kbd{S-@key{TAB}} (@code{outline-cycle-buffer}) cycles
+the whole buffer between ``only top-level headings'', ``all headings
+and subheadings'', and ``show all'' states.
+
 @anchor{Outline Search}
 @findex reveal-mode
 @vindex search-invisible
@@ -1215,6 +1329,17 @@ To change the default for future searches, customize the option
 and related functions treat hidden text, @pxref{Query Replace}.)
 You can also automatically make text visible as you navigate in it by
 using Reveal mode (@kbd{M-x reveal-mode}), a buffer-local minor mode.
+
+@vindex outline-default-state
+  The @code{outline-default-state} variable controls what headings
+will be visible after Outline mode is turned on.  If non-@code{nil},
+some headings are initially outlined.  If equal to a number, show only
+headings up to and including the corresponding level.  If equal to
+@code{outline-show-all}, all text of buffer is shown.  If equal to
+@code{outline-show-only-headings}, show only headings, whatever their
+level is.  If equal to a lambda function or function name, this
+function is expected to toggle headings visibility, and will be called
+without arguments after the mode is enabled.
 
 @node Outline Views
 @subsection Viewing One Outline in Multiple Views
@@ -1247,9 +1372,9 @@ levels.
 
   Consider an Outline mode buffer with all the text and subheadings under
 level-1 headings hidden.  To look at what is hidden under one of these
-headings, you could use @kbd{C-c C-e} (@kbd{M-x outline-show-entry})
-to expose the body, or @kbd{C-c C-i} to expose the child (level-2)
-headings.
+headings, you could use @kbd{C-c C-e} (@kbd{M-x outline-show-entry-and-parents})
+to expose the body and its parent hierarchy, or @kbd{C-c C-i} to expose
+the child (level-2) headings.
 
 @kindex C-c C-z
 @findex foldout-zoom-subtree
@@ -1283,11 +1408,20 @@ particular chapter or section of your document.
 This hides all the text and subheadings under the top-level heading and
 returns you to the previous view of the buffer.  Specifying a numeric
 argument exits that many levels of folds.  Specifying a zero argument
-exits all folds.
+exits all folds.  Specifying a negative argument (so that the exited
+fold remains visible) preserves the position of point and window view.
 
   To cancel the narrowing of a fold without hiding the text and
 subheadings, specify a negative argument.  For example, @w{@kbd{M--2 C-c
 C-x}} exits two folds and leaves the text and subheadings exposed.
+
+@findex foldout-widen-to-current-fold
+  While working within a fold, you may wish to use Emacs's standard
+narrowing commands such as @kbd{C-x n n} (@code{narrow-to-region}) or
+@kbd{C-x n d} (@code{narrow-to-defun}).  After using these commands,
+@code{foldout-widen-to-current-fold}) allows you to widen back to the
+current fold level, rather than the entire buffer.  If you're not
+currently in a fold, it behaves like @code{widen}.
 
   Foldout mode also provides mouse commands for entering and exiting
 folds, and for showing and hiding text:
@@ -1448,22 +1582,22 @@ org-agenda}.  This command prompts for what you want to see: a list of
 things to do this week, a list of TODO items with specific keywords,
 etc.
 @ifnottex
-@xref{Agenda views,,,org, The Org Manual}, for details.
+@xref{Agenda Views,,,org, The Org Manual}, for details.
 @end ifnottex
 
 @node Org Authoring
 @subsection Org as an authoring system
 @cindex Org exporting
 
-@findex org-export
+@findex org-export-dispatch
 @kindex C-c C-e @r{(Org mode)}
   You may want to format your Org notes nicely and to prepare them for
 export and publication.  To export the current buffer, type @kbd{C-c
-C-e} (@code{org-export}) anywhere in an Org buffer.  This command
-prompts for an export format; currently supported formats include
-HTML, @LaTeX{}, Texinfo, OpenDocument (@file{.odt}), iCalendar,
-Markdown, man-page, and PDF@.  Some formats, such as PDF, require
-certain system tools to be installed.
+C-e} (@code{org-export-dispatch}) anywhere in an Org buffer.  This
+command prompts for an export format; currently supported formats
+include HTML, @LaTeX{}, Texinfo, OpenDocument (@file{.odt}),
+iCalendar, Markdown, man-page, and PDF@.  Some formats, such as PDF,
+require certain system tools to be installed.
 
 @vindex org-publish-project-alist
   To export several files at once to a specific directory, either
@@ -1659,17 +1793,17 @@ to work with them.
 @table @kbd
 @item C-c C-o
 Insert @samp{\begin} and @samp{\end} for @LaTeX{} block and position
-point on a line between them (@code{tex-latex-block}).
+point on a line between them (@code{latex-insert-block}).
 @item C-c C-e
 Close the innermost @LaTeX{} block not yet closed
-(@code{tex-close-latex-block}).
+(@code{latex-close-block}).
 @end table
 
-@findex tex-latex-block
+@findex latex-insert-block
 @kindex C-c C-o @r{(@LaTeX{} mode)}
   In @LaTeX{} input, @samp{\begin} and @samp{\end} tags are used to
 group blocks of text.  To insert a block, type @kbd{C-c C-o}
-(@code{tex-latex-block}).  This prompts for a block type, and inserts
+(@code{latex-insert-block}).  This prompts for a block type, and inserts
 the appropriate matching @samp{\begin} and @samp{\end} tags, leaving a
 blank line between the two and moving point there.
 
@@ -1680,11 +1814,11 @@ completion list contains the standard @LaTeX{} block types.  If you
 want additional block types for completion, customize the list
 variable @code{latex-block-names}.
 
-@findex tex-close-latex-block
+@findex latex-close-block
 @kindex C-c C-e @r{(@LaTeX{} mode)}
 @findex latex-electric-env-pair-mode
   In @LaTeX{} input, @samp{\begin} and @samp{\end} tags must balance.
-You can use @kbd{C-c C-e} (@code{tex-close-latex-block}) to insert an
+You can use @kbd{C-c C-e} (@code{latex-close-block}) to insert an
 @samp{\end} tag which matches the last unmatched @samp{\begin}.  It
 also indents the @samp{\end} to match the corresponding @samp{\begin},
 and inserts a newline after the @samp{\end} tag if point is at the
@@ -1773,7 +1907,8 @@ determined by the variable @code{tex-dvi-print-command}.  The variable
 extension for viewing and printing @TeX{}-compiled files.  For
 example, you can set it to @file{.pdf}, and update
 @code{tex-dvi-view-command} and @code{tex-dvi-print-command}
-accordingly.
+accordingly, as well as @code{latex-run-command} or
+@code{tex-run-command}.
 
   Normally, Emacs automatically appends the output file name to the
 shell command strings described in the preceding paragraph.  For
@@ -1836,7 +1971,7 @@ files needed by @TeX{} for cross-references; these commands are generally
 not suitable for running the final copy in which all of the cross-references
 need to be correct.
 
-  When you want the auxiliary files for cross references, use @kbd{C-c
+  When you want the auxiliary files for cross-references, use @kbd{C-c
 C-f} (@code{tex-file}) which runs @TeX{} on the current buffer's file,
 in that file's directory.  Before running @TeX{}, it offers to save any
 modified buffers.  Generally, you need to use (@code{tex-file}) twice to
@@ -2847,11 +2982,12 @@ cell interval, and the justification of the text in each cell.
 @findex table-generate-source
   @kbd{M-x table-generate-source} generates a table formatted for a
 specific markup language.  It asks for a language (which must be one
-of @code{html}, @code{latex}, or @code{cals}), a destination buffer in
-which to put the result, and a table caption, and then inserts the
-generated table into the specified buffer.  The default destination
-buffer is @code{table.@var{lang}}, where @var{lang} is the language
-you specified.
+of @code{html}, @code{latex}, @code{cals}, @code{wiki} or
+@code{mediawiki}), a destination buffer in which to put the result,
+and a table caption, and then inserts the generated table into the
+specified buffer.  The default destination buffer is
+@code{table.@var{lang}}, where @var{lang} is the language you
+specified.
 
 @node Two-Column
 @section Two-Column Editing

@@ -41,6 +41,24 @@ symbol: aix
 ****** Error number 140 in line 8 of file errors.c ******
 
 
+* Ansible
+
+symbols: ansible-error ansible-fatal ansible-warning
+         ansible-included ansible-origin
+
+[ERROR]: couldn't resolve module/action 'shelll'. This often indicates a misspelling, missing collection, or incorrect module path.
+Origin: /home/albinus/src/tramp-tests/roles/test/tasks/adb.yml:19:3
+[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.
+[DEPRECATION WARNING]: Importing 'to_bytes' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.
+included: /home/albinus/src/tramp-tests/roles/test/tasks/adb.yml for localhost => (item={'name': 'adb', 'start': '04157df41d46b840'})
+fatal: [localhost]: FAILED! => {
+    "assertion": "message == []",
+    "changed": false,
+    "evaluated_to": false,
+    "msg": "Assertion failed"
+}
+
+
 * Ant Java: works at least for jikes and javac
 
 symbol: ant
@@ -49,10 +67,11 @@ The regexps found on http://ant.apache.org/faq.html, and since
 integrated in both Emacsen, were hairy.  The extra two numbers for
 jikes are the ending line and ending column.
 
-    [javac] /src/DataBaseTestCase.java:27: unreported exception ...
-    [javac] /src/DataBaseTestCase.java:49: warning: finally clause cannot complete normally
-    [jikes]  foo.java:3:5:7:9: blah blah
-  [javadoc] c:\MyProject\Polynomial.java:560: error: unknown tag: math
+       [javac] /src/DataBaseTestCase.java:27: unreported exception ...
+       [javac] /src/DataBaseTestCase.java:49: warning: finally clause cannot complete normally
+      [jikes]  foo.java:3:5:7:9: blah blah
+     [javadoc] c:\MyProject\Polynomial.java:560: error: unknown tag: math
+  [checkstyle] [ERROR] /src/Test.java:38: warning: foo: bar
 
 
 * Bash v2
@@ -152,7 +171,7 @@ Failing Scenarios:
 cucumber foo/cucumber.feature:6 # Scenario: assertion false (Test::Unit)
 cucumber foo/cucumber.feature:9 # Scenario: assertion false (RSpec)
 cucumber foo/cucumber.feature:12 # Scenario: backtrace in step definition
-cucumber foo/cucumber.feature:15 # Scenario: deeep backtrace in step definition
+cucumber foo/cucumber.feature:15 # Scenario: deep backtrace in step definition
 
 5 scenarios (4 failed, 1 undefined)
 5 steps (4 failed, 1 undefined)
@@ -160,7 +179,7 @@ cucumber foo/cucumber.feature:15 # Scenario: deeep backtrace in step definition
 
 * EDG C/C++
 
-symbol: edg-1 edg-2
+symbols: edg-1 edg-2
 
 build/intel/debug/../../../struct.cpp(42): error: identifier "foo" is undefined
 build/intel/debug/../../../struct.cpp(44): warning #1011: missing return statement at end of ...
@@ -177,12 +196,38 @@ Error 24 at (2:progran.f90) : syntax error
 
 * Fortran checker
 
-symbols: ftnchek
+symbol: ftnchek
 
     Dummy arg W in module SUBA line 8 file arrayclash.f is array
     L4 used at line 55 file test/assign.f; never set
 Warning near line 10 file arrayclash.f: Module contains no executable
 Nonportable usage near line 31 col 9 file assign.f: mixed default and explicit
+
+
+* Gradle with Kotlin plugin
+
+symbol: grade-kotlin
+
+e: file:///src/Test.kt:267:5 foo: bar
+w: file:///src/Test.kt:267:5 foo: bar
+
+
+* Gradle with Kotlin plugin (legacy)
+
+symbol: gradle-kotlin-legacy
+
+e: /src/Test.kt: (34, 15): foo: bar
+w: /src/Test.kt: (34, 15): foo: bar
+
+
+* Gradle Android resource linking
+
+symbol: gradle-android
+
+Execution failed for task ':app:processDebugResources'.
+> A failure occurred while executing com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask$TaskAction
+   > Android resource linking failed
+     ERROR:/Users/salutis/src/AndroidSchemeExperiment/app/build/intermediates/incremental/debug/mergeDebugResources/stripped.dir/layout/item.xml:3: AAPT: error: '16dpw' is incompatible with attribute padding (attr) dimension.
 
 
 * IAR Systems C Compiler
@@ -228,6 +273,20 @@ Register 6 contains wrong type
 ==1332==    by 0x8008621: main (vtest.c:180)
 
 
+* javac Java compiler
+
+symbol: javac
+
+Should also work when compiling Java with Gradle.  We use the position
+of "^" in the third line as column number because no explicit value is
+present.
+
+Test.java:5: error: ';' expected
+        foo foo
+               ^
+1 error
+
+
 * IBM jikes
 
 symbols: jikes-file jikes-line
@@ -263,6 +322,251 @@ In file included from /usr/include/c++/3.3/backward/warn.h:4,
                  from /usr/include/c++/3.3/backward/iostream.h:31:0,
                  from test_clt.cc:1:
 
+* GCC nested notes
+
+symbol: gcc-nested-notes
+
+Example from https://developers.redhat.com/articles/2026/04/28/gcc-16-improved-error-messages-sarif-output#new_c___error_improvements with and without Unicode
+
+test.cc:8:6: error: no declaration matches 'void foo::test(int, int, const void*, int)'
+    8 | void foo::test(int i, int j, const void *ptr, int k)
+      |      ^~~
+  * there is 1 candidate
+    * candidate is: 'void foo::test(int, int, void*, int)'
+      test.cc:4:10:
+          4 |     void test(int i, int j, void *ptr, int k);
+            |          ^~~~
+      * parameter 3 of candidate has type 'void*'...
+        test.cc:4:35:
+            4 |     void test(int i, int j, void *ptr, int k);
+              |                             ~~~~~~^~~
+      * ...which does not match type 'const void*'
+        test.cc:8:42:
+            8 | void foo::test(int i, int j, const void *ptr, int k)
+              |                              ~~~~~~~~~~~~^~~
+test.cc:1:7: note: 'class foo' defined here
+    1 | class foo
+      |       ^~~
+
+test.cc:8:6: error: no declaration matches ‘void foo::test(int, int, const void*, int)’
+    8 | void foo::test(int i, int j, const void *ptr, int k)
+      |      ^~~
+  • there is 1 candidate
+    • candidate is: ‘void foo::test(int, int, void*, int)’
+      test.cc:4:10:
+          4 |     void test(int i, int j, void *ptr, int k);
+            |          ^~~~
+      • parameter 3 of candidate has type ‘void*’...
+        test.cc:4:35:
+            4 |     void test(int i, int j, void *ptr, int k);
+              |                             ~~~~~~^~~
+      • ...which does not match type ‘const void*’
+        test.cc:8:42:
+            8 | void foo::test(int i, int j, const void *ptr, int k)
+              |                              ~~~~~~~~~~~~^~~
+test.cc:1:7: note: ‘class foo’ defined here
+    1 | class foo
+      |       ^~~
+
+../../gcc/gcc/cp/module.cc: In member function ‘void {anonymous}::trees_out::type_node(tree)’:
+../../gcc/gcc/cp/module.cc:9628:40: error: cannot convert ‘qualifier_set’ to ‘int’ in initialization
+ 9628 |           int quals = type_memfn_quals (type);
+      |                       ~~~~~~~~~~~~~~~~~^~~~~~
+      |                                        |
+      |                                        qualifier_set
+../../gcc/gcc/cp/module.cc:9635:24: error: no match for ‘operator!=’ (operand types are ‘int’ and ‘qualifier_set’)
+ 9635 |               || quals != type_memfn_quals (root)
+      |                  ~~~~~ ^~ ~~~~~~~~~~~~~~~~~~~~~~~
+      |                  |                         |
+      |                  int                       qualifier_set
+  • there are 3 candidates
+    ../../gcc/gcc/cp/module.cc:9635:24:
+     9635 |               || quals != type_memfn_quals (root)
+          |                  ~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from ../../gcc/gcc/cp/module.cc:215:
+    • candidate 1: ‘bool operator==(const cp_expr&, tree)’ (reversed)
+      ../../gcc/gcc/cp/cp-tree.h:126:1:
+        126 | operator == (const cp_expr &lhs, tree rhs)
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘qualifier_set’ to ‘const cp_expr&’
+        ../../gcc/gcc/cp/cp-tree.h:126:29:
+          126 | operator == (const cp_expr &lhs, tree rhs)
+              |              ~~~~~~~~~~~~~~~^~~
+In file included from ../../gcc/gcc/coretypes.h:479,
+                 from ../../gcc/gcc/cp/module.cc:214:
+    • candidate 2: ‘template<class T1, class T2> typename wi::binary_traits<T1, T2>::predicate_result operator!=(const T1&, const T2&)’
+      ../../gcc/gcc/wide-int.h:3853:19:
+       3853 | BINARY_PREDICATE (operator !=, ne_p)
+            |                   ^~~~~~~~
+    • in definition of macro ‘BINARY_PREDICATE’
+       3829 |   OP (const T1 &x, const T2 &y) \
+            |   ^~
+      • template argument deduction/substitution failed:
+      • in definition of macro ‘BINARY_PREDICATE’
+         3829 |   OP (const T1 &x, const T2 &y) \
+              |   ^~
+        • ../../gcc/gcc/wide-int.h: In substitution of ‘template<class T1, class T2> typename wi::binary_traits<T1, T2>::predicate_result operator!=(const T1&, const T2&) [with T1 = int; T2 = qualifier_set]’:
+        • required from here
+          ../../gcc/gcc/cp/module.cc:9635:42:
+           9635 |               || quals != type_memfn_quals (root)
+                |                                                 ^
+        • error: incomplete type ‘wi::int_traits<qualifier_set>’ used in nested name specifier
+          ../../gcc/gcc/wide-int.h:3853:19:
+           3853 | BINARY_PREDICATE (operator !=, ne_p)
+                |                   ^~~~~~~~
+        • in definition of macro ‘BINARY_PREDICATE’
+           3829 |   OP (const T1 &x, const T2 &y) \
+                |   ^~
+In file included from ../../gcc/gcc/input.h:24,
+                 from ../../gcc/gcc/coretypes.h:507:
+    • candidate 3: ‘bool operator!=(const expanded_location&, const expanded_location&)’
+      ../../gcc/gcc/../libcpp/include/line-map.h:1313:1:
+       1313 | operator!= (const expanded_location &a,
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘int’ to ‘const expanded_location&’
+        ../../gcc/gcc/../libcpp/include/line-map.h:1313:38:
+         1313 | operator!= (const expanded_location &a,
+              |             ~~~~~~~~~~~~~~~~~~~~~~~~~^
+../../gcc/gcc/c/c-typeck.cc:8719:38: error: no match for ‘operator|’ (operand types are ‘qualifier_set’ and ‘qualifier_set’)
+ 8719 |                           : ((lquals | rquals) == lquals)))
+      |                               ~~~~~~ ^ ~~~~~~
+      |                               |        |
+      |                               |        qualifier_set
+      |                               qualifier_set
+  • there are 6 candidates
+    ../../gcc/gcc/c/c-typeck.cc:8719:38:
+     8719 |                           : ((lquals | rquals) == lquals)))
+          |                               ~~~~~~~^~~~~~~~
+    • candidate 1: ‘template<class T1, class T2> typename wi::binary_traits<T1, T2>::operator_result operator|(const T1&, const T2&)’
+      ../../gcc/gcc/wide-int.h:3855:18:
+       3855 | BINARY_OPERATOR (operator |, bit_or)
+            |                  ^~~~~~~~
+    • in definition of macro ‘BINARY_OPERATOR’
+       3837 |   OP (const T1 &x, const T2 &y) \
+            |   ^~
+      • template argument deduction/substitution failed:
+      • in definition of macro ‘BINARY_OPERATOR’
+         3837 |   OP (const T1 &x, const T2 &y) \
+              |   ^~
+        • ../../gcc/gcc/wide-int.h: In substitution of ‘template<class T1, class T2> typename wi::binary_traits<T1, T2>::operator_result operator|(const T1&, const T2&) [with T1 = qualifier_set; T2 = qualifier_set]’:
+        • required from here
+          ../../gcc/gcc/c/c-typeck.cc:8719:19:
+           8719 |                           : ((lquals | rquals) == lquals)))
+                |                                        ^~~~~~
+        • error: incomplete type ‘wi::int_traits<qualifier_set>’ used in nested name specifier
+          ../../gcc/gcc/wide-int.h:3855:18:
+           3855 | BINARY_OPERATOR (operator |, bit_or)
+                |                  ^~~~~~~~
+        • in definition of macro ‘BINARY_OPERATOR’
+           3837 |   OP (const T1 &x, const T2 &y) \
+                |   ^~
+    • candidate 2: ‘dump_flags_t operator|(dump_flags_t, dump_flags_t)’
+      ../../gcc/gcc/dumpfile.h:212:1:
+        212 | operator| (dump_flags_t lhs, dump_flags_t rhs)
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘qualifier_set’ to ‘dump_flags_t’ {aka ‘dump_flag’}
+        ../../gcc/gcc/dumpfile.h:212:25:
+          212 | operator| (dump_flags_t lhs, dump_flags_t rhs)
+              |            ~~~~~~~~~~~~~^~~
+    • candidate 3: ‘optgroup_flags_t operator|(optgroup_flags_t, optgroup_flags_t)’
+      ../../gcc/gcc/dumpfile.h:280:1:
+        280 | operator| (optgroup_flags_t lhs, optgroup_flags_t rhs)
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘qualifier_set’ to ‘optgroup_flags_t’ {aka ‘optgroup_flag’}
+        ../../gcc/gcc/dumpfile.h:280:29:
+          280 | operator| (optgroup_flags_t lhs, optgroup_flags_t rhs)
+              |            ~~~~~~~~~~~~~~~~~^~~
+    • candidate 4: ‘constexpr cv_qualifier operator|(cv_qualifier, cv_qualifier)’
+      ../../gcc/gcc/tree-core.h:716:1:
+        716 | operator| (cv_qualifier l, cv_qualifier r)
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘qualifier_set’ to ‘cv_qualifier’
+        ../../gcc/gcc/tree-core.h:716:25:
+          716 | operator| (cv_qualifier l, cv_qualifier r)
+              |            ~~~~~~~~~~~~~^
+    • candidate 5: ‘constexpr qualifier_set operator|(qualifier_set, cv_qualifier)’
+      ../../gcc/gcc/tree.h:2816:1:
+       2816 | operator| (qualifier_set qs, cv_qualifier cvs)
+            | ^~~~~~~~
+      • no known conversion for argument 2 from ‘qualifier_set’ to ‘cv_qualifier’
+        ../../gcc/gcc/tree.h:2816:43:
+         2816 | operator| (qualifier_set qs, cv_qualifier cvs)
+              |                              ~~~~~~~~~~~~~^~~
+    • candidate 6: ‘constexpr qualifier_set operator|(cv_qualifier, qualifier_set)’
+      ../../gcc/gcc/tree.h:2822:1:
+       2822 | operator| (cv_qualifier cvs, qualifier_set qs)
+            | ^~~~~~~~
+      • no known conversion for argument 1 from ‘qualifier_set’ to ‘cv_qualifier’
+        ../../gcc/gcc/tree.h:2822:25:
+         2822 | operator| (cv_qualifier cvs, qualifier_set qs)
+              |            ~~~~~~~~~~~~~^~~
+
+The g++.dg/diagnostic/pr100716.C example has some more complex cases:
+
+pr100716.C: In function ‘int main()’:
+pr100716.C:34:13: error: no matching function for call to ‘A<int>::f(int)’
+   34 |   A<int>().f(0); // { dg-error "no matching function for call to 'A<int>::f\\(int\\)'" }
+      |   ~~~~~~~~~~^~~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void A<T>::f() [with T = int]’
+      pr100716.C:7:12:
+          7 |       void f() {} // { dg-line Af }
+            |            ^
+      • candidate expects 0 arguments, 1 provided
+pr100716.C:37:13: error: no matching function for call to ‘A<int>::g()’
+   37 |   A<int>().g(); // { dg-error "no matching function for call to 'A<int>::g\\(\\)'" }
+      |   ~~~~~~~~~~^~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void A<T>::g(U) [with T = int]’
+      pr100716.C:10:12:
+         10 |       void g(U) {} // { dg-line Ag }
+            |            ^
+      • candidate expects 1 argument, 0 provided
+pr100716.C:40:13: error: no matching function for call to ‘B<int>::f()’
+   40 |   B<int>().f(); // { dg-error "no matching function for call to 'B<int>::f\\(\\)'" }
+      |   ~~~~~~~~~~^~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void B<T>::f(U) [with T = int]’
+      pr100716.C:17:12:
+         17 |       void f(U) {} // { dg-line Bf }
+            |            ^
+      • candidate expects 1 argument, 0 provided
+pr100716.C:43:13: error: no matching function for call to ‘B<int>::g()’
+   43 |   B<int>().g(); // { dg-error "no matching function for call to 'B<int>::g\\(\\)'" }
+      |   ~~~~~~~~~~^~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void B<T>::g(U, T) [with T = int]’
+      pr100716.C:20:12:
+         20 |       void g(U, T) {} // { dg-line Bg }
+            |            ^
+      • candidate expects 2 arguments, 0 provided
+pr100716.C:46:15: error: no matching function for call to ‘B<float>::g(int)’
+   46 |   B<float>().g(0); // { dg-error "no matching function for call to 'B<float>::g\\(int\\)'" }
+      |   ~~~~~~~~~~~~^~~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void B<T>::g(U, T) [with T = float]’
+      pr100716.C:20:12:
+         20 |       void g(U, T) {} // { dg-line Bg }
+            |            ^
+      • candidate expects 2 arguments, 1 provided
+pr100716.C:49:8: error: no matching function for call to ‘C::f()’
+   49 |   C().f(); // { dg-error "no matching function for call to 'C::f\\(\\)'" }
+      |   ~~~~~^~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void C::f(U)’
+      pr100716.C:26:10:
+         26 |     void f(U) {} // { dg-line Cf }
+            |          ^
+      • candidate expects 1 argument, 0 provided
+pr100716.C:52:8: error: no matching function for call to ‘C::g(int)’
+   52 |   C().g(0); // { dg-error "no matching function for call to 'C::g\\(int\\)'" }
+      |   ~~~~~^~~
+  • there is 1 candidate
+    • candidate 1: ‘template<class U> void C::g()’
+      pr100716.C:29:10:
+         29 |     void g() {} // { dg-line Cg }
+            |          ^
+      • candidate expects 0 arguments, 1 provided
 
 * GNU style
 
@@ -286,11 +590,16 @@ jade:dbcommon.dsl:133:17:E: missing argument for function call
 G:/cygwin/dev/build-myproj.xml:54: Compiler Adapter 'javac' can't be found.
 file:G:/cygwin/dev/build-myproj.xml:54: Compiler Adapter 'javac' can't be found.
 {standard input}:27041: Warning: end of file not at end of a line; newline inserted
+boost/container/detail/flat_tree.hpp:589:25:   [ skipping 5 instantiation contexts, use -ftemplate-backtrace-limit=0 to disable ]
+   |
+   |board.h:60:21:
+   |   60 | #define I(b, C) ((C).y * (b)->width + (C).x)
+  src/add.cpp:8:31: error: invalid operands of types ‘const double’ and ‘const double*’ to binary ‘operator+’
 
 
 * Guile backtrace, 2.0.11
 
-symbols: guile-file, guile-line
+symbols: guile-file guile-line
 
 Backtrace:
 In ice-9/boot-9.scm:
@@ -306,6 +615,21 @@ In unknown file:
 In /home/janneke/vc/guile/examples/gud-break.scm:
 1038: 1 [main ("gud-break.scm")]
 1033: 0 [stderr "~a:hello world\n" (# # #)]
+
+
+* Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT 2.1
+
+symbols: lua lua-stack
+
+/usr/bin/lua: database.lua:31: assertion failed!
+stack traceback:
+	[C]: in function 'assert'
+	database.lua:31: in field 'statement'
+	database.lua:42: in field 'table'
+	database.lua:55: in field 'row'
+	database.lua:63: in field 'value'
+	io.lua: in main chunk
+	[C]: in ?
 
 
 * Lucid Compiler, lcc 3.x
@@ -331,6 +655,8 @@ makepp: bla bla `/foo/bar.c' and `/foo/bar.h'
 symbol: maven
 
 FooBar.java:[111,53] no interface expected here
+[ERROR] /Users/cinsk/hello.java:[651,96] ';' expected
+[WARNING] /foo/bar/Test.java:[27,43] unchecked conversion
 
 
 * MIPS lint; looks good for SunPro lint also
@@ -355,6 +681,7 @@ made it more strict about the error message that follows.
 keyboard handler.c(537) : warning C4005: 'min' : macro redefinition
 d:\tmp\test.c(23) : error C2143: syntax error : missing ';' before 'if'
 d:\tmp\test.c(1145) : see declaration of 'nsRefPtr'
+c:\tmp\test.cpp(101,11): error C4101: 'bias0123': unreferenced local variable [c:\tmp\project.vcxproj]
 1>test_main.cpp(29): error C2144: syntax error : 'int' should be preceded by ';'
 1>test_main.cpp(29): error C4430: missing type specifier - int assumed. Note: C++ does not support default-int
 1>
@@ -372,13 +699,29 @@ symbol: watcom
 ..\src\ctrl\lister.c(120): Warning! W201: Unreachable code
 
 
+* OMake
+
+symbol: omake
+
+When using in -p or -P mode, OMake will detect changes to files and
+report critical build errors indented by 6 spaces.
+
+*** omake: file alpha.c changed
+*** omake: targets were not rebuilt because of errors:
+   alpha.o
+      depends on: alpha.c
+      - build . alpha.o
+      + cc -I. -c -o alpha.o alpha.c
+      alpha.c:5:15: error: expected ';' after expression
+
+
 * Oracle pro*c
 
 symbol: oracle
 
 This stupid precompiler wraps lines at column 80 in the middle of a file name.
 There is no obvious way of detecting this or turning it off.  But if you
-delete the newline (probably needs M-x toggle-read-only), the file name will
+delete the newline (probably needs M-x read-only-mode), the file name will
 automatically be reparsed, so that you can then go there.
 
 Semantic error at line 528, column 5, file erosacqdb.pc:
@@ -409,6 +752,20 @@ symbol: php
 
 Parse error: parse error, unexpected $ in main.php on line 59
 Fatal error: Call to undefined function: mysql_pconnect() in db.inc on line 66
+
+* Rust
+
+symbols: rust rust-panic
+
+error[E0277]: `Foo` is not an iterator
+  --> src/main.rs:4:16
+warning: borrow of packed field is unsafe and requires unsafe function or block (error E0133)
+  --> lint_example.rs:11:13
+note: required by a bound in `Trait`
+  --> src/auxiliary/trait-debuginfo.rs:23:18
+
+thread 'main' (1234) panicked at library/std/src/io/stdio.rs:30:40:
+    thread 'main' (1234) panicked at library/std/src/io/stdio.rs:50:60:
 
 * Ruby
 
@@ -493,6 +850,14 @@ cc-1070 cc: WARNING File = linkl.c, Line = 38
 cf90-113 f90comp: ERROR NSE, File = Hoved.f90, Line = 16, Column = 3
 
 
+* ShellCheck
+
+In autogen.sh line 38:
+autoconf_min=`sed -n 's/^ *AC_PREREQ(\[\([0-9\.]*\)]).*/\1/p' configure.ac`
+^----------^ SC2034: autoconf_min appears unused. Verify use (or export if used externally).
+             ^-- SC2006: Use $(...) notation instead of legacy backticked `...`.
+
+
 * Sun Ada (VADS, Solaris)
 
 symbol: sun-ada
@@ -512,7 +877,7 @@ bloofle defined( /users/wolfgang/foo.c(4) ), but never used
 
 * GCOV (test coverage program)
 
-symbol: gcov-file gcov-bb-file gcov-never-called-line gcov-called-line
+symbols: gcov-file gcov-bb-file gcov-never-called-line gcov-called-line
 
         -:    0:Source:foo.c
         -:    0:Object:foo.bb
@@ -576,6 +941,20 @@ symbol: weblint
 index.html (13:1) Unknown element <fdjsk>
 
 
+* Typescript prior to tsc version 2.7, "plain" format
+
+symbol: typescript-tsc-plain
+
+greeter.ts(30,12): error TS2339: Property 'foo' does not exist.
+
+
+* Typescript after tsc version 2.7, "pretty" format
+
+symbol: typescript-tsc-pretty
+
+src/resources/document.ts:140:22 - error TS2362: something.
+
+
 * Directory tracking
 
 Directories are matched via 'compilation-directory-matcher'.  Files which are
@@ -625,7 +1004,7 @@ Compilation segmentation fault at Thu Jul 13 10:55:49
 Compilation finished at Thu Jul 21 15:02:15
 
 
-Copyright (C) 2004-2018 Free Software Foundation, Inc.
+Copyright (C) 2004-2026 Free Software Foundation, Inc.
 
 COPYING PERMISSIONS:
 
@@ -641,3 +1020,11 @@ COPYING PERMISSIONS:
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+;;; Local Variables:
+;;; outline-regexp: "\\*\\_>"
+;;; outline-minor-mode-cycle: t
+;;; outline-minor-mode-highlight: t
+;;; eval: (outline-minor-mode 1)
+;;; End:

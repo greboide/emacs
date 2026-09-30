@@ -1,8 +1,8 @@
-% ViperCard -- The Reference Card for Viper under GNU Emacs and XEmacs
+% ViperCard -- The Reference Card for Viper under GNU Emacs
 
-% Copyright (C) 1995-1997, 2001-2018 Free Software Foundation, Inc.
+% Copyright (C) 1995--1997, 2001--2026 Free Software Foundation, Inc.
 
-% Author: Michael Kifer <kifer@cs.sunysb.edu> (Viper)
+% Author: Michael Kifer <kifer@cs.stonybrook.edu> (Viper)
 %	Aamod Sane <sane@cs.uiuc.edu> (VIP 4.3)
 %	Masahiko Sato <ms@sail.stanford.edu> (VIP 3.5)
 
@@ -58,7 +58,6 @@
 
 \input emacsver.tex
 \def\versionemacs{21}           % version of Emacs this is for
-\def\versionxemacs{20}          % version of XEmacs this is for
 \def\versionviper{3.0}          % version of Viper this is for
 
 % Nothing else needs to be changed.
@@ -258,7 +257,7 @@ see the Emacs distribution, or {\tt https://www.gnu.org/software/emacs}
 
 \title{ViperCard: Viper Reference Pal}
 
-\centerline{(Version \versionviper\ for Emacs \versionemacs\ and XEmacs \versionxemacs)}
+\centerline{(Version \versionviper\ for Emacs \versionemacs)}
 
 %\copyrightnotice
 
@@ -302,7 +301,6 @@ You can do editing in insert state.
 \key{delete line word}{C-u}
 \key{indent shiftwidth forward}{C-t}
 \key{indent shiftwidth backward}{C-d}
-\key{delete line word}{C-u}
 \key{quote following character}{C-v}
 \key{emulate Meta key in emacs state}{C-$\backslash$}
 \key{escape to Vi state for one command}{C-z}
@@ -507,7 +505,7 @@ non-white character.
 \section{Modifying Commands}
 
 Most commands that operate on text regions accept the motion commands,
-to describe regions. They also accept the Emacs region specifications
+to describe regions.  They also accept the Emacs region specifications
 {\bf r} and {\bf R}. {\bf r} describes the region between {\it point}
 and {\it mark}, and {\bf R} describes whole lines in that region.
 Motion commands are classified into {\it point commands} and
@@ -666,12 +664,12 @@ moves 11 lines below current line to the end of buffer.
 
 Avoid Ex text manipulation commands except substitute.
 There are better VI equivalents
-for all of them. Also note that all Ex commands expand \% to
-current file name. To include a \% in the command, escape it with a $\backslash$.
-Similarly, \# is replaced by previous file. For Viper, this is the
-first  file in the {\sl :args} listing for that buffer. This defaults
+for all of them.  Also note that all Ex commands expand \% to
+current file name.  To include a \% in the command, escape it with a $\backslash$.
+Similarly, \# is replaced by previous file.  For Viper, this is the
+first file in the {\sl :args} listing for that buffer.  This defaults
 to the previous file in the VI sense if you have one window.
-Ex commands can be made to have history. See the manual for details.
+Ex commands can be made to have history.  See the manual for details.
 
 \subsection{Ex Text Commands}
 

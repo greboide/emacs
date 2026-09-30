@@ -1,6 +1,6 @@
 ;;; mpc.el --- A client for the Music Player Daemon   -*- lexical-binding: t -*-
 
-;; Copyright (C) 2006-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2006-2026 Free Software Foundation, Inc.
 
 ;; Author: Stefan Monnier <monnier@iro.umontreal.ca>
 ;; Keywords: multimedia
@@ -63,7 +63,7 @@
 ;;   e.g. filename regexp -> compilation flag
 ;; - window/buffer management.
 ;; - menubar, tooltips, ...
-;; - add mpc-describe-song, mpc-describe-album, ...
+;; - add mpc-describe-album, ...
 ;; - add import/export commands (especially export to an MP3 player).
 ;; - add a real notion of album (as opposed to just album-name):
 ;;   if all songs with same album-name have same artist -> it's an album
@@ -91,9 +91,11 @@
 ;; UI-commands       : mpc-
 ;; internal          : mpc--
 
-(eval-when-compile
-  (require 'cl-lib)
-  (require 'subr-x))
+(require 'cl-lib)
+
+(require 'notifications)
+
+(require 'vtable)
 
 (defgroup mpc ()
   "Client for the Music Player Daemon (mpd)."
@@ -125,16 +127,13 @@
           (unless (member elem seen) (push elem res)))))
     (nreverse res)))
 
-(defun mpc-intersection (l1 l2 &optional selectfun)
+(defun mpc-intersection (l1 l2 selectfun)
   "Return L1 after removing all elements not found in L2.
-If SELECTFUN is non-nil, elements aren't compared directly, but instead
+Elements aren't compared directly, but instead
 they are passed through SELECTFUN before comparison."
-  (let ((res ()))
-    (if selectfun (setq l2 (mapcar selectfun l2)))
-    (dolist (elem l1)
-      (when (member (if selectfun (funcall selectfun elem) elem) l2)
-        (push elem res)))
-    (nreverse res)))
+  (seq-intersection l1 l2 (lambda (x y)
+                            (equal (funcall selectfun x)
+                                   (funcall selectfun y)))))
 
 (defun mpc-event-set-point (event)
   (condition-case nil (posn-set-point (event-end event))
@@ -185,8 +184,6 @@ numerically rather than lexicographically."
                     (abs res))
                 res))))))))
 
-(define-obsolete-function-alias 'mpc-string-prefix-p 'string-prefix-p "24.3")
-
 ;; This can speed up mpc--song-search significantly.  The table may grow
 ;; very large, tho.  It's only bounded by the fact that it gets flushed
 ;; whenever the connection is established; which seems to work OK thanks
@@ -200,10 +197,10 @@ numerically rather than lexicographically."
 (defcustom mpc-host
   (concat (or (getenv "MPD_HOST") "localhost")
           (if (getenv "MPD_PORT") (concat ":" (getenv "MPD_PORT"))))
-  "Host (and port) where the Music Player Daemon is running.  The
-format is \"HOST\", \"HOST:PORT\", \"PASSWORD@HOST\" or
-\"PASSWORD@HOST:PORT\" where PASSWORD defaults to no password, PORT
-defaults to 6600 and HOST defaults to localhost."
+  "Host (and port) where the Music Player Daemon is running.
+The format is \"HOST\", \"HOST:PORT\", \"PASSWORD@HOST\" or
+\"PASSWORD@HOST:PORT\" where PASSWORD defaults to no password,
+PORT defaults to 6600 and HOST defaults to localhost."
   :type 'string)
 
 (defvar mpc-proc nil)
@@ -217,8 +214,8 @@ defaults to 6600 and HOST defaults to localhost."
       (with-current-buffer "*MPC-debug*"
         (goto-char (point-max))
         (insert-before-markers          ;So it scrolls.
-         (replace-regexp-in-string "\n" "\n	"
-                                   (apply #'format-message format args))
+         (string-replace "\n" "\n	"
+                         (apply #'format-message format args))
          "\n"))))
 
 (defun mpc--proc-filter (proc string)
@@ -293,11 +290,11 @@ defaults to 6600 and HOST defaults to localhost."
           (let ((plist (process-plist mpc-proc)))
             (while plist (process-put proc (pop plist) (pop plist)))))
         (mpc-proc-buffer proc 'mpd-commands (current-buffer))
-        (process-put proc 'callback 'ignore)
+        (process-put proc 'callback #'ignore)
         (process-put proc 'ready nil)
         (clrhash mpc--find-memoize)
-        (set-process-filter proc 'mpc--proc-filter)
-        (set-process-sentinel proc 'ignore)
+        (set-process-filter proc #'mpc--proc-filter)
+        (set-process-sentinel proc #'ignore)
         (set-process-query-on-exit-flag proc nil)
         ;; This may be called within a process filter ;-(
         (with-local-quit (mpc-proc-sync proc))
@@ -308,18 +305,20 @@ defaults to 6600 and HOST defaults to localhost."
 (defun mpc--proc-quote-string (s)
   (if (numberp s) (number-to-string s)
     (setq s (replace-regexp-in-string "[\"\\]" "\\\\\\&" s))
-    (if (string-match " " s) (concat "\"" s "\"") s)))
+    (if (string-search " " s) (concat "\"" s "\"") s)))
 
 (defconst mpc--proc-alist-to-alists-starters '(file directory))
 
 (defun mpc--proc-alist-to-alists (alist)
+  ;; ALIST is assumed to contain a flattened sequence of sequences,
+  ;; of the form (file . ..) ..filedata.. (directory . ..) ..dirdata..
+  ;; See bug#41493.
   (cl-assert (or (null alist)
               (memq (caar alist) mpc--proc-alist-to-alists-starters)))
-  (let ((starter (caar alist))
-        (alists ())
+  (let ((alists ())
         tmp)
     (dolist (pair alist)
-      (when (eq (car pair) starter)
+      (when (memq (car pair) mpc--proc-alist-to-alists-starters)
         (if tmp (push (nreverse tmp) alists))
         (setq tmp ()))
       (push pair tmp))
@@ -378,7 +377,7 @@ which will be concatenated with proper quoting before passing them to MPD."
         (mpc--debug "Send \"%s\"" cmd)
         (process-send-string
          proc (concat (if (stringp cmd) cmd
-                        (mapconcat 'mpc--proc-quote-string cmd " "))
+                        (mapconcat #'mpc--proc-quote-string cmd " "))
                       "\n")))
       (if callback
           ;; (let ((buf (current-buffer)))
@@ -390,7 +389,7 @@ which will be concatenated with proper quoting before passing them to MPD."
                        ;;              (set-buffer buf)))))
                        )
         ;; If `callback' is nil, we're executing synchronously.
-        (process-put proc 'callback 'ignore)
+        (process-put proc 'callback #'ignore)
         ;; This returns the process's buffer.
         (mpc-proc-sync proc)))))
 
@@ -400,7 +399,7 @@ which will be concatenated with proper quoting before passing them to MPD."
   (concat "command_list_begin\n"
           (mapconcat (lambda (cmd)
                        (if (stringp cmd) cmd
-                         (mapconcat 'mpc--proc-quote-string cmd " ")))
+                         (mapconcat #'mpc--proc-quote-string cmd " ")))
                      cmds
                      "\n")
           "\ncommand_list_end"))
@@ -452,7 +451,7 @@ which will be concatenated with proper quoting before passing them to MPD."
 ;;; Support for regularly updated current status information ;;;;;;;;;;;;;;;
 
 ;; Exported elements:
-;; `mpc-status' holds the uptodate data.
+;; `mpc-status' holds the up-to-date data.
 ;; `mpc-status-callbacks' holds the registered callback functions.
 ;; `mpc-status-refresh' forces a refresh of the data.
 ;; `mpc-status-stop' stops the automatic updating.
@@ -465,6 +464,7 @@ which will be concatenated with proper quoting before passing them to MPD."
     (state  . mpc--faster-toggle-refresh) ;Only ffwd/rewind while play/pause.
     (volume . mpc-volume-refresh)
     (file   . mpc-songpointer-refresh)
+    (file   . mpc-notifications-notify)
     ;; The song pointer may need updating even if the file doesn't change,
     ;; if the same song appears multiple times in a row.
     (song   . mpc-songpointer-refresh)
@@ -472,8 +472,9 @@ which will be concatenated with proper quoting before passing them to MPD."
     (updating_db . mpc--status-timers-refresh)
     (t      . mpc-current-refresh))
   "Alist associating properties to the functions that care about them.
-Each entry has the form (PROP . FUN) where PROP can be t to mean
-to call FUN for any change whatsoever.")
+Each entry has the form (PROP . FUN) to call FUN (without arguments)
+whenever property PROP changes.  PROP can be t, which means to call
+FUN for any change whatsoever.")
 
 (defun mpc--status-callback ()
   (let ((old-status mpc-status))
@@ -490,9 +491,9 @@ to call FUN for any change whatsoever.")
 
 (defvar mpc--status-timer nil)
 (defun mpc--status-timer-start ()
-  (add-hook 'pre-command-hook 'mpc--status-timer-stop)
+  (add-hook 'pre-command-hook #'mpc--status-timer-stop)
   (unless mpc--status-timer
-    (setq mpc--status-timer (run-with-timer 1 1 'mpc--status-timer-run))))
+    (setq mpc--status-timer (run-with-timer 1 1 #'mpc--status-timer-run))))
 (defun mpc--status-timer-stop ()
   (when mpc--status-timer
     (cancel-timer mpc--status-timer)
@@ -512,7 +513,7 @@ to call FUN for any change whatsoever.")
     ;; Turn it off even if we'll start it again, in case it changes the delay.
     (cancel-timer mpc--status-idle-timer))
   (setq mpc--status-idle-timer
-        (run-with-idle-timer 1 t 'mpc--status-idle-timer-run))
+        (run-with-idle-timer 1 t #'mpc--status-idle-timer-run))
   ;; Typically, the idle timer is started from the mpc--status-callback,
   ;; which is run asynchronously while we're already idle (we typically
   ;; just started idling), so the timer itself will only be run the next
@@ -527,7 +528,7 @@ to call FUN for any change whatsoever.")
         (unless really
           ;; We don't completely stop the timer, so that if some other MPD
           ;; client starts playback, we may get a chance to notice it.
-          (run-with-idle-timer 10 t 'mpc--status-idle-timer-run))))
+          (run-with-idle-timer 10 t #'mpc--status-idle-timer-run))))
 (defun mpc--status-idle-timer-run ()
   (mpc--status-timer-start)
   (mpc--status-timer-run))
@@ -598,7 +599,7 @@ Any call to `mpc-status-refresh' may cause it to be restarted."
 ;;       (dotimes (i (string-to-number pos)) (mpc--queue-pop))
 ;;       (mpc-proc-cmd (mpc-proc-cmd-list
 ;;                      (make-list (string-to-number pos) "delete 0"))
-;;                     'ignore)
+;;                     #'ignore)
 ;;       (if (not (equal (cdr (assq 'file mpc-status))
 ;;                       (mpc--queue-head)))
 ;;           (message "MPC's queue is out of sync"))))))
@@ -614,7 +615,7 @@ Any call to `mpc-status-refresh' may cause it to be restarted."
 
 (defun mpc-cmd-special-tag-p (tag)
   (or (memq tag '(Playlist Search Directory))
-      (string-match "|" (symbol-name tag))))
+      (string-search "|" (symbol-name tag))))
 
 (defun mpc-cmd-find (tag value)
   "Return a list of all songs whose tag TAG has value VALUE.
@@ -633,21 +634,21 @@ The songs are returned as alists."
                        (i 0))
                    (mapcar (lambda (s)
                              (prog1 (cons (cons 'Pos (number-to-string i)) s)
-                               (cl-incf i)))
+                               (incf i)))
                            l)))
                 ((eq tag 'Search)
                  (mpc-proc-buf-to-alists
                   (mpc-proc-cmd (list "search" "any" value))))
                 ((eq tag 'Directory)
-                 (let ((pairs
-                        (mpc-proc-buf-to-alist
+                 (let ((entries
+                        (mpc-proc-buf-to-alists
                          (mpc-proc-cmd (list "listallinfo" value)))))
-                   (mpc--proc-alist-to-alists
-                    ;; Strip away the `directory' entries.
-                    (delq nil (mapcar (lambda (pair)
-                                        (if (eq (car pair) 'directory)
-                                            nil pair))
-                                      pairs)))))
+                   ;; Strip away the `directory' entries because our callers
+                   ;; currently don't know what to do with them.
+                   (delq nil (mapcar (lambda (entry)
+                                       (if (eq (caar entry) 'directory)
+                                           nil entry))
+                                     entries))))
                 ((string-match "|" (symbol-name tag))
                  (add-to-list 'mpc--find-memoize-union-tags tag)
                  (let ((tag1 (intern (substring (symbol-name tag)
@@ -685,7 +686,7 @@ The songs are returned as alists."
           (let ((plsongs (mpc-cmd-find 'Playlist pl)))
             (if (not (mpc-cmd-special-tag-p other-tag))
                 (when (member (cons other-tag value)
-                              (apply 'append plsongs))
+                              (apply #'append plsongs))
                   (push pl pls))
               ;; Problem N°2: we compute the intersection whereas all
               ;; we care about is whether it's empty.  So we could
@@ -696,15 +697,15 @@ The songs are returned as alists."
               ;; good enough because this is only used with "search", which
               ;; doesn't pay attention to playlists and URLs anyway.
               (let* ((osongs (mpc-cmd-find other-tag value))
-                     (ofiles (mpc-assq-all 'file (apply 'append osongs)))
-                     (plfiles (mpc-assq-all 'file (apply 'append plsongs))))
-                (when (mpc-intersection plfiles ofiles)
+                     (ofiles (mpc-assq-all 'file (apply #'append osongs)))
+                     (plfiles (mpc-assq-all 'file (apply #'append plsongs))))
+                (when (seq-intersection plfiles ofiles)
                   (push pl pls)))))))
       pls))
 
    ((eq tag 'Directory)
     (if (null other-tag)
-        (apply 'nconc
+        (apply #'nconc
                (mpc-assq-all 'directory
                              (mpc-proc-buf-to-alist
                               (mpc-proc-cmd "lsinfo")))
@@ -727,7 +728,7 @@ The songs are returned as alists."
       ;; If there's an other-tag, then just extract the dir info from the
       ;; list of other-tag's songs.
       (let* ((other-songs (mpc-cmd-find other-tag value))
-             (files (mpc-assq-all 'file (apply 'append other-songs)))
+             (files (mpc-assq-all 'file (apply #'append other-songs)))
              (dirs '()))
         (dolist (file files)
           (let ((dir (file-name-directory file)))
@@ -761,7 +762,7 @@ The songs are returned as alists."
 
    ((null other-tag)
     (condition-case nil
-        (mapcar 'cdr (mpc-proc-cmd-to-alist (list "list" (symbol-name tag))))
+        (mapcar #'cdr (mpc-proc-cmd-to-alist (list "list" (symbol-name tag))))
       (mpc-proc-error
        ;; If `tag' is not one of the expected tags, MPD burps about not
        ;; having the relevant table.
@@ -772,7 +773,7 @@ The songs are returned as alists."
     (condition-case nil
         (if (mpc-cmd-special-tag-p other-tag)
             (signal 'mpc-proc-error "Not implemented")
-          (mapcar 'cdr
+          (mapcar #'cdr
                   (mpc-proc-cmd-to-alist
                    (list "list" (symbol-name tag)
                          (symbol-name other-tag) value))))
@@ -783,7 +784,7 @@ The songs are returned as alists."
          (mpc-assq-all tag
                        ;; Don't use `nconc' now that mpc-cmd-find may
                        ;; return a memoized result.
-                       (apply 'append other-songs))))))))
+                       (apply #'append other-songs))))))))
 
 (defun mpc-cmd-stop (&optional callback)
   (mpc-proc-cmd "stop" callback))
@@ -819,8 +820,8 @@ The songs are returned as alists."
 (defun mpc-cmd-status ()
   (mpc-proc-cmd-to-alist "status"))
 
-(defun mpc-cmd-play ()
-  (mpc-proc-cmd "play")
+(defun mpc-cmd-play (&optional sn)
+  (mpc-proc-cmd (if sn (list "play" sn) "play"))
   (mpc-status-refresh))
 
 (defun mpc-cmd-seekcur (time)
@@ -849,7 +850,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                          ;; Sort them from last to first, so the renumbering
                          ;; caused by the earlier deletions don't affect
                          ;; later ones.
-                         (sort song-poss '>))))
+                         (sort (copy-sequence song-poss) #'>))))
     (if (stringp playlist)
         (puthash (cons 'Playlist playlist) nil mpc--find-memoize)))
 
@@ -868,12 +869,12 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                          (list "move" song-pos dest-pos))
                   (if (< song-pos dest-pos)
                       ;; This move has shifted dest-pos by 1.
-                      (cl-decf dest-pos))
-                  (cl-incf i)))
+                      (decf dest-pos))
+                  (incf i)))
               ;; Sort them from last to first, so the renumbering
               ;; caused by the earlier deletions affect
               ;; later ones a bit less.
-              (sort song-poss '>))))
+              (sort (copy-sequence song-poss) #'>))))
     (if (stringp playlist)
         (puthash (cons 'Playlist playlist) nil mpc--find-memoize))))
 
@@ -884,7 +885,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
     (unless callback (mpc-proc-sync))))
 
 (defun mpc-cmd-tagtypes ()
-  (mapcar 'cdr (mpc-proc-cmd-to-alist "tagtypes")))
+  (mapcar #'cdr (mpc-proc-cmd-to-alist "tagtypes")))
 
 ;; This was never integrated into MPD.
 ;; (defun mpc-cmd-download (file)
@@ -920,6 +921,16 @@ If PLAYLIST is t or nil or missing, use the main playlist."
   (locate-user-emacs-file "mpc" ".mpc")
   "Directory where MPC.el stores auxiliary data."
   :type 'directory)
+
+(defcustom mpc-crossfade-time 3
+  "Number of seconds to crossfade between songs."
+  :version "31.1"
+  :type 'natnum)
+
+(defun mpc-cmd-crossfade (&optional arg)
+  "Set duration of crossfade to `mpc-crossfade-time' or ARG seconds."
+  (mpc-proc-cmd (list "crossfade" (or arg mpc-crossfade-time))
+                #'mpc-status-refresh))
 
 (defun mpc-data-directory ()
   (unless (file-directory-p mpc-data-directory)
@@ -965,12 +976,21 @@ If PLAYLIST is t or nil or missing, use the main playlist."
 
 ;;; Formatter ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defcustom mpc-cover-image-re nil ; (rx (or ".jpg" ".jpeg" ".png") string-end)
+  "If non-nil, it is a regexp that should match a valid cover image."
+  :type '(choice (const nil) regexp)
+  :version "28.1")
+
 (defun mpc-secs-to-time (secs)
+  "Convert SECS from a string, integer or float value to a time string."
   ;; We could use `format-seconds', but it doesn't seem worth the trouble
   ;; because we'd still need to check (>= secs (* 60 100)) since the special
   ;; %z only allows us to drop the large units for small values but
   ;; not to drop the small units for large values.
   (if (stringp secs) (setq secs (string-to-number secs)))
+  ;; Ensure secs is an integer.  The Time tag has been deprecated by MPD
+  ;; and its replacement (the duration tag) includes fractional seconds.
+  (if (floatp secs) (setq secs (round secs)))
   (if (>= secs (* 60 100))              ;More than 100 minutes.
       (format "%dh%02d" ;"%d:%02d:%02d"
               (/ secs 3600) (% (/ secs 60) 60)) ;; (% secs 60)
@@ -992,7 +1012,18 @@ If PLAYLIST is t or nil or missing, use the main playlist."
   (push file mpc-tempfiles))
 
 (defun mpc-format (format-spec info &optional hscroll)
-  "Format the INFO according to FORMAT-SPEC, inserting the result at point."
+  "Format the INFO according to FORMAT-SPEC, inserting the result at point.
+
+FORMAT-SPEC is a string that includes elements of the form
+'%-WIDTH{NAME-POST}' that get expanded to the value of
+property NAME.
+The first '-', WIDTH, and -POST are optional.
+% followed by the optional '-' means to right align the output.
+WIDTH limits the output to the specified number of characters by
+replacing any further output with a horizontal ellipsis.
+The optional -POST means to use the empty string if NAME is
+absent or else use the concatenation of the content of NAME with the
+string POST."
   (let* ((pos 0)
          (start (point))
          (col (if hscroll (- hscroll) 0))
@@ -1000,7 +1031,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                    (cond
                     ((>= col 0) (insert str))
                     (t (insert (substring str (min (length str) (- col))))))))
-         (pred nil))
+         (pred #'always))
     (while (string-match "%\\(?:%\\|\\(-\\)?\\([0-9]+\\)?{\\([[:alpha:]][[:alnum:]]*\\)\\(?:-\\([^}]+\\)\\)?}\\)" format-spec pos)
       (let ((pre-text (substring format-spec pos (match-beginning 0))))
         (funcall insert pre-text)
@@ -1017,27 +1048,34 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                (text
                 (if (eq info 'self) (symbol-name tag)
                   (pcase tag
-                    ((or `Time `Duration)
+                    ((or 'Time 'Duration)
                      (let ((time (cdr (or (assq 'time info) (assq 'Time info)))))
-                       (setq pred (list nil)) ;Just assume it's never eq.
+                       (setq pred #'ignore) ;Just assume it's never eq.
                        (when time
                          (mpc-secs-to-time (if (and (eq tag 'Duration)
                                                     (string-match ":" time))
                                                (substring time (match-end 0))
                                              time)))))
-                    (`Cover
-                     (let ((dir (file-name-directory (cdr (assq 'file info)))))
+                    ('Cover
+                     (let* ((file (alist-get 'file info))
+                            (dir (file-name-directory file)))
                        ;; (debug)
-                       (push `(equal ',dir (file-name-directory (cdr (assq 'file info)))) pred)
-                       (if-let* ((covers '(".folder.png" "cover.jpg" "folder.jpg"))
-                                 (cover (cl-loop for file in (directory-files (mpc-file-local-copy dir))
-                                                 if (member (downcase file) covers)
-                                                 return (concat dir file)))
+                       (setq pred
+                             ;; We want the closure to capture the current
+                             ;; value of `pred' and not a reference to the
+                             ;; variable itself.
+                             (let ((oldpred pred))
+                               (lambda (info)
+                                 (and (funcall oldpred info)
+                                      (equal dir (file-name-directory
+                                                  (cdr (assq 'file info))))))))
+                       (if-let* ((cover (mpc-cover-image-find file))
                                  (file (with-demoted-errors "MPC: %s"
                                          (mpc-file-local-copy cover))))
                            (let (image)
                              (if (null size) (setq image (create-image file))
                                (let ((tempfile (make-temp-file "mpc" nil ".jpg")))
+                                 ;; FIXME: Use native image scaling instead.
                                  (call-process "convert" nil nil nil
                                                "-scale" size file tempfile)
                                  (setq image (create-image tempfile))
@@ -1045,7 +1083,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                              (setq size nil)
                              (propertize dir 'display image))
                          ;; Make sure we return something on which we can
-                         ;; place the `mpc-pred' property, as
+                         ;; place the `mpc--uptodate-p' property, as
                          ;; a negative-cache.  We could also use
                          ;; a default cover.
                          (progn (setq size nil) " "))))
@@ -1054,7 +1092,14 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                          ;; than the URL in `file'.  Pretend it's in `Title'.
                          (when (and (null val) (eq tag 'Title))
                            (setq val (cdr (assq 'file info))))
-                         (push `(equal ',val (cdr (assq ',tag info))) pred)
+                         (setq pred
+                               ;; We want the closure to capture the current
+                               ;; value of `pred' and not a reference to the
+                               ;; variable itself.
+                               (let ((oldpred pred))
+                                 (lambda (info)
+                                   (and (funcall oldpred info)
+                                        (equal val (cdr (assq tag info)))))))
                          (cond
                           ((not (and (eq tag 'Date) (stringp val))) val)
                           ;; For "date", only keep the year!
@@ -1082,11 +1127,11 @@ If PLAYLIST is t or nil or missing, use the main playlist."
                                   'follow-link t
                                   'keymap `(keymap
                                             (mouse-2
-                                             . (lambda ()
-                                                 (interactive)
-                                                 (mpc-constraints-push 'noerror)
-                                                 (mpc-constraints-restore
-                                                  ',(list (list tag text)))))))))
+                                             . ,(lambda ()
+                                                  (interactive)
+                                                  (mpc-constraints-push 'noerror)
+                                                  (mpc-constraints-restore
+                                                   (list (list tag text)))))))))
               (funcall insert
                        (concat (when size
                                  (propertize " " 'display
@@ -1099,36 +1144,52 @@ If PLAYLIST is t or nil or missing, use the main playlist."
           (if (null size) (setq col (+ col textwidth postwidth))
             (insert space)
             (setq col (+ col size))))))
-    (put-text-property start (point) 'mpc-pred
-                       `(lambda (info) (and ,@(nreverse pred))))))
+    ;; Print the rest of format-spec, in case there is text after the
+    ;; last actual format specifier.
+    (insert (substring format-spec pos))
+    (put-text-property start (point) 'mpc--uptodate-p pred)))
+
+(defun mpc-cover-image-find (file)
+  "Find cover image for FILE in suitable MPC directory."
+  (when-let* ((default-directory mpc-mpd-music-directory)
+              (dir (mpc-file-local-copy (file-name-directory file)))
+              (files (directory-files dir))
+              (cover (seq-find #'mpc-cover-image-p files)))
+    (expand-file-name cover dir)))
+
+(defun mpc-cover-image-p (file)
+  "Check if FILE is a cover image suitable for MPC."
+  (let ((covers '(".folder.png" "folder.png" "cover.jpg" "folder.jpg")))
+    (or (member-ignore-case file covers)
+        (and mpc-cover-image-re (string-match-p mpc-cover-image-re file)))))
 
 ;;; The actual UI code ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defvar mpc-mode-map
-  (let ((map (make-sparse-keymap)))
-    ;; (define-key map "\e" 'mpc-stop)
-    (define-key map "q" 'mpc-quit)
-    (define-key map "\r" 'mpc-select)
-    (define-key map [(shift return)] 'mpc-select-toggle)
-    (define-key map [mouse-2] 'mpc-select)
-    (define-key map [S-mouse-2] 'mpc-select-extend)
-    (define-key map [C-mouse-2] 'mpc-select-toggle)
-    (define-key map [drag-mouse-2] 'mpc-drag-n-drop)
-    ;; We use `always' because a binding to t is like a binding to nil.
-    (define-key map [follow-link] :always)
-    ;; But follow-link doesn't apply blindly to header-line and
-    ;; mode-line clicks.
-    (define-key map [header-line follow-link] 'ignore)
-    (define-key map [mode-line follow-link] 'ignore)
-    ;; Doesn't work because the first click changes the buffer, so the second
-    ;; is applied elsewhere :-(
-    ;; (define-key map [(double mouse-2)] 'mpc-play-at-point)
-    (define-key map "p" 'mpc-pause)
-    (define-key map "s" 'mpc-toggle-play)
-    (define-key map ">" 'mpc-next)
-    (define-key map "<" 'mpc-prev)
-    (define-key map "g" 'mpc-seek-current)
-    map))
+(defvar-keymap mpc-mode-map
+  ;; "ESC"                         #'mpc-stop
+  "q"                           #'mpc-quit
+  "RET"                         #'mpc-select
+  "S-<return>"                  #'mpc-select-toggle
+  "<mouse-2>"                   #'mpc-select
+  "S-<mouse-2>"                 #'mpc-select-extend
+  "C-<mouse-2>"                 #'mpc-select-toggle
+  "<drag-mouse-2>"              #'mpc-drag-n-drop
+  ;; We use `always' because a binding to t is like a binding to nil.
+  "<follow-link>"               :always
+  ;; But follow-link doesn't apply blindly to header-line and
+  ;; mode-line clicks.
+  "<header-line> <follow-link>" #'ignore
+  "<mode-line> <follow-link>"   #'ignore
+  ;; Doesn't work because the first click changes the buffer, so the second
+  ;; is applied elsewhere :-(
+  ;; "<double-mouse-2>"            #'mpc-play-at-point
+  "p"                           #'mpc-pause
+  "s"                           #'mpc-toggle-play
+  ">"                           #'mpc-next
+  "<"                           #'mpc-prev
+  "g"                           #'mpc-seek-current
+  "o"                           #'mpc-goto-playing-song
+  "d"                           #'mpc-describe-song)
 
 (easy-menu-define mpc-mode-menu mpc-mode-map
   "Menu for MPC mode."
@@ -1137,6 +1198,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
     ["Next Track" mpc-next]             ;FIXME: Add ⇥ there?
     ["Previous Track" mpc-prev]         ;FIXME: Add ⇤ there?
     ["Seek Within Track" mpc-seek-current]
+    ["Song Details" mpc-describe-song]
     "--"
     ["Repeat Playlist" mpc-toggle-repeat :style toggle
      :selected (member '(repeat . "1") mpc-status)]
@@ -1146,8 +1208,11 @@ If PLAYLIST is t or nil or missing, use the main playlist."
      :selected (member '(single . "1") mpc-status)]
     ["Consume Mode" mpc-toggle-consume :style toggle
      :selected (member '(consume . "1") mpc-status)]
+    ["Crossfade Songs" mpc-toggle-crossfade :style toggle
+     :selected (alist-get 'xfade mpc-status)]
     "--"
     ["Add new browser" mpc-tagbrowser]
+    ["Server Stats" mpc-server-stats]
     ["Update DB" mpc-update]
     ["Quit" mpc-quit]))
 
@@ -1219,7 +1284,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
           (when (assq 'file mpc-status)
             (let ((inhibit-read-only t))
               (dolist (spec mpc-status-buffer-format)
-                (let ((pred (get-text-property (point) 'mpc-pred)))
+                (let ((pred (get-text-property (point) 'mpc--uptodate-p)))
                   (if (and pred (funcall pred mpc-status))
                       (forward-line)
                     (delete-region (point) (line-beginning-position 2))
@@ -1279,7 +1344,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
   ;; Restore the selection.  I.e. move the overlays back to their
   ;; corresponding location.  Actually which overlay is used for what
   ;; doesn't matter.
-  (mapc 'delete-overlay mpc-select)
+  (mapc #'delete-overlay mpc-select)
   (setq mpc-select nil)
   (dolist (elem selection)
     ;; After an update, some elements may have disappeared.
@@ -1304,7 +1369,7 @@ If PLAYLIST is t or nil or missing, use the main playlist."
   (interactive (list last-nonmenu-event))
   (mpc-event-set-point event)
   (if (and (bolp) (eobp)) (forward-line -1))
-  (mapc 'delete-overlay mpc-select)
+  (mapc #'delete-overlay mpc-select)
   (setq mpc-select nil)
   (if (mpc-tagbrowser-all-p)
       nil
@@ -1355,12 +1420,12 @@ If PLAYLIST is t or nil or missing, use the main playlist."
           (while (and (zerop (forward-line 1))
                       (get-char-property (point) 'mpc-select))
             (setq end (1+ (point)))
-            (cl-incf after))
+            (incf after))
           (goto-char mid)
           (while (and (zerop (forward-line -1))
                       (get-char-property (point) 'mpc-select))
             (setq start (point))
-            (cl-incf before))
+            (incf before))
           (if (and (= after 0) (= before 0))
               ;; Shortening an already minimum-size region: do nothing.
               nil
@@ -1384,13 +1449,13 @@ If PLAYLIST is t or nil or missing, use the main playlist."
               (start (line-beginning-position)))
           (while (and (zerop (forward-line 1))
                       (not (get-char-property (point) 'mpc-select)))
-            (cl-incf count))
+            (incf count))
           (unless (get-char-property (point) 'mpc-select)
             (setq count nil))
           (goto-char start)
           (while (and (zerop (forward-line -1))
                       (not (get-char-property (point) 'mpc-select)))
-            (cl-incf before))
+            (incf before))
           (unless (get-char-property (point) 'mpc-select)
             (setq before nil))
           (when (and before (or (null count) (< before count)))
@@ -1427,7 +1492,7 @@ when constructing the set of constraints."
   (let (res)
     (dolist (constraint constraints)
       (when (or (eq (car constraint) buffer-tag)
-                (and (string-match "|" (symbol-name buffer-tag))
+                (and (string-search "|" (symbol-name buffer-tag))
                      (member (symbol-name (car constraint))
                              (split-string (symbol-name buffer-tag) "|"))))
         (setq res (cdr constraint))))
@@ -1530,9 +1595,10 @@ when constructing the set of constraints."
    (t (concat (symbol-name tag) "s"))))
 
 (defun mpc-tagbrowser-buf (tag)
-  (let ((buf (mpc-proc-buffer (mpc-proc) tag)))
+  (let ((buf (mpc-proc-buffer (mpc-proc) tag))
+        (tag-name (mpc-tagbrowser-tag-name tag)))
     (if (buffer-live-p buf) buf
-      (setq buf (get-buffer-create (format "*MPC %ss*" tag)))
+      (setq buf (get-buffer-create (format "*MPC %s*" tag-name)))
       (mpc-proc-buffer (mpc-proc) tag buf)
       (with-current-buffer buf
         (let ((inhibit-read-only t))
@@ -1543,13 +1609,14 @@ when constructing the set of constraints."
           (insert mpc-tagbrowser-all-name "\n"))
         (forward-line -1)
         (setq mpc-tag tag)
-        (setq mpc-tag-name (mpc-tagbrowser-tag-name tag))
+        (setq mpc-tag-name tag-name)
         (mpc-tagbrowser-all-select)
         (mpc-tagbrowser-refresh)
         buf))))
 
-(defvar tag-browser-tagtypes
-  (lazy-completion-table tag-browser-tagtypes
+(define-obsolete-variable-alias 'tag-browser-tagtypes 'mpc-tag-browser-tagtypes "29.1")
+(defvar mpc-tag-browser-tagtypes
+  (lazy-completion-table mpc-tag-browser-tagtypes
                          (lambda ()
                            (append '("Playlist" "Directory")
                                    (mpc-cmd-tagtypes)))))
@@ -1560,7 +1627,7 @@ when constructing the set of constraints."
    (list
     (let ((completion-ignore-case t))
       (intern
-       (completing-read "Tag: " tag-browser-tagtypes nil 'require-match)))))
+       (completing-read "Tag: " mpc-tag-browser-tagtypes nil 'require-match)))))
   (let* ((newbuf (mpc-tagbrowser-buf tag))
          (win (get-buffer-window newbuf 0)))
     (if win (select-window win)
@@ -1606,7 +1673,7 @@ when constructing the set of constraints."
                 (make-overlay (point) (point)))
     (overlay-put mpc-separator-ol 'after-string
                  (propertize "\n"
-                             'face '(:height 0.05 :inverse-video t))))
+                             'face '(:height 0.05 :inverse-video t :extend t))))
   (goto-char (point-min))
   (forward-line 1)
   (while
@@ -1664,12 +1731,12 @@ Return non-nil if a selection was deactivated."
       ;; (unless (equal constraints mpc-constraints)
       ;;   (setq-local mpc-constraints constraints)
       (dolist (cst constraints)
-        (let ((vals (apply 'mpc-union
+        (let ((vals (apply #'mpc-union
                            (mapcar (lambda (val)
                                      (mpc-cmd-list mpc-tag (car cst) val))
                                    (cdr cst)))))
           (setq active
-                (if (listp active) (mpc-intersection active vals) vals))))
+                (if (listp active) (seq-intersection active vals) vals))))
 
       (when (listp active)
         ;; Remove the selections if they are all in conflict with
@@ -1683,7 +1750,7 @@ Return non-nil if a selection was deactivated."
               (setq mpc--changed-selection t))
             (unless nodeactivate
               (setq selection nil)
-              (mapc 'delete-overlay mpc-select)
+              (mapc #'delete-overlay mpc-select)
               (setq mpc-select nil)
               (mpc-tagbrowser-all-select))))
 
@@ -1725,11 +1792,9 @@ Return non-nil if a selection was deactivated."
 ;;   present (because we're in the non-selected part and the parent is
 ;;   in the selected part).
 
-(defvar mpc-tagbrowser-dir-mode-map
-  (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map mpc-tagbrowser-mode-map)
-    (define-key map [?\M-\C-m] 'mpc-tagbrowser-dir-toggle)
-    map))
+(defvar-keymap mpc-tagbrowser-dir-mode-map
+  :parent mpc-tagbrowser-mode-map
+  "M-RET" #'mpc-tagbrowser-dir-toggle)
 
 ;; (defvar mpc-tagbrowser-dir-keywords
 ;;   '(mpc-tagbrowser-dir-hide-prefix))
@@ -1836,30 +1901,32 @@ A value of t means the main playlist.")
 
 ;;; Volume management ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defvar mpc-volume-map
-  (let ((map (make-sparse-keymap)))
-    ;; Bind the up-events rather than the down-event, so the
-    ;; `message' isn't canceled by the subsequent up-event binding.
-    (define-key map [down-mouse-1] 'ignore)
-    (define-key map [mouse-1] 'mpc-volume-mouse-set)
-    (define-key map [header-line mouse-1] 'mpc-volume-mouse-set)
-    (define-key map [header-line down-mouse-1] 'ignore)
-    (define-key map [mode-line mouse-1] 'mpc-volume-mouse-set)
-    (define-key map [mode-line down-mouse-1] 'ignore)
-    map))
+(defvar-keymap mpc-volume-map
+  ;; Bind the up-events rather than the down-event, so the
+  ;; `message' isn't canceled by the subsequent up-event binding.
+  "<down-mouse-1>"               #'ignore
+  "<mouse-1>"                    #'mpc-volume-mouse-set
+  "<header-line> <mouse-1>"      #'mpc-volume-mouse-set
+  "<header-line> <down-mouse-1>" #'ignore
+  "<mode-line> <mouse-1>"        #'mpc-volume-mouse-set
+  "<mode-line> <down-mouse-1>"   #'ignore)
 
 (defvar mpc-volume nil) (put 'mpc-volume 'risky-local-variable t)
 
 (defun mpc-volume-refresh ()
-  ;; Maintain the volume.
-  (setq mpc-volume
-        (mpc-volume-widget
-         (string-to-number (cdr (assq 'volume mpc-status)))))
-  (let ((status-buf (mpc-proc-buffer (mpc-proc) 'status)))
+  "Maintain the volume."
+  (let ((status-buf (mpc-proc-buffer (mpc-proc) 'status))
+        (status-vol (cdr (assq 'volume mpc-status))))
+    ;; If MPD is paused or stopped the volume is nil.
+    (when status-vol
+      (setq mpc-volume
+            (mpc-volume-widget
+             (string-to-number status-vol))))
     (when (buffer-live-p status-buf)
       (with-current-buffer status-buf (force-mode-line-update)))))
 
-(defvar mpc-volume-step 5)
+(defvar mpc-volume-step 5
+  "Change volume in increments of this integer.")
 
 (defun mpc-volume-mouse-set (&optional event)
   "Change volume setting."
@@ -1873,12 +1940,12 @@ A value of t means the main playlist.")
                     '(?◁ ?<))
               (- mpc-volume-step) mpc-volume-step))
          (curvol (string-to-number (cdr (assq 'volume mpc-status))))
-         (newvol (max 0 (min 100 (+ curvol diff)))))
+         (newvol (max 0 (min 100 (+ (- curvol (mod curvol diff)) diff)))))
     (if (= newvol curvol)
         (progn
           (message "MPD volume already at %s%%" newvol)
           (ding))
-      (mpc-proc-cmd (list "setvol" newvol) 'mpc-status-refresh)
+      (mpc-proc-cmd (list "setvol" newvol) #'mpc-status-refresh)
       (message "Set MPD volume to %s%%" newvol))))
 
 (defun mpc-volume-widget (vol &optional size)
@@ -1913,10 +1980,8 @@ A value of t means the main playlist.")
 
 (defvar mpc-previous-window-config nil)
 
-(defvar mpc-songs-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map [remap mpc-select] 'mpc-songs-jump-to)
-    map))
+(defvar-keymap mpc-songs-mode-map
+  "<remap> <mpc-select>" #'mpc-songs-jump-to)
 
 (defvar mpc-songpointer-set-visible nil)
 
@@ -1963,7 +2028,7 @@ This is used so that they can be compared with `eq', which is needed for
                   (setq mpc-songs-playlist (cadr cst)))
               ;; We don't do anything really special here for playlists,
               ;; because it's unclear what's a correct "union" of playlists.
-              (let ((vals (apply 'mpc-union
+              (let ((vals (apply #'mpc-union
                                  (mapcar (lambda (val)
                                            (mpc-cmd-find (car cst) val))
                                          (cdr cst)))))
@@ -1998,7 +2063,7 @@ This is used so that they can be compared with `eq', which is needed for
                                                 (cdr (assq 'file song1))
                                                 (cdr (assq 'file song2)))))
                                       (and (integerp cmp) (< cmp 0)))))))
-              (cl-incf totaltime (string-to-number (or (cdr (assq 'Time song)) "0")))
+              (incf totaltime (string-to-number (or (cdr (assq 'Time song)) "0")))
               (mpc-format mpc-songs-format song)
               (delete-char (- (skip-chars-backward " "))) ;Remove trailing space.
               (insert "\n")
@@ -2089,7 +2154,7 @@ This is used so that they can be compared with `eq', which is needed for
      ((null (with-current-buffer plbuf (re-search-forward re nil t)))
       ;; song-file only appears once in the playlist: no ambiguity,
       ;; we're good to go!
-      (mpc-proc-cmd (list "play" sn)))
+      (mpc-cmd-play sn))
      (t
       ;; The song appears multiple times in the playlist.  If the current
       ;; buffer holds not only the destination song but also the current
@@ -2240,12 +2305,12 @@ This is used so that they can be compared with `eq', which is needed for
     (dolist (song (car context))
       (and (zerop (forward-line -1))
            (eq (get-text-property (point) 'mpc-file) song)
-           (cl-incf count)))
+           (incf count)))
     (goto-char pos)
     (dolist (song (cdr context))
       (and (zerop (forward-line 1))
            (eq (get-text-property (point) 'mpc-file) song)
-           (cl-incf count)))
+           (incf count)))
     count))
 
 (defun mpc-songpointer-refresh-hairy ()
@@ -2286,13 +2351,13 @@ This is used so that they can be compared with `eq', which is needed for
                ((< score context-size) nil)
                (t
                 ;; Score is equal and increasing context might help: try it.
-                (cl-incf context-size)
+                (incf context-size)
                 (let ((new-context
                        (mpc-songpointer-context context-size plbuf)))
                   (if (null new-context)
                       ;; There isn't more context: choose one arbitrarily
                       ;; and keep looking for a better match elsewhere.
-                      (cl-decf context-size)
+                      (decf context-size)
                     (setq context new-context)
                     (setq score (mpc-songpointer-score context pos))
                     (save-excursion
@@ -2337,7 +2402,7 @@ This is used so that they can be compared with `eq', which is needed for
   "Quit Music Player Daemon."
   (interactive)
   (let* ((proc mpc-proc)
-         (bufs (mapcar 'cdr (if proc (process-get proc 'buffers))))
+         (bufs (mapcar #'cdr (if proc (process-get proc 'buffers))))
          (wins (mapcar (lambda (buf) (get-buffer-window buf 0)) bufs))
          (song-buf (mpc-songs-buf))
          frames)
@@ -2358,7 +2423,7 @@ This is used so that they can be compared with `eq', which is needed for
             (unless (memq (window-buffer win) bufs) (setq delete nil)))
           (if delete (ignore-errors (delete-frame frame))))))
     ;; Then kill the buffers.
-    (mapc 'kill-buffer bufs)
+    (mapc #'kill-buffer bufs)
     (mpc-status-stop)
     (if proc (delete-process proc))))
 
@@ -2386,11 +2451,18 @@ This is used so that they can be compared with `eq', which is needed for
   (mpc-cmd-random
    (if (string= "0" (cdr (assq 'random (mpc-cmd-status)))) "1" "0")))
 
+(defun mpc-toggle-crossfade ()
+  "Toggle crossfading between songs."
+  (interactive)
+  (mpc-cmd-crossfade
+   (if (alist-get 'xfade mpc-status) "0" mpc-crossfade-time)))
+
 (defun mpc-stop ()
   "Stop playing the current queue of songs."
   (interactive)
   (mpc-cmd-stop)
   (mpc-cmd-clear)
+  (mpc-songs-refresh)
   (mpc-status-refresh))
 
 (defun mpc-pause ()
@@ -2498,42 +2570,42 @@ If stopped, start playback."
      (t (mpc-proc-cmd "previous")))
     (mpc-status-refresh)))
 
-(defvar mpc-last-seek-time '(0 . 0))
+;; (defvar mpc-last-seek-time '(0 . 0))
 
-(defun mpc--faster (event speedup step)
-  "Fast forward."
-  (interactive (list last-nonmenu-event))
-  (let ((repeat-delay (/ (abs (float step)) speedup)))
-    (if (not (memq 'down (event-modifiers event)))
-        (let* ((currenttime (float-time))
-               (last-time (- currenttime (car mpc-last-seek-time))))
-          (if (< last-time (* 0.9 repeat-delay))
-              nil ;; Throttle
-            (let* ((status (if (< last-time 1.0)
-                               mpc-status (mpc-cmd-status)))
-                   (songid (cdr (assq 'songid status)))
-                   (time (if songid
-                             (if (< last-time 1.0)
-                                 (cdr mpc-last-seek-time)
-                               (string-to-number
-                                (cdr (assq 'time status)))))))
-              (setq mpc-last-seek-time
-                    (cons currenttime (setq time (+ time step))))
-              (mpc-proc-cmd (list "seekid" songid time)
-                            'mpc-status-refresh))))
-      (let ((status (mpc-cmd-status)))
-        (let* ((songid (cdr (assq 'songid status)))
-                       (time (if songid (string-to-number
-                                         (cdr (assq 'time status))))))
-          (let ((timer (run-with-timer
-                        t repeat-delay
-                        (lambda ()
-                          (mpc-proc-cmd (list "seekid" songid
-                                              (setq time (+ time step)))
-                                        'mpc-status-refresh)))))
-            (while (mouse-movement-p
-                    (event-basic-type (setq event (read-event)))))
-            (cancel-timer timer)))))))
+;; (defun mpc--faster (event speedup step)
+;;   "Fast forward."
+;;   (interactive (list last-nonmenu-event))
+;;   (let ((repeat-delay (/ (abs (float step)) speedup)))
+;;     (if (not (memq 'down (event-modifiers event)))
+;;         (let* ((currenttime (float-time))
+;;                (last-time (- currenttime (car mpc-last-seek-time))))
+;;           (if (< last-time (* 0.9 repeat-delay))
+;;               nil ;; Throttle
+;;             (let* ((status (if (< last-time 1.0)
+;;                                mpc-status (mpc-cmd-status)))
+;;                    (songid (cdr (assq 'songid status)))
+;;                    (time (if songid
+;;                              (if (< last-time 1.0)
+;;                                  (cdr mpc-last-seek-time)
+;;                                (string-to-number
+;;                                 (cdr (assq 'time status)))))))
+;;               (setq mpc-last-seek-time
+;;                     (cons currenttime (setq time (+ time step))))
+;;               (mpc-proc-cmd (list "seekid" songid time)
+;;                             #'mpc-status-refresh))))
+;;       (let ((status (mpc-cmd-status)))
+;;         (let* ((songid (cdr (assq 'songid status)))
+;;                        (time (if songid (string-to-number
+;;                                          (cdr (assq 'time status))))))
+;;           (let ((timer (run-with-timer
+;;                         t repeat-delay
+;;                         (lambda ()
+;;                           (mpc-proc-cmd (list "seekid" songid
+;;                                               (setq time (+ time step)))
+;;                                         #'mpc-status-refresh)))))
+;;             (while (mouse-movement-p
+;;                     (event-basic-type (setq event (read-event)))))
+;;             (cancel-timer timer)))))))
 
 (defvar mpc--faster-toggle-timer nil)
 (defun mpc--faster-stop ()
@@ -2555,7 +2627,6 @@ If stopped, start playback."
 (defvar mpc--faster-toggle-forward nil)
 (defvar mpc--faster-acceleration 0.5)
 (defun mpc--faster-toggle (speedup step)
-  (setq speedup (float speedup))
   (if mpc--faster-toggle-timer
       (mpc--faster-stop)
     (mpc-status-refresh) (mpc-proc-sync)
@@ -2582,11 +2653,11 @@ If stopped, start playback."
                    (setq songtime (string-to-number
                                    (cdr (assq 'time mpc-status))))
                    (setq songduration (mpc--songduration))
-                   (setq oldtime (float-time)))
+		   (setq oldtime (current-time)))
                   ((and (>= songtime songduration) mpc--faster-toggle-forward)
                    ;; Skip to the beginning of the next song.
                    (if (not (equal (cdr (assq 'state mpc-status)) "play"))
-                       (mpc-proc-cmd "next" 'mpc-status-refresh)
+                       (mpc-proc-cmd "next" #'mpc-status-refresh)
                      ;; If we're playing, this is done automatically, so we
                      ;; don't need to do anything, or rather we *shouldn't*
                      ;; do anything otherwise there's a race condition where
@@ -2601,14 +2672,16 @@ If stopped, start playback."
                        (lambda ()
                          (setq songid (cdr (assq 'songid mpc-status)))
                          (setq songtime (setq songduration (mpc--songduration)))
-                         (setq oldtime (float-time))
+			 (setq oldtime (current-time))
                          (mpc-proc-cmd (list "seekid" songid songtime)))))))
                   (t
                    (setq speedup (+ speedup mpc--faster-acceleration))
                    (let ((newstep
-                          (truncate (* speedup (- (float-time) oldtime)))))
+			  (truncate
+			   (* speedup
+			      (float-time (time-since oldtime))))))
                      (if (<= newstep 1) (setq newstep 1))
-                     (setq oldtime (+ oldtime (/ newstep speedup)))
+		     (setq oldtime (time-add oldtime (/ newstep speedup)))
                      (if (not mpc--faster-toggle-forward)
                          (setq newstep (- newstep)))
                      (setq songtime (min songduration (+ songtime newstep)))
@@ -2616,7 +2689,7 @@ If stopped, start playback."
                        (condition-case nil
                            (mpc-proc-cmd
                             (list "seekid" songid songtime)
-                            'mpc-status-refresh)
+                            #'mpc-status-refresh)
                          (mpc-proc-error (mpc-status-refresh)))))))))))
         (setq mpc--faster-toggle-forward (> step 0))
         (funcall fun)                   ;Initialize values.
@@ -2644,6 +2717,18 @@ If stopped, start playback."
   (interactive (list last-nonmenu-event))
   (mpc-select event)
   (mpc-play))
+
+(defun mpc-goto-playing-song ()
+  "Move point to the currently playing song in the \"*Songs*\" buffer."
+  (interactive)
+  (let* ((buf (mpc-proc-buffer (mpc-proc) 'songs))
+         (win (get-buffer-window buf)))
+    (when (and (buffer-live-p buf) win)
+      (select-window win)
+      (with-current-buffer buf
+        (when (and overlay-arrow-position
+                   (eq (marker-buffer overlay-arrow-position) buf))
+          (goto-char (marker-position overlay-arrow-position)))))))
 
 ;; (defun mpc-play-tagval ()
 ;;   "Play all the songs of the tag at point."
@@ -2700,7 +2785,7 @@ If stopped, start playback."
                            (error "Not a playlist")
                          (buffer-substring (line-beginning-position)
                                            (line-end-position)))))
-         (mpc-cmd-add (mapcar 'car songs) playlist)
+         (mpc-cmd-add (mapcar #'car songs) playlist)
          (message "Added %d songs to %s" (length songs) playlist)
          (if (member playlist
                      (cdr (assq 'Playlist (mpc-constraints-get-current))))
@@ -2712,7 +2797,7 @@ If stopped, start playback."
          ((eq start-buf end-buf)
           ;; Moving songs within the shown playlist.
           (let ((dest-pos (get-text-property (point) 'mpc-file-pos)))
-            (mpc-cmd-move (mapcar 'cdr songs) dest-pos mpc-songs-playlist)
+            (mpc-cmd-move (mapcar #'cdr songs) dest-pos mpc-songs-playlist)
             (message "Moved %d songs" (length songs))))
          (t
           ;; Adding songs to the shown playlist.
@@ -2723,16 +2808,212 @@ If stopped, start playback."
             ;; MPD's protocol does not let us add songs at a particular
             ;; position in a playlist, so we first have to add them to the
             ;; end, and then move them to their final destination.
-            (mpc-cmd-add (mapcar 'car songs) mpc-songs-playlist)
+            (mpc-cmd-add (mapcar #'car songs) mpc-songs-playlist)
             (mpc-cmd-move (let ((poss '()))
                             (dotimes (i (length songs))
-                                     (push (+ i (length pl)) poss))
+                              (push (+ i (length pl)) poss))
                             (nreverse poss))
                             dest-pos mpc-songs-playlist)
             (message "Added %d songs" (length songs)))))
         (mpc-songs-refresh))
       (t
        (error "Unsupported drag'n'drop gesture"))))))
+
+;;; Notifications ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(declare-function notifications-notify "notifications")
+
+(defcustom mpc-notifications nil
+  "Non-nil means MPC should display notifications when the song changes."
+  :version "31.1"
+  :type 'boolean)
+
+(defcustom mpc-notifications-title
+  '("%{Title}" "Unknown Title")
+  "List of FORMAT-SPECs used in the notification title.
+
+The first element in the list that expands to a non-empty string
+will be used.  See `mpc-format' for the definition of FORMAT-SPEC."
+  :version "31.1"
+  :type '(repeat string))
+
+(defcustom mpc-notifications-body
+  '("%{Artist}" "%{AlbumArtist}" "Unknown Artist")
+  "List of FORMAT-SPECs used in the notification body.
+
+The first element in the list that expands to a non-empty string
+will be used.  See `mpc-format' for the definition of FORMAT-SPEC."
+  :version "31.1"
+  :type '(repeat string))
+
+(defvar mpc--notifications-id nil)
+
+(defun mpc--notifications-format (format-specs)
+  "Use FORMAT-SPECS to get string for use in notification."
+  (with-temp-buffer
+    (cl-some
+     (lambda (spec)
+       (mpc-format spec mpc-status)
+       (if (< (point-min) (point-max))
+           (buffer-string)))
+     format-specs)))
+
+(defun mpc-notifications-notify ()
+  "Display a notification with information about the current song."
+  (when-let* ((mpc-notifications)
+              ((notifications-get-server-information))
+              ((string= "play" (alist-get 'state mpc-status)))
+              (title (mpc--notifications-format mpc-notifications-title))
+              (body (mpc--notifications-format mpc-notifications-body))
+              (icon (or (mpc-cover-image-find (alist-get 'file mpc-status))
+                        notifications-application-icon)))
+    (setq mpc--notifications-id
+          (notifications-notify :title title
+                                :body body
+                                :app-icon icon
+                                :replaces-id mpc--notifications-id))))
+
+;;; Song Viewer ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defface mpc-table-value
+  '((t (:inherit vtable)))
+  "Face for values in MPC tables.")
+
+(defface mpc-table-key
+  '((t (:inherit (mpc-table-value bold))))
+  "Face for keys in MPC tables.")
+
+(defface mpc-table-empty
+  '((t (:inherit (mpc-table-value italic shadow))))
+  "Face for empty values in MPC tables.")
+
+(defcustom mpc-song-viewer-tags
+  '("Title" "Artist" "Album" "Performer" "Composer"
+    "Date" "Duration" "Disc" "Track" "Genre" "File")
+  "The list of tags to display with `mpc-describe-song'.
+
+The list of supported tags are available by evaluating
+`mpc-cmd-tagtypes'.  In addition to the standard MPD tags: Bitrate,
+Duration, File, and Format are also supported."
+  :version "31.1"
+  :type '(repeat string))
+
+(defun mpc-describe-song (file)
+  "Show details of the selected song or FILE in the MPC song viewer.
+
+If there is no song at point then information about the currently
+playing song is displayed."
+  (interactive
+   ;; Handle being called from the context menu.  In that case you want
+   ;; to see details for the song you clicked on to invoke the menu not
+   ;; whatever `point' happens to be on at that time.
+   (list (when-let* ((event last-nonmenu-event)
+                     ((listp event))
+                     (position (nth 1 (event-start event))))
+           (get-text-property position 'mpc-file))))
+  (let ((tags (or (when (and file (stringp file))
+                    (mpc-proc-cmd-to-alist (list "search" "file" file)))
+                  (when-let* (((string= (buffer-name) "*MPC-Songs*"))
+                              (file (get-text-property (point) 'mpc-file)))
+                    (mpc-proc-cmd-to-alist (list "search" "file" file)))
+                  (when (assoc 'file mpc-status) mpc-status)))
+        (buffer "*MPC Song Viewer*"))
+    (when tags
+      (with-current-buffer (get-buffer-create buffer)
+        (special-mode)
+        (visual-line-mode)
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (make-vtable
+           :columns `(( :name "Tag"
+                        :align right
+                        :min-width 3
+                        :displayer
+                        ,(lambda (tag &rest _)
+                           (propertize tag 'face 'mpc-table-key)))
+                      ( :name "Value"
+                        :align left
+                        :min-width 5
+                        :displayer
+                        ,(lambda (value &rest _)
+                           (if (and value (not (string-blank-p value)))
+                               (propertize value 'face 'mpc-table-value)
+                             (propertize "empty" 'face 'mpc-table-empty)))))
+           :objects (mapcar
+                     (lambda (tag)
+                       (pcase tag
+                         ("Bitrate"
+                          (list tag (let ((bitrate (alist-get 'bitrate tags)))
+                                      (when bitrate
+                                        (format "%s kpbs" bitrate)))))
+                         ("Duration" (list tag (mpc-secs-to-time
+                                                (alist-get 'duration tags))))
+                         ("File" (list tag (alist-get 'file tags)))
+                         ;; Concatenate all the values of tags which may
+                         ;; occur multiple times.
+                         ((or "Composer" "Genre" "Performer")
+                          (list tag (mapconcat
+                                     (lambda (val) (cdr val))
+                                     (seq-filter
+                                      (lambda (val) (eq (car val) (intern tag)))
+                                      tags)
+                                     "; ")))
+                         (_ (list tag (alist-get (intern tag) tags)))))
+                     mpc-song-viewer-tags))
+          (goto-char (point-min))))
+      (pop-to-buffer buffer '((display-buffer-reuse-window
+                               display-buffer-same-window)
+                              (reusable-frames . t))))))
+
+;;; Stats viewer ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defvar mpc--server-stats-date "%c"
+  "Format used for dates in `mpc-server-stats'.
+See `format-time-string' for formatting details.")
+
+(defvar mpc--server-stats-duration "%Y, %D, %z%h:%.2m:%.2s"
+  "Format used for durations in `mpc-server-stats'.
+See `format-seconds' for formatting details.")
+
+(defun mpc--server-stats-date (seconds)
+  "Format SECONDS as a date for display by `mpc-server-stats'."
+  (format-time-string mpc--server-stats-date (string-to-number seconds)))
+
+(defun mpc--server-stats-duration (seconds)
+  "Format SECONDS as a duration for display by `mpc-server-stats'."
+  (format-seconds mpc--server-stats-duration (string-to-number seconds)))
+
+(defun mpc--server-stats-format (stat)
+  "Format STAT data for display by `mpc-server-stats'."
+  (let ((key (seq-reduce (lambda (string from-to)
+                           (string-replace (car from-to) (cdr from-to) string))
+                         '(("Db_" . "DB_") ("_" . " "))
+                         (capitalize (symbol-name (car stat)))))
+        (val (cdr stat)))
+    (list key (cond
+               ((string-match-p "time\\'" key) (mpc--server-stats-duration val))
+               ((string-match-p "date\\'" key) (mpc--server-stats-date val))
+               (t val)))))
+
+(defun mpc-server-stats ()
+  "Display stats about the connected MPD server."
+  (interactive)
+  (let ((buffer "*MPC Stats Viewer*"))
+    (with-current-buffer (get-buffer-create buffer)
+      (special-mode)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (make-vtable
+         :columns '((:name "Server Stats" :align right :min-width 10) "")
+         :formatter (lambda (value column &rest _)
+                      (propertize value 'face (if (= column 0)
+                                                  'mpc-table-key
+                                                'mpc-table-value)))
+         :objects (mapcar #'mpc--server-stats-format
+                          (mpc-proc-cmd-to-alist (list "stats")))))
+      (pop-to-buffer buffer '((display-buffer-reuse-window)
+                              (reusable-frames . t)
+                              (window-height . 10))))))
 
 ;;; Toplevel ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -2749,7 +3030,9 @@ If stopped, start playback."
      (if current-prefix-arg
          ;; FIXME: We should provide some completion here, especially for the
          ;; case where the user specifies a local socket/file name.
-         (setq mpc-host (read-string "MPD host and port: " nil nil mpc-host)))
+         (setq mpc-host (read-string
+                         (format-prompt "MPD host and port" mpc-host)
+                         nil nil mpc-host)))
      nil))
   (let* ((song-buf (mpc-songs-buf))
          (song-win (get-buffer-window song-buf 0)))

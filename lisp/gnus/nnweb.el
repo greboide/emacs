@@ -1,6 +1,6 @@
-;;; nnweb.el --- retrieving articles via web search engines
+;;; nnweb.el --- retrieving articles via web search engines  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 1996-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1996-2026 Free Software Foundation, Inc.
 
 ;; Author: Lars Magne Ingebrigtsen <larsi@gnus.org>
 ;; Keywords: news
@@ -24,8 +24,6 @@
 
 ;;; Code:
 
-(eval-when-compile (require 'cl-lib))
-
 (require 'nnoo)
 (require 'message)
 (require 'gnus-util)
@@ -42,37 +40,30 @@
 
 (defvoo nnweb-type 'google
   "What search engine type is being used.
-Valid types include `google', `dejanews', and `gmane'.")
+The only valid type is currently `google'.")
 
 (defvar nnweb-type-definition
   '((google
-     (id . "http://www.google.com/groups?as_umsgid=%s&hl=en&dmode=source")
-     (result . "http://groups.google.com/group/%s/msg/%s?dmode=source")
+     (id . "https://www.google.com/groups?as_umsgid=%s&hl=en&dmode=source")
+     (result . "https://groups.google.com/group/%s/msg/%s?dmode=source")
      (article . nnweb-google-wash-article)
      (reference . identity)
      (map . nnweb-google-create-mapping)
      (search . nnweb-google-search)
-     (address . "http://groups.google.com/groups")
-     (base    . "http://groups.google.com")
+     (address . "https://groups.google.com/groups")
+     (base    . "https://groups.google.com")
      (identifier . nnweb-google-identity))
+    ;; FIXME: Make obsolete?
     (dejanews ;; alias of google
-     (id . "http://www.google.com/groups?as_umsgid=%s&hl=en&dmode=source")
-     (result . "http://groups.google.com/group/%s/msg/%s?dmode=source")
+     (id . "https://www.google.com/groups?as_umsgid=%s&hl=en&dmode=source")
+     (result . "https://groups.google.com/group/%s/msg/%s?dmode=source")
      (article . nnweb-google-wash-article)
      (reference . identity)
      (map . nnweb-google-create-mapping)
      (search . nnweb-google-search)
-     (address . "http://groups.google.com/groups")
-     (base    . "http://groups.google.com")
-     (identifier . nnweb-google-identity))
-    (gmane
-     (article . nnweb-gmane-wash-article)
-     (id . "http://gmane.org/view.php?group=%s")
-     (reference . identity)
-     (map . nnweb-gmane-create-mapping)
-     (search . nnweb-gmane-search)
-     (address . "http://search.gmane.org/nov.php")
-     (identifier . nnweb-gmane-identity)))
+     (address . "https://groups.google.com/groups")
+     (base    . "https://groups.google.com")
+     (identifier . nnweb-google-identity)))
   "Type-definition alist.")
 
 (defvoo nnweb-search nil
@@ -96,7 +87,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 
 (nnoo-define-basics nnweb)
 
-(deffoo nnweb-retrieve-headers (articles &optional group server fetch-old)
+(deffoo nnweb-retrieve-headers (articles &optional group server _fetch-old)
   (nnweb-possibly-change-server group server)
   (with-current-buffer nntp-server-buffer
     (erase-buffer)
@@ -109,7 +100,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 (deffoo nnweb-request-scan (&optional group server)
   (nnweb-possibly-change-server group server)
   (if nnweb-ephemeral-p
-      (setq nnweb-hashtb (gnus-make-hashtable 4095))
+      (setq nnweb-hashtb (gnus-make-hashtable 4000))
     (unless nnweb-articles
       (nnweb-read-overview group)))
   (funcall (nnweb-definition 'map))
@@ -117,7 +108,7 @@ Valid types include `google', `dejanews', and `gmane'.")
     (nnweb-write-active)
     (nnweb-write-overview group)))
 
-(deffoo nnweb-request-group (group &optional server dont-check info)
+(deffoo nnweb-request-group (group &optional server dont-check _info)
   (nnweb-possibly-change-server group server)
   (unless (or nnweb-ephemeral-p
 	      dont-check
@@ -154,23 +145,23 @@ Valid types include `google', `dejanews', and `gmane'.")
 		(and (stringp article)
 		     (nnweb-definition 'id t)
 		     (let ((fetch (nnweb-definition 'id))
-			   art active)
-		       (when (string-match "^<\\(.*\\)>$" article)
-			 (setq art (match-string 1 article)))
+			   (art (when (string-match "^<\\(.*\\)>$" article)
+			          (match-string 1 article)))
+			   ) ;; active
 		       (when (and fetch art)
 			 (setq url (format fetch
 					   (mm-url-form-encode-xwfu art)))
 			 (mm-url-insert url)
 			 (if (nnweb-definition 'reference t)
 			     (setq article
-				   (funcall (nnweb-definition
-					     'reference) article)))))))
+				   (funcall (nnweb-definition 'reference)
+					    article)))))))
 	(unless nnheader-callback-function
 	  (funcall (nnweb-definition 'article)))
 	(nnheader-report 'nnweb "Fetched article %s" article)
 	(cons group (and (numberp article) article))))))
 
-(deffoo nnweb-close-server (&optional server)
+(deffoo nnweb-close-server (&optional server _defs)
   (when (and (nnweb-server-opened server)
 	     (gnus-buffer-live-p nnweb-buffer))
     (with-current-buffer nnweb-buffer
@@ -184,19 +175,19 @@ Valid types include `google', `dejanews', and `gmane'.")
     (nnmail-generate-active (list (assoc server nnweb-group-alist)))
     t))
 
-(deffoo nnweb-request-update-info (group info &optional server))
+(deffoo nnweb-request-update-info (_group _info &optional _server))
 
 (deffoo nnweb-asynchronous-p ()
   nil)
 
-(deffoo nnweb-request-create-group (group &optional server args)
+(deffoo nnweb-request-create-group (group &optional server _args)
   (nnweb-possibly-change-server nil server)
   (nnweb-request-delete-group group)
   (push `(,group ,(cons 1 0)) nnweb-group-alist)
   (nnweb-write-active)
   t)
 
-(deffoo nnweb-request-delete-group (group &optional force server)
+(deffoo nnweb-request-delete-group (group &optional _force server)
   (nnweb-possibly-change-server group server)
   (gnus-alist-pull group nnweb-group-alist t)
   (nnweb-write-active)
@@ -229,11 +220,11 @@ Valid types include `google', `dejanews', and `gmane'.")
 	(nnheader-insert-nov (cadr (pop articles)))))))
 
 (defun nnweb-set-hashtb (header data)
-  (gnus-sethash (nnweb-identifier (mail-header-xref header))
+  (puthash (nnweb-identifier (mail-header-xref header))
 		data nnweb-hashtb))
 
 (defun nnweb-get-hashtb (url)
-  (gnus-gethash (nnweb-identifier url) nnweb-hashtb))
+  (gethash (nnweb-identifier url) nnweb-hashtb))
 
 (defun nnweb-identifier (ident)
   (funcall (nnweb-definition 'identifier) ident))
@@ -254,6 +245,8 @@ Valid types include `google', `dejanews', and `gmane'.")
 
 (defun nnweb-definition (type &optional noerror)
   "Return the definition of TYPE."
+  (when (eq nnweb-type 'gmane)
+    (user-error "`gmane' is no longer a valid value for `nnweb-type'"))
   (let ((def (cdr (assq type (assq nnweb-type nnweb-type-definition)))))
     (when (and (not def)
 	       (not noerror))
@@ -268,7 +261,7 @@ Valid types include `google', `dejanews', and `gmane'.")
   (unless nnweb-group-alist
     (nnweb-read-active))
   (unless nnweb-hashtb
-    (setq nnweb-hashtb (gnus-make-hashtable 4095)))
+    (setq nnweb-hashtb (make-hash-table :size 4000 :test #'equal)))
   (when group
     (setq nnweb-group group)))
 
@@ -277,6 +270,8 @@ Valid types include `google', `dejanews', and `gmane'.")
   (unless (gnus-buffer-live-p nnweb-buffer)
     (setq nnweb-buffer
 	  (save-current-buffer
+            (when (eq nnweb-type 'gmane)
+              (user-error "`gmane' is no longer a valid value for `nnweb-type'"))
             (nnheader-set-temp-buffer
              (format " *nnweb %s %s %s*"
                      nnweb-type nnweb-search server))
@@ -317,7 +312,7 @@ Valid types include `google', `dejanews', and `gmane'.")
   (let ((i 0)
 	(case-fold-search t)
 	(active (cadr (assoc nnweb-group nnweb-group-alist)))
-	Subject Score Date Newsgroups From
+	Subject Date Newsgroups From
 	map url mid)
     (unless active
       (push (list nnweb-group (setq active (cons 1 0)))
@@ -360,11 +355,11 @@ Valid types include `google', `dejanews', and `gmane'.")
 		     (current-time-string)))
 	(setq From (match-string 4)))
       (widen)
-      (cl-incf i)
+      (incf i)
       (unless (nnweb-get-hashtb url)
 	(push
 	 (list
-	  (cl-incf (cdr active))
+          (incf (cdr active))
 	  (make-full-mail-header
 	   (cdr active) (if Newsgroups
 			    (concat  "(" Newsgroups ") " Subject)
@@ -396,7 +391,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 		  (nconc nnweb-articles (nnweb-google-parse-1)))
 	    ;; Check if there are more articles to fetch
 	    (goto-char (point-min))
-	    (cl-incf i 100)
+            (incf i 100)
 	    (if (or (not (re-search-forward
 			  "<a [^>]+href=\"\n?\\([^>\" \n\t]+\\)[^<]*<img[^>]+src=[^>]+next"
 			  nil t))
@@ -411,7 +406,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 	  ;; Return the articles in the right order.
 	  (nnheader-message 7 "Searching google...done")
 	  (setq nnweb-articles
-		(sort nnweb-articles 'car-less-than-car))))))
+		(sort nnweb-articles #'car-less-than-car))))))
 
 (defun nnweb-google-search (search)
   (mm-url-insert
@@ -437,10 +432,11 @@ Valid types include `google', `dejanews', and `gmane'.")
     url))
 
 ;;;
-;;; gmane.org
+;;; gmane.org -- now obsolete as the gmane.org web interface is gone
 ;;;
 (defun nnweb-gmane-create-mapping ()
   "Perform the search and create a number-to-url alist."
+  (declare (obsolete nil "30.1"))
   (with-current-buffer nnweb-buffer
     (let ((case-fold-search t)
 	  (active (or (cadr (assoc nnweb-group nnweb-group-alist))
@@ -461,30 +457,30 @@ Valid types include `google', `dejanews', and `gmane'.")
 		    (subject (mail-header-subject header))
 		    (rfc2047-encoding-type 'mime))
 		(when (string-match " \\([^:]+\\)[:/]\\([0-9]+\\)" xref)
-		  (mail-header-set-xref
-		   header
-		   (format "http://article.gmane.org/%s/%s/raw"
-			   (match-string 1 xref)
-			   (match-string 2 xref))))
+		  (setf (mail-header-xref header)
+		        (format "http://article.gmane.org/%s/%s/raw"
+			        (match-string 1 xref)
+			        (match-string 2 xref))))
 
 		;; Add host part to gmane-encrypted addresses
 		(when (string-match "@$" from)
-		  (mail-header-set-from header
-					(concat from "public.gmane.org")))
+		  (setf (mail-header-from header)
+			(concat from "public.gmane.org")))
 
-		(mail-header-set-subject header
-					 (rfc2047-encode-string subject))
+		(setf (mail-header-subject header)
+		      (rfc2047-encode-string subject))
 
 		(unless (nnweb-get-hashtb (mail-header-xref header))
-		  (mail-header-set-number header (cl-incf (cdr active)))
+                  (setf (mail-header-number header) (incf (cdr active)))
 		  (push (list (mail-header-number header) header) map)
 		  (nnweb-set-hashtb (cadar map) (car map))))))
 	  (forward-line 1)))
       (nnheader-message 7 "Searching Gmane...done")
       (setq nnweb-articles
-	    (sort (nconc nnweb-articles map) 'car-less-than-car)))))
+	    (sort (nconc nnweb-articles map) #'car-less-than-car)))))
 
 (defun nnweb-gmane-wash-article ()
+  (declare (obsolete nil "30.1"))
   (let ((case-fold-search t))
     (goto-char (point-min))
     (when (search-forward "<!--X-Head-of-Message-->" nil t)
@@ -496,6 +492,7 @@ Valid types include `google', `dejanews', and `gmane'.")
       (mm-url-remove-markup))))
 
 (defun nnweb-gmane-search (search)
+  (declare (obsolete nil "30.1"))
   (mm-url-insert
    (concat
     (nnweb-definition 'address)
@@ -512,6 +509,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 
 (defun nnweb-gmane-identity (url)
   "Return a unique identifier based on URL."
+  (declare (obsolete nil "30.1"))
   (if (string-match "group=\\(.+\\)" url)
       (match-string 1 url)
     url))
@@ -535,7 +533,7 @@ Valid types include `google', `dejanews', and `gmane'.")
 	     (nth 1 parse)
 	     " "))
     (insert ">\n")
-    (mapc 'nnweb-insert-html (nth 2 parse))
+    (mapc #'nnweb-insert-html (nth 2 parse))
     (insert "</" (symbol-name (car parse)) ">\n")))
 
 (defun nnweb-parse-find (type parse &optional maxdepth)

@@ -1,6 +1,6 @@
-;;; calc-mode.el --- calculator modes for Calc
+;;; calc-mode.el --- calculator modes for Calc  -*- lexical-binding:t -*-
 
-;; Copyright (C) 1990-1993, 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 1990-1993, 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: David Gillespie <daveg@synaptics.com>
 
@@ -109,11 +109,14 @@
      (setq n (and (not (eq calc-auto-why t)) (if calc-auto-why t 1))))
    (calc-change-mode 'calc-auto-why n nil)
    (cond ((null n)
-	  (message "User must press `w' to explain unsimplified results"))
+	  (message (substitute-command-keys
+                    "User must press \\`w' to explain unsimplified results")))
 	 ((eq n t)
-	  (message "Automatically doing `w' to explain unsimplified results"))
+          (message (substitute-command-keys
+                    "Automatically doing \\`w' to explain unsimplified results")))
 	 (t
-	  (message "Automatically doing `w' only for unusual messages")))))
+          (message (substitute-command-keys
+                    "Automatically doing \\`w' only for unusual messages"))))))
 
 (defun calc-group-digits (n)
   (interactive "P")
@@ -268,7 +271,7 @@
   (interactive)
   (calc-wrapper
    (let (pos
-	 (vals (mapcar (function (lambda (v) (symbol-value (car v))))
+         (vals (mapcar (lambda (v) (symbol-value (car v)))
 		       calc-mode-var-list)))
      (unless calc-settings-file
        (error "No `calc-settings-file' specified"))
@@ -287,22 +290,16 @@
        (goto-char (point-max))
        (insert "\n\n")
        (forward-char -1))
+     (save-excursion
+       (goto-char (point-max))
+       (skip-chars-backward " \n\t")
+       (when (bobp)
+         (insert ";;; -*- mode: emacs-lisp; lexical-binding:t -*-\n")))
      (insert ";;; Mode settings stored by Calc on " (current-time-string) "\n")
-     (let ((list calc-mode-var-list))
-       (while list
-	 (let* ((v (car (car list)))
-		(def (nth 1 (car list)))
-		(val (car vals)))
-	   (or (equal val def)
-	       (progn
-		 (insert "(setq " (symbol-name v) " ")
-		 (if (and (or (listp val)
-			      (symbolp val))
-			  (not (memq val '(nil t))))
-		     (insert "'"))
-		 (insert (prin1-to-string val) ")\n"))))
-	 (setq list (cdr list)
-	       vals (cdr vals))))
+     (pcase-dolist (`(,v ,def) calc-mode-var-list)
+       (let* ((val (pop vals)))
+	 (or (equal val def)
+	     (pp `(setq ,v ,(macroexp-quote val)) (current-buffer)))))
      (run-hooks 'calc-mode-save-hook)
      (insert ";;; End of mode settings\n")
      (save-buffer)
@@ -329,7 +326,8 @@
           (equal user-init-file calc-settings-file)
           (> arg 0))
 	 (< arg 0)
-	 (load name t)
+	 (let ((warning-inhibit-types '((files missing-lexbind-cookie))))
+           (load name t))
 	 (message "New file")))))
 
 (defun math-get-modes-vec ()
@@ -424,8 +422,8 @@
 		  (t
 		   "Not recording mode changes permanently")))))
 
-(defun calc-total-algebraic-mode (flag)
-  (interactive "P")
+(defun calc-total-algebraic-mode (&optional _flag)
+  (interactive)
   (calc-wrapper
    (if (eq calc-algebraic-mode 'total)
        (calc-algebraic-mode nil)

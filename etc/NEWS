@@ -1,765 +1,611 @@
 GNU Emacs NEWS -- history of user-visible changes.
 
-Copyright (C) 2017-2018 Free Software Foundation, Inc.
+Copyright (C) 2022-2026 Free Software Foundation, Inc.
 See the end of the file for license conditions.
 
-Please send Emacs bug reports to bug-gnu-emacs@gnu.org.
-If possible, use M-x report-emacs-bug.
+Please send Emacs bug reports to 'bug-gnu-emacs@gnu.org'.
+If possible, use 'M-x report-emacs-bug'.
 
-This file is about changes in Emacs version 27.
+This file is about changes in Emacs version 32.
 
 See file HISTORY for a list of GNU Emacs versions and release dates.
-See files NEWS.26, NEWS.25, ..., NEWS.18, and NEWS.1-17 for changes
+See files NEWS.31, NEWS.30, ..., NEWS.18, and NEWS.1-17 for changes
 in older Emacs versions.
 
 You can narrow news to a specific version by calling 'view-emacs-news'
-with a prefix argument or by typing C-u C-h C-n.
+with a prefix argument or by typing 'C-u C-h C-n'.
 
 Temporary note:
-+++ indicates that all necessary documentation updates are complete.
-    (This means all relevant manuals in doc/ AND lisp doc-strings.)
++++ indicates that all relevant manuals in doc/ have been updated.
 --- means no change in the manuals is needed.
-When you add a new item, use the appropriate mark if you are sure it applies,
+When you add a new item, use the appropriate mark if you are sure it
+applies, and please also update docstrings as needed.
 
 
-* Installation Changes in Emacs 27.1
-
-** The new configure option '--with-json' adds support for JSON using
-the Jansson library.  It is on by default; use 'configure
---with-json=no' to build without Jansson support.  The new JSON
-functions 'json-serialize', 'json-insert', 'json-parse-string', and
-'json-parse-buffer' are typically much faster than their Lisp
-counterparts from json.el.
-
-** Emacs has been ported to the -fcheck-pointer-bounds option of GCC.
-This causes Emacs to check bounds of some arrays addressed by its
-internal pointers, which can be helpful when debugging the Emacs
-interpreter or modules that it uses.  If your platform supports it you
-can enable it when configuring, e.g., './configure CFLAGS="-g3 -O2
--mmpx -fcheck-pointer-bounds"' on Intel MPX platforms.
-
-** Emacs now normally uses a C pointer type instead of a C integer
-type to implement Lisp_Object, which is the fundamental machine word
-type internal to the Emacs Lisp interpreter.  This change aims to
-catch typos and support -fcheck-pointer-bounds.  The 'configure'
-option --enable-check-lisp-object-type is therefore no longer as
-useful and so is no longer enabled by default in developer builds,
-to reduce differences between developer and production builds.
+* Installation Changes in Emacs 32.1
 
 
-* Startup Changes in Emacs 27.1
+* Startup Changes in Emacs 32.1
 
-+++
-** Emacs can now be configured using an early init file.
-The file is called 'early-init.el', in 'user-emacs-directory'.  It is
-loaded very early in the startup process: before graphical elements
-such as the tool bar are initialized, and before the package manager
-is initialized.  The primary purpose is to allow customizing how the
-package system is initialized given that initialization now happens
-before loading the regular init file (see below).
-
-We recommend against putting any customizations in this file that
-don't need to be set up before initializing installed add-on packages,
-because the early init file is read too early into the startup
-process, and some important parts of the Emacs session, such as
-window-system and other GUI features, are not yet set up, which could
-make some customization fail to work.
-
-+++
-** Installed packages are now activated *before* loading the init file.
-This is part of a change intended to eliminate the behavior of
-package.el inserting a call to 'package-initialize' into the init
-file, which was previously done when Emacs was started.  As a result
-of this change, it is no longer necessary to call 'package-initialize'
-in your init file.
-
-However, if your init file changes the values of 'package-load-list' or
-'package-user-dir', or sets 'package-enable-at-startup' to nil then it won't
-work right without some adjustment:
-- you can move that code to the early init file (see above), so those settings
-  apply before Emacs tries to activate the packages.
-- you can use the new 'package-quickstart' so activation of packages does not
-  need to pay attention to 'package-load-list' or 'package-user-dir' any more.
+** New terminal type 'Kmscon'.
+Emacs now supports the 'Kmscon' terminal emulator available on GNU/Linux
+systems.
 
 
-* Changes in Emacs 27.1
+* Changes in Emacs 32.1
+
+** Emacs now supports Unicode Standard version 18.0.
 
 ---
-** New variable 'xft-ignore-color-fonts'.
-Default t means don't try to load color fonts when using Xft, as they
-often cause crashes.  Set it to nil if you really need those fonts.
-(Bug#30874)
+** Emacs no longer kills child processes after EPIPE.
+Previously, Emacs would immediately kill a child process and set its
+exit status to 256 if sending input to that process returned EPIPE.
+Now when this happens, Emacs closes the file descriptor to write to the
+child process, but allows it to continue execution as normal.
 
 ---
-** The new option 'tooltip-resize-echo-area' avoids truncating tooltip text
-on GUI frames when tooltips are displayed in the echo area.  Instead,
-it resizes the echo area as needed to accommodate the full tool-tip
-text.
+** New variable 'tty-cursor-movement-use-TAB'.
+If this is set to the nil value, Emacs will not use TABs to optimize
+cursor motion on text-mode terminals.  This is for the rare cases where
+the hardware tabs of the terminal were set to a non-default value by the
+'tabs' command or similar, or if using TABs for cursor movement has any
+other undesired effects.  The default is t, which preserves past
+behavior.
+
+If this variable is nil, 'tty-cursor-movement-use-TAB-BS' has no effect,
+and Emacs will never use TABs for any cursor-movement sequences.
 
 ---
-** Show modeline tooltips only if the corresponding action applies.
-Customize the option 'mode-line-default-help-echo' to restore the old
-behavior where the tooltip text is also shown when the corresponding
-action does not apply.
-
-+++
-** New hook 'server-after-make-frame-hook'.
-This hook is a convenient place to perform initializations in daemon
-mode which require GUI features to be available.  One example is
-restoration of the previous session using the desktop.el package: put
-the call to 'desktop-read' in this hook, if you want the GUI settings
-to be restored, or if desktop.el needs to interact with you during
-restoration of the session.
-
-+++
-** New function 'logcount' calculates an integer's Hamming weight.
-
-+++
-** New function 'libxml-available-p'.
-This function returns non-nil if libxml support is both compiled in
-and available at run time.  Lisp programs should use this function to
-detect built-in libxml support, instead of testing for that
-indirectly, e.g., by checking that functions like
-'libxml-parse-html-region' return nil.
-
-+++
-** 'libxml-parse-xml-region' and 'libxml-parse-html' region take
-a parameter that's called DISCARD-COMMENTS, but it really only
-discards the top-level comment.  Therefore this parameter is now
-obsolete, and the new utility function 'xml-remove-comments' can be
-used to remove comments before calling the libxml functions to parse
-the data.
-
-+++
-** New function 'fill-polish-nobreak-p', to be used in 'fill-nobreak-predicate'.
-It blocks line breaking after a one-letter word, also in the case when
-this word is preceded by a non-space, but non-alphanumeric character.
-
-+++
-** The limit on repetitions in regexps has been raised to 2^16-1.
-It was previously limited to 2^15-1.  For example, the following
-regular expression was previously invalid, but is now accepted:
-
-   x\{32768\}
+** File- and directory-local variables respect user option setters.
+Values of variables that are user options mentioned in file-local
+variable sections and directory-locals via ".dir-locals.el" are now
+set similarly to 'setopt-local'; i.e., if a user option has a defcustom
+':set' function, that function will be invoked.
 
 ---
-** The German prefix and postfix input methods now support Capital sharp S.
+** New user option 'setopt-local-type-mismatch'.
+This option controls what 'setopt-local' does when it detects a type
+mismatch between the specified value and the ':type' specification of a
+user option.  Its backward-compatible default is nil which emits a
+warning and accepts the type-mismatched value.  You can control this by
+customizing 'setopt-local-type-mismatch' to a non-nil value: the value
+'accept' inhibits the warning and silently accepts type-mismatched
+values; the value 'discard' inhibits the warning and discards
+type-mismatched values; any other non-nil value prompts you whether to
+accept or ignore the value.
+
+---
+** Specifying a minor mode as a local variable enables that mode.
+The previous behavior, toggling the mode, was neither reliable nor
+generally desirable.
+
++++
+** Emacs tries to display the overlay arrow in the left margin.
+On a non-graphical display (or when the left fringe is not shown), if a
+left margin is present, Emacs will now display the overlay arrow into
+this margin.  Edebug is now using this feature by explicitly setting up
+a left margin for it.
+
+** Mode Line
+
+*** Popup menus invoked from mode line select another window.
+Clicking mode line elements in inactive windows now first
+selects another window before displaying the menu, so the
+commands invoked from the menu will operate on the right buffer.
+You can restore the previous behavior by removing
+'mode-line-window-select' from 'x-pre-popup-menu-hook'.
+
+** Minibuffer
+
+---
+*** The variable 'completion-ignore-case' is now customizable.
+
+---
+*** 'icomplete-in-buffer' users need no longer advise 'completion-at-point'.
+The "*Completions*" buffer no longer pops up in addition to Icomplete's
+in-buffer display of completions, by default.
+Therefore, the instructions in the NEWS file for Emacs 30.1 to add
+
+    (advice-add 'completion-at-point :after #'minibuffer-hide-completions)
+
+to your initialization file no longer apply, and you may remove it.
+If you still want to show the "*Completions*" buffer, then customize
+the user option 'icomplete-in-buffer' to the value 'with-completions-popup'.
+
+---
+** Improved Emoji support on text-only terminals.
+Emacs now composes Emoji sequences as two-column glyphs on text-mode
+terminals when 'auto-composition-mode' is enabled.  This should correct
+a number of movement and display issues on Emoji-capable terminal
+emulators.
+
+However, the actual rendering of Emoji still depends on the capability
+of the terminal emulator:
+
+- If the terminal emulator does not support grapheme clusters at all,
+  composed Emoji sequences will not work.  In this case, disable
+  'auto-composition-mode'.
+
+- Non-compliant terminal emulators may not always render an Emoji
+  sequence as a wide glyph, depending on the character width of the
+  first code point in the sequence.  In this case, it might help to set
+  'tty-display-emoji-force-wide' to nil.
+
+---
+** Support for overline face attributes on text-only terminals.
+Emacs now displays overlines on text-only terminals.  Terminal support
+for overline is determined based on the 'Smol' capability in the
+terminfo database.  For terminals where the terminfo database does not
+correctly declare the 'Smol' capability, the new function
+'tty-enable-overline' allows manually enabling or disabling support.
 
 
-* Editing Changes in Emacs 27.1
-
----
-** New variable 'x-wait-for-event-timeout'.
-This controls how long Emacs will wait for updates to the graphical
-state to take effect (making a frame visible, for example).
+* Editing Changes in Emacs 32.1
 
 +++
-** New user option 'electric-quote-replace-double'.
-This option controls whether '"' is replaced in 'electric-quote-mode',
-in addition to other quote characters.  If non-nil, ASCII double-quote
-characters that quote text "like this" are replaced by double
-typographic quotes, “like this”, in text modes, and in comments in
-non-text modes.
+** New user option 'query-replace-show-preview'.
+If non-nil, the replacement commands preview the replacement while you
+type it: the matches visible in the window are shown as they would look
+after the replacement.  Only the matches that the command will replace
+are previewed: those after point, or those before it when replacing
+backward.  The preview also appears at the first prompt, as soon as its
+input holds both halves, as it does after recalling a replacement from
+the history with 'M-p'.  Replacements that use '\,' or '\#' are not
+previewed.  The preview is off by default.
 
----
-** 'write-abbrev-file' now includes special properties.
-'write-abbrev-file' now writes special properties like ':case-fixed'
-for abbrevs that have them.
+The value can be the symbol 'replacement-only', which shows the
+replacement alone, the symbol 'both', which shows the match and the
+replacement side-by-side, or a custom function of the match and the
+replacement, returning the string to show in place of the match.
 
-+++
-** The new functions and commands 'text-property-search-forward' and
-'text-property-search-backward' have been added.  These provide an
-interface that's more like functions like @code{search-forward}.
+** Electric Pair mode
 
----
-** More commands support noncontiguous rectangular regions, namely
-'upcase-dwim', 'downcase-dwim', 'replace-string', 'replace-regexp'.
-
-+++
-** When asked to visit a large file, Emacs now offers visiting it literally.
-Previously, Emacs would only ask for confirmation before visiting
-large files.  Now it also offers a third alternative: to visit the
-file literally, as in 'find-file-literally', which speeds up
-navigation and editing of large files.
+*** Electric pair mode can restrict operation to nearby fields.
+This is particularly useful in comint-based modes (like 'M-x shell' or
+'M-x run-python') and other situations where process output may contain
+unpaired delimiters, while keeping delimiters you insert balanced.  The
+'electric-pair-field-search-size' variable controls the search distance
+for nearby fields.
 
 
-* Changes in Specialized Modes and Packages in Emacs 27.1
+* Changes in Specialized Modes and Packages in Emacs 32.1
 
-** Browse-url
-*** The function 'browse-url-emacs' can now visit a URL in selected window.
-It now treats the optional 2nd argument to mean that the URL should be
-shown in the currently selected window.
+** Use-Package
+---
+*** ':ensure t' installs the package only at run-time.
+In previous versions, it tried to install it more eagerly during
+compilation, but such side-effects are not welcome during compilation.
+In a pinch, to recover the previous behavior you can
+set 'use-package-ensure-install-during-compile' to a non-nil value,
+but it is a temporary backward compatibility hack that will disappear.
+
+** Package
+
+---
+*** Package-vc can copy local changes from existing installations.
+When installing the latest release of a package, 'package-vc' will
+propose copying files from an existing tarball installation of the same
+package with the same version.  This is useful if you have started
+making local changes to your tarball installation, and then decided to
+check out the repository to prepare a patch for the package maintainer.
+
+** Compilation mode
+
+---
+*** Messages from Ansible are now recognized.
 
 ** Flymake
 
 +++
-*** The variable 'flymake-diagnostic-types-alist' is obsolete
-You should instead set properties on known diagnostic symbols, like
-':error' and ':warning', as demonstrated in the Flymake manual.
+*** Overhauled inline diagnostics.
+A new user option 'flymake-inline-diagnostics' replaces
+'flymake-show-diagnostics-at-end-of-line' and controls how Flymake
+annotates diagnostic text directly in the buffer.  Besides the previous
+styles ('eol', 'short', and 'fancy'), it can be used to only display
+certain styles in certain situations, such as using a 'fancy' inline
+displays on nearby diagnostic only.  The old variable is now an obsolete
+alias.  In parallel, the user option 'flymake-diagnostic-format-alist'
+contains new options to configure exactly which parts of a diagnostic to
+show for each inline layout possibility.
 
-*** New customizable variable 'flymake-start-on-save-buffer'
-Control whether Flymake starts checking the buffer on save.
+** Man
 
-*** Flymake and backend functions may exchange hints about buffer changes
-This enables more efficient backends.  See the docstring of
-'flymake-diagnostic-functions' or the Flymake manual for details.
+---
+*** OSC 8 hyperlinks in man pages are now buttonized.
+When a man page contains OSC 8 hyperlink escape sequences, they
+are now buttonized, allowing using mouse or 'RET' to follow them.
 
-** Package
-*** New 'package-quickstart' feature
-When 'package-quickstart' is non-nil, package.el precomputes a big autoloads
-file so that activation of packages can be done much faster, which can speed up
-your startup significantly.
-It also causes variables like package-user-dir and package-load-list to be
-consulted when 'package-quickstart-refresh' is run rather than at startup so
-you don't need to set them in your early init file.
+** Woman
 
-*** New function 'package-activate-all'.
+---
+*** The variable 'woman-topic-history' is now obsolete.
+Use 'Man-topic-history' instead.
 
-** Ecomplete
-*** The ecomplete sorting has changed to a decay-based algorithm.
-This can be controlled by the new 'ecomplete-sort-predicate' variable.
-
-*** The 'ecompleterc' file is now placed in ~/.emacs.d/ecompleterc by default
-Of course it will still find it if you have it in ~/.ecompleterc
-
-** Gnus
+** VC
 
 +++
-*** A prefix argument to 'gnus-summary-limit-to-score' will limit reverse
-Limit to articles with score at below.
 
-*** The function 'gnus-score-find-favorite-words' has been renamed
-from 'gnus-score-find-favourite-words'.
+*** VC Directory outgoing revisions count is now asynchronous.
+This means it won't get in your way even if it's slow for your
+repository.  As such, the 'vc-dir-show-outgoing-count' option is now
+obsolete.
 
 ---
-*** Gmane has been removed as an nnir backend, since Gmane no longer
-has a search engine.
+*** VC Directory now shows key binding hints.
+To hide these, you can customize the new user option
+'vc-dir-show-key-binding-hints' to nil.
+Backends can supply additional hints using the new 'dir-extra-hints'
+backend method.
+
+---
+*** VC Directory doesn't process very large status output by default.
+If the VCS status process used to populate the VC Directory buffer
+produces a very large amount of output, it often means that you did
+something accidental like renaming a subdirectory containing thousands
+of files, and Emacs can become unresponsive while trying to process all
+the output.  Now Emacs stops early.  When this happens, VC Directory
+includes a message saying so, with a button to override it.  You can
+customize the new user option 'vc-dir-process-output-limit' to control
+how early to stop, and to disable this feature.
+
+---
+*** VC Directory resolves symbolic links only if the directory has no backend.
+When called interactively, 'M-x vc-dir' checks if the passed directory
+has a VC backend.  If it doesn't, but the directory's truename does
+have a backend, and 'vc-follow-symlinks' is non-nil, the truename is
+used instead.  Previously, the truename was used unconditionally.
 
 +++
-*** Splitting mail on common mailing list headers has been added.  See
-the concept index in the Gnus manual for the 'match-list' entry.
+*** New option 'vc-dir-simple-unmark-all-files'.
+This inverts the meaning of a prefix argument to the existing 'U'
+('vc-dir-unmark-all-files') command, which some users may find more
+intuitive.
 
 +++
-*** nil is no longer an allowed value for 'mm-text-html-renderer'.
+*** Improved creation of commit log entry from ChangeLog.
+When VC detects that all log entries for the current changeset come from
+the same ChangeLog file or buffer, it now inserts the entire body of the
+ChangeLog entry into the "*vc-log*" buffer.  If the ChangeLog entry
+contains a summary line, VC inserts it into the "*vc-log*" Summary
+header.  If one or more files listed in the ChangeLog entry are not in
+the current VC fileset, VC displays a warning.
+
+---
+*** The face 'log-edit-headers-separator' inherits from separator-line.
+The default definition of 'log-edit-headers-separator' now inherits its
+attributes from the face 'separator-line'.  That changes the default
+color and makes it work better in the terminal.
+
+---
+*** New user option 'vc-quick-select-current-working-tree'.
+If you customize this to non-nil, commands that may operate on any
+working tree no longer prompt when the current working tree is the only
+choice.
+
+** Diff
+
+---
+*** 'diff-switches' now includes '-r' by default.
+
+** Diff mode
 
 +++
-*** A new Gnus summary mode command, 'S A'
-('gnus-summary-attach-article') can be used to attach the current
-article(s) to a pre-existing Message buffer, or create a new Message
-buffer with the article(s) attached.
+*** New command 'f' jumps to the corresponding line of the old source.
+This is primarily intended for use in "*vc-diff*" buffers, where it
+mirrors the existing 'f' binding in Log View mode buffers.
+In such buffers, 'f' when point is on an old changed line (i.e. a
+removed line) jumps to the file at the diff's old revision, and 'f' when
+point is on a new changed line (i.e. an added line) or an unchanged line
+jumps to the file at the diff's new revision.
 
-** erc
+** Outline mode
+
+*** New command 'outline-show-entry-and-parents'.
+It is bound to 'C-e' in the Outline keymaps and reveals the current
+entry with its parent hierarchy.
 
 ---
-*** 'erc-button-google-url' has been renamed 'erc-button-search-url'
-and its value has been changed to Duck Duck Go.
+*** New function 'outline-search-from-regexp'.
+A generic 'outline-search-function' implementation driven by
+'outline-regexp', suitable for modes or minor modes that customize
+'outline-regexp' but do not need a custom search strategy.
+Install it with:
 
-** eww/shr
+    (setq-local outline-search-function #'outline-search-from-regexp)
 
-*** When opening external links in eww/shr (typically with the
-'C-u RET' keystroke on a link), the link will be flashed with the new
-'shr-selected-link' face to give the user feedback that the command
-has been executed.
+---
+*** 'outline-search-function' is now a user option.
+Previously a plain variable, it is now a 'defcustom'
+with named choices for the predefined search functions
+('outline-search-from-regexp' and 'outline-search-level')
+as well as the default nil and arbitrary user functions.
 
-** Htmlfontify
-*** The functions 'hfy-color', 'hfy-color-vals' and
-'hfy-fallback-color-values' and the variables 'hfy-fallback-color-map'
-and 'hfy-rgb-txt-color-map' have been renamed from names that used
-'colour' instead of 'color'.
+---
+*** New options to recognize comment-prefixed outline headings.
+When the user option 'outline-use-comment-regexp' is non-nil, enabling
+'outline-minor-mode' configures heading recognition so that outline
+headings prefixed by a comment are recognized, for example ";;; *",
+";;; **", and so on in a buffer whose comment syntax is ";;".  The
+heading level is the number of stars.  The heading pattern is taken from
+the buffer-local variable 'outline-comment-regexp' when that is set;
+major modes and users can set it to customize recognition per mode.
+Otherwise, a pattern is built from 'comment-start' and the new option
+'outline-comment-regexp-suffix'.
+
+---
+*** New command 'outline-find-headings'.
+It finds all outline headings in the current buffer and displays them in
+an Xref buffer.  Users can use that Xref buffer to navigate and edit the
+outline.  It is bound to 'M-o' in the Outline keymaps.
+
+** Xref
 
 +++
-** Enriched mode supports the 'charset' text property.
-You can add or modify the 'charset' text properties of text using the
-Edit->Text Properties->Special Properties menu, or by invoking the
-'facemenu-set-charset' command.  Documents in Enriched mode will be
-saved with the charset properties, and those properties will be
-restored when the file is visited.
+*** New command 'M-g .'/'M-g M-.' ('xref-find-by-kind').
+This command allows you to jump to a specific kind of definition, such
+as a variable or face definition, or a constructor, instead of the
+function of the same name.  The xref backend defines what kinds of
+definitions are available.
 
-** Smtpmail
-Authentication mechanisms can be added via external packages, by
-defining new cl-defmethod of smtpmail-try-auth-method.
+** CPerl mode
 
-** Footnote-mode
-*** Support Hebrew-style footnotes
-*** Footnote text lines are now aligned.
-Can be controlled via the new variable 'footnote-align-to-fn-text'.
+*** Perl 5.44 support: Signatures with named parameters.
+Perl 5.44 allows to declare a signature like "sub subname (:$par)", see
+<https://perldoc.perl.org/5.44.0/perldelta#Named-Parameters-in-Signatures>.
+CPerl mode now recognizes this as a variable declaration.
 
-** CSS mode
+** Newsticker
 
 ---
-*** A new command 'css-cycle-color-format' for cycling between color
-formats (e.g. "black" => "#000000" => "rgb(0, 0, 0)") has been added,
-bound to 'C-c C-f'.
-
----
-*** CSS mode, SCSS mode, and Less CSS mode now have support for Imenu.
-
-** SGML mode
-
----
-*** 'sgml-quote' now handles double quotes and apostrophes
-when escaping text and in addition all numeric entities when
-unescaping text.
-
-** Dired
-
-+++
-*** The new user option 'dired-create-destination-dirs' controls whether
-'dired-do-copy' and 'dired-rename-file' should create non-existent
-directories in the destination.
-
-** Help
-
----
-*** Output format of 'C-h l' (view-lossage) has changed.
-For convenience, 'view-lossage' now displays the last keystrokes
-and commands in the same format as the edit buffer of
-'edit-last-kbd-macro'.  This makes it possible to copy the lines from
-the buffer generated by 'view-lossage' to the "*Edit Macro*" buffer
-created by 'edit-last-kbd-macro', and to save the macro by 'C-c C-c'.
-
----
-*** The list of help commands produced by 'C-h C-h' ('help-for-help')
-can now be searched via 'C-s'.
-
-** Ibuffer
-
----
-*** New filter ibuffer-filter-by-process; bound to '/E'.
-
-** Search and Replace
-
-+++
-*** New isearch bindings.
-
-'C-M-w' in isearch changed from isearch-del-char to the new function
-isearch-yank-symbol-or-char.  isearch-del-char is now bound to
-'C-M-d'.
-
-+++
-*** 'search-exit-option' provides new options 'move' and 'shift-move'
-to extend the search string by yanking text that ends at the new
-position after moving point in the current buffer.  'shift-move'
-extends the search string by motion commands while holding down
-the shift key.
-
----
-*** Isearch now remembers the regexp-based search mode for words/symbols
-and case-sensitivity together with search strings in the search ring.
-
-** Edebug
-
-+++
-*** The runtime behavior of Edebug's instrumentation can be changed
-using the new variables 'edebug-behavior-alist',
-'edebug-after-instrumentation-function' and
-'edebug-new-definition-function'.  Edebug's behavior can be changed
-globally or for individual definitions.
-
-** Enhanced xterm support
-
-*** New variable 'xterm-set-window-title' controls whether Emacs sets
-the XTerm window title.  This feature is experimental and is disabled
-by default.
-
-** Gamegrid
-
-** grep
-
-+++
-*** rgrep, lgrep and zrgrep now hide part of the command line
-that contains a list of ignored directories and files.
-Clicking on the button with ellipsis unhides it.
-The abbreviation can be disabled by the new option
-'grep-find-abbreviate'.  The new command
-'grep-find-toggle-abbreviation' toggles it interactively.
-
-** ERT
-
-+++
-*** New variable 'ert-quiet' allows to make ERT output in batch mode
-less verbose by removing non-essential information.
-
----
-*** Gamegrid now determines its default glyph size based on display
-dimensions, instead of always using 16 pixels.  As a result, Tetris,
-Snake and Pong are more playable on HiDPI displays.
-
-** Filecache
-
----
-*** Completing filenames in the minibuffer via 'C-TAB' now uses the
-styles as configured by the variable 'completion-styles'.
-
-** New macros 'thunk-let' and 'thunk-let*'.
-These macros are analogue to 'let' and 'let*', but create bindings that
-are evaluated lazily.
-
-** next-error
-
-+++
-*** New customizable variable 'next-error-find-buffer-function'.
-The value should be a function that determines how to find the
-next buffer to be used by 'next-error' and 'previous-error'.  The
-default is to use the last buffer that navigated to the current
-error.
-
-+++
-*** New command 'next-error-select-buffer'.
-It can be used to set any buffer as the next one to be used by
-'next-error' and 'previous-error'.
-
-** nxml-mode
-
----
-*** The default value of 'nxml-sexp-element-flag' is now t.
-This means that pressing C-M-SPACE now selects the entire tree by
-default, and not just the opening element.
-
-
-** Eshell
-
----
-*** Expansion of history event designators is disabled by default.
-To restore the old behavior, use
-
-    (add-hook 'eshell-expand-input-functions
-              #'eshell-expand-history-references)
-
----
-*** The function 'eshell-uniquify-list' has been renamed from
-'eshell-uniqify-list'.
-
-*** The function eshell/kill is now able to handle signal switches.
-Previously eshell/kill would fail if provided a kill signal to send to the
-process.  It now accepts signals specified either by name or by its number.
-
-** Pcomplete
-*** The function 'pcomplete-uniquify-list' has been renamed from
-'pcomplete-uniqify-list'.
-
-
-** Auth-source
-
----
-*** The Secret Service backend supports the :create key now.
-
-** Tramp
-
-+++
-*** New connection method "owncloud", which allows to access OwnCloud
-or NextCloud hosted files and directories.
-
-+++
-*** Connection methods "obex" and "synce" are removed, because they
-are obsoleted in GVFS.
-
-+++
-*** Validated passwords are saved by auth-source backends which support this.
-
-+++
-*** The user option 'tramp-ignored-file-name-regexp' allows to disable
-Tramp for some look-alike remote file names.
-
----
-** The options.el library has been removed.
-It was obsolete since Emacs 22.1, replaced by customize.
-
-
-** Message
-
-+++
-*** Messages can now be systematically encrypted
-when the PGP keyring contains a public key for every recipient.  To
-achieve this, add 'message-sign-encrypt-if-all-keys-available' to
-'message-send-hook'.
-
----
-*** When replying a message that have addresses on the form
-'"foo@bar.com" <foo@bar.com>', Message will elide the repeated "name"
-from the address field in the response.
-
----
-*** The default of 'message-forward-as-mime' has changed from t to nil
-as it has been reported that many recipients can't read forwards that
-are formatted as MIME digests.
-
-+++
-*** 'message-forward-included-headers' has changed its default to
-exclude most headers when forwarding.
-
-** EasyPG
-
----
-*** 'epa-pinentry-mode' is renamed to 'epg-pinentry-mode'.
-It now applies to epg functions as well as epa functions.
-
----
-*** The alias functions 'epa--encode-coding-string',
-'epa--decode-coding-string', and 'epa--select-safe-coding-system' have
-been removed.  Use 'encode-coding-string', 'decode-coding-string', and
-'select-safe-coding-system' instead.
+*** New command to copy the URL of the selected newsticker item.
+The new command 'newsticker-treeview-copy-url', bound to 'w', adds the
+URL of the currently selected item in the list view to the kill ring.
 
 ** Rmail
 
 +++
-*** New user option 'rmail-output-reset-deleted-flag'.
-If this option is non-nil, messages appended to an output file by the
-'rmail-output' command have their Deleted flag reset.
+*** Files named "RMAIL" or ending in ".rmail" are now visited in Rmail mode.
+You can now visit such files in Rmail mode using ordinary file-visiting
+commands, such as 'C-x C-f'.
 
-* New Modes and Packages in Emacs 27.1
+** Timeclock
+
+---
+*** New user option 'timeclock-use-24hr-format'.
+If this option is set to non-nil, displayed times (clocked in/out
+since, time to leave) will use 24-hour clock instead of 12-hour clock.
+
+** Eshell
 
 +++
-** Emacs can now visit files in archives as if they were directories.
-This feature uses Tramp and works only on systems which support GVFS,
-i.e. GNU/Linux, roughly spoken.  See the chapter "(tramp) Archive file
-names" in the Tramp manual for full documentation of these facilities.
+*** Eshell now supports piping output to Lisp functions.
+You can now manipulate the output of other commands using the many Lisp
+functions provided in Emacs.  For example, to uppercase the output of
+some other command:
+
+    echo hi | #'upcase
+
+See the "(eshell) Lisp Pipelines" node in the Eshell manual for more
+details.
+
+---
+*** New user option 'eshell-lexical-binding'.
+When enabled, this causes Eshell to evaluate commands in Lisp syntax
+using lexical binding.
+
+** Dired
+
+*** The 'repeat-mode' key 'j' has been removed from 'dired-jump-map'.
+
+** Viper
+
+---
+*** New ex command: 'number' ('#').
+Ex can now display line numbers when printing lines with the 'number'
+('#') command.
+
+---
+*** New ex command: 'list'.
+Ex can now display lines unambiguously when printing using the 'list'
+command.  This means that certain characters such as 'TAB' will be shown
+with their literal equivalents i.e. '^I'.
+
+*** New ex command: 'z'.
+Ex can now print lines using the 'z' command which allows scrolling the
+output of the lines.
+
+** Tramp
+
++++
+*** Tramp is more strict now in expanding the tilde "~USER".
+If this isn't possible, an error is raised.  This happens often in test
+functions, which use example file names like "/ssh:host:~user/file.txt".
+In order to suppress such errors, let-bind 'tramp-tolerate-tilde' to a
+non-nil value.
+
++++
+*** 'tramp-recompile-elpa' is marked obsolete.
+Use 'package-recompile' instead.
 
 
-* Incompatible Lisp Changes in Emacs 27.1
+* New Modes and Packages in Emacs 32.1
 
-** The 'repetitions' argument of 'benchmark-run' can now also be a variable.
-** The FILENAME argument to 'file-name-base' is now mandatory and no
-longer defaults to 'buffer-file-name'.
+** New major modes based on the tree-sitter library
 
----
-** The function 'eldoc-message' now accepts a single argument.
-Programs that called it with multiple arguments before should pass
-them through 'format' first.  Even that is discouraged: for ElDoc
-support, you should set 'eldoc-documentation-function' instead of
-calling 'eldoc-message' directly.
+*** New major mode 'markdown-ts-mode'.
+A major mode based on the tree-sitter library for editing Markdown
+files.  Markdown files are visited using this mode when the required
+tree-sitter grammars ('markdown' and 'markdown-inline') are available,
+or when the user has opted in via 'treesit-enabled-modes'.  Otherwise,
+Markdown files fall back to 'text-mode'.
 
-** Old-style backquotes now generate an error.  They have been
-generating warnings for a decade.  To interpret old-style backquotes
-as new-style, bind the new variable 'force-new-style-backquotes' to t.
+To install the grammars, use 'M-x markdown-ts-mode-install-parsers'.
 
-** Defining a Common Lisp structure using 'cl-defstruct' or
-'cl-struct-define' whose name clashes with a builtin type (e.g.,
-'integer' or 'hash-table') now signals an error.
-
-** When formatting a floating-point number as an octal or hexadecimal
-integer, Emacs now signals an error if the number is too large for the
-implementation to format (Bug#30408).
-
-+++
-** The Lisp reader now signals an overflow for plain decimal integers
-that do not end in '.' and are outside Emacs range.  Formerly the Lisp
-reader silently converted them to floating-point numbers, and signaled
-overflow only for integers with a radix that are outside machine range.
-To get the old behavior, set the new, experimental variable
-read-integer-overflow-as-float to t and please email
-30408@debbugs.gnu.org if you need that.  (Bug#30408).
+** Speedbar
 
 ---
-** Some functions and variables obsolete since Emacs 22 have been removed:
-archive-mouse-extract, assoc-ignore-case, assoc-ignore-representation,
-backward-text-line, blink-cursor, bookmark-exit-hooks,
-comint-use-prompt-regexp-instead-of-fields, compilation-finish-function,
-count-text-lines, cperl-vc-header-alist, custom-face-save-command,
-cvs-display-full-path, cvs-fileinfo->full-path, delete-frame-hook,
-derived-mode-class, describe-char-after, describe-project,
-desktop-basefilename, desktop-buffer-handlers, desktop-buffer-misc-functions,
-desktop-buffer-modes-to-save, desktop-enable, desktop-load-default,
-dired-omit-files-p, disabled-command-hook, dungeon-mode-map,
-electric-nroff-mode, electric-nroff-newline, electric-perl-terminator,
-focus-frame, forward-text-line, generic-define-mswindows-modes,
-generic-define-unix-modes, generic-font-lock-defaults, goto-address-at-mouse,
-highlight-changes-colours, ibuffer-elide-long-columns, ibuffer-hooks,
-ibuffer-mode-hooks, icalendar-convert-diary-to-ical,
-icalendar-extract-ical-from-buffer, imenu-always-use-completion-buffer-p,
-ipconfig-program, ipconfig-program-options, isearch-lazy-highlight-cleanup,
-isearch-lazy-highlight-initial-delay, isearch-lazy-highlight-interval,
-isearch-lazy-highlight-max-at-a-time, iswitchb-use-fonts,
-latin1-char-displayable-p, mouse-wheel-click-button, mouse-wheel-down-button,
-mouse-wheel-up-button, new-frame, pascal-outline, process-kill-without-query,
-recentf-menu-append-commands-p, rmail-pop-password,
-rmail-pop-password-required, savehist-load, set-default-font,
-spam-list-of-processors, speedbar-add-ignored-path-regexp,
-speedbar-buffers-line-path, speedbar-ignored-path-expressions,
-speedbar-ignored-path-regexp, speedbar-line-path, speedbar-path-line,
-timer-set-time-with-usecs, tooltip-gud-display, tooltip-gud-modes,
-tooltip-gud-toggle-dereference, unfocus-frame, unload-hook-features-list,
-update-autoloads-from-directories, vc-comment-ring, vc-comment-ring-index,
-vc-comment-search-forward, vc-comment-search-reverse, vc-comment-to-change-log,
-vc-diff-switches-list, vc-next-comment, vc-previous-comment, view-todo,
-x-lost-selection-hooks, x-sent-selection-hooks.
+*** A nil value for 'speedbar-directory-unshown-regexp' means "show all".
 
 ---
-** Further functions and variables obsolete since Emacs 24 have been removed:
-default-directory-alist, dired-default-directory,
-dired-default-directory-alist, dired-enable-local-variables,
-dired-hack-local-variables, dired-local-variables-file, dired-omit-here-always.
-
-** The function 'display-buffer-in-major-side-window' no longer exists.
-It has been renamed as internal function 'window--make-major-side-window',
-however applications should instead call 'display-buffer-in-side-window'
-(passing the SIDE and SLOT parameters as elements of ALIST).  This approach
-is backwards-compatible with versions of Emacs in which the old function
-exists.  See the node "Displaying Buffers in Side Windows" in the ELisp
-manual for more details.
-
-* Lisp Changes in Emacs 27.1
+*** A nil value for 'speedbar-file-unshown-regexp' means "show all".
 
 +++
-** New hook 'after-delete-frame-functions'.
-This works like 'delete-frame-functions', but runs after the frame to
-be deleted has been made dead and removed from the frame list.
-
-+++
-** New frame focus state inspection interface.
-The hooks 'focus-in-hook' and 'focus-out-hook' are now obsolete.
-Instead, attach to 'after-focus-change-function' using 'add-function'
-and inspect the focus state of each frame using 'frame-focus-state'.
-
-+++
-** Emacs now requests and recognizes focus-change notifications from TTYs.
-On terminal emulators that support the feature, Emacs can now support
-'focus-in-hook' and 'focus-out-hook' for TTY frames.
-
-+++
-** Window-specific face remapping.
-Face specifications (of the kind used in 'face-remapping-alist')
-now support filters, allowing faces to vary between different windows
-displaying the same buffer.  See the Info node "Face Remapping" of the
-Emacs Lisp Reference manual for more detail.
-
-+++
-** New function assoc-delete-all.
-
-+++
-** New function 'string-distance' to calculate the Levenshtein distance
-between two strings.
-
-** 'print-quoted' now defaults to t, so if you want to see
-(quote x) instead of 'x you will have to bind it to nil where applicable.
-
-** To avoid confusion caused by "smart quotes", the reader signals an
-error when reading Lisp symbols which begin with one of the following
-quotation characters: ‘’‛“”‟〞＂＇.  A symbol beginning with such a
-character can be written by escaping the quotation character with a
-backslash.  For example:
-
-    (read "‘smart") => (invalid-read-syntax "strange quote" "‘")
-    (read "\\‘smart") == (intern "‘smart")
-
-+++
-** Omitting variables after '&optional' and '&rest' is now allowed.
-For example (defun foo (&optional)) is no longer an error.  This is
-sometimes convenient when writing macros.  See the ChangeLog entry
-titled "Allow '&rest' or '&optional' without following variable
-(Bug#29165)" for a full listing of which arglists are accepted across
-versions.
-
-** Internal parsing commands now use 'syntax-ppss' and disregard
-'open-paren-in-column-0-is-defun-start'.  This affects mostly things like
-'forward-comment', 'scan-sexps', and 'forward-sexp' when parsing backward.
-The new variable 'comment-use-syntax-ppss' can be set to nil to recover the old
-behavior if needed.
-
-** The 'server-name' and 'server-socket-dir' variables are set when a
-socket has been passed to Emacs (Bug#24218).
-
----
-** The 'file-system-info' function is now available on all platforms.
-instead of just Microsoft platforms.  This fixes a 'get-free-disk-space'
-bug on OS X 10.8 and later (Bug#28639).
-
-+++
-** New macro 'combine-change-calls' arranges to call the change hooks
-('before-change-functions' and 'after-change-functions') just once
-each around a sequence of lisp forms, given a region.  This is
-useful when a function makes a possibly large number of repetitive
-changes and the change hooks are time consuming.
-
----
-** The function 'get-free-disk-space' returns now a non-nil value for
-remote systems, which support this check.
-
-+++
-** The function 'make-string' accepts an additional optional argument.
-If the optional third argument is non-nil, 'make-string' will produce
-a multibyte string even if its second argument is an ASCII character.
-
-** (format "%d" X) no longer mishandles a floating-point number X that
-does not fit in a machine integer (Bug#30408).
-
-** New JSON parsing and serialization functions 'json-serialize',
-'json-insert', 'json-parse-string', and 'json-parse-buffer'.  These
-are implemented in C using the Jansson library.
-
-** Mailcap
-
----
-*** The new function 'mailcap-file-name-to-mime-type' has been added.
-It's a simple convenience function for looking up MIME types based on
-file name extensions.
-
-*** The default way the list of possible external viewers for MIME
-types is sorted and chosen has changed.  Earlier, the most specific
-viewer was chosen, even if there was a general override in ~/.mailcap.
-For instance, if /etc/mailcap has an entry for image/gif, that one
-will be chosen even if you have an entry for image/* in your
-~/.mailcap file.  But with the new method, entries from ~/.mailcap
-overrides all system and Emacs-provided defaults.  To get the old
-method back, set 'mailcap-prefer-mailcap-viewers' to nil.
-
-
-** URL
-
-*** The file: handler no longer looks for index.html in directories if
-you ask it for a file:///dir URL.  Since this is a low-level library,
-such decisions (if they are to be made at all) are left to
-higher-level functions.
-
-
-** image-mode
-
-*** image-mode started using ImageMagick by default for all images
-some years back.  It now respects 'imagemagick-types-inhibit' as a way
-to disable that.
-
-
-+++
-** The new function 'read-answer' accepts either long or short answers
-depending on the new customizable variable 'read-answer-short'.
-
-** The function 'load' now behaves correctly when loading modules.
-Specifically, it puts the module name into 'load-history', prints
-loading messages if requested, and protects against recursive loads.
-
-+++
-** The function 'read-variable' now uses its own history list.
-The history of variable names read by 'read-variable' is recorded in
-the new variable 'custom-variable-history'.
-
----
-** The function 'string-to-unibyte' is no longer declared obsolete.
-We have found that there are legitimate use cases for this function,
-where there's no better alternative.  We believe that the incorrect
-uses of this function all but disappeared by now, so we are
-un-obsoleting it.
+** New library 'uuid'.
+This library provides useful code for handling Universally Unique
+Identifiers (UUIDs).  It provides methods for generating UUIDs, parsing
+them, and outputting them as a string, a unibyte binary string, or as a
+number.
 
 
-* Changes in Emacs 27.1 on Non-Free Operating Systems
+* Incompatible Lisp Changes in Emacs 32.1
+
++++
+** 'intern' and 'intern-soft' ignore 'read-symbol-shorthands'.
+This means they revert to the behavior of Emacs < 28.
+In those cases where shorthands need to be obeyed, you now need to use
+'shorthands-intern', 'shorthands-intern-soft', or 'shorthands-to-longhand'.
+And 'shorthands-of-symbol' provides the reverse mapping.
+
+** Pcase
+
++++
+*** Add 'pcase-let*-strict'.
+This macro is like 'pcase-let*', but signals an error if a 'pcase'
+pattern does not match its corresponding value.  This can be useful for
+destructuring values when you do not wish to continue if the
+corresponding value is not as expected.
+
++++
+** The transition variable 'current-time-list' now defaults to nil.
+Therefore, timestamps now default to '(TICKS . HZ)' form instead of the
+older '(HIGH LOW USEC PSEC)' form.
+
+
+* Lisp Changes in Emacs 32.1
+
++++
+** Support for canvas image objects.
+Canvas images support efficient updating and refreshing.  An image
+specifier with type 'canvas' creates a canvas image.  The canvas has an
+associated writable pixel buffer.  The dynamic module function 'canvas_data'
+provides access to the pixel buffer.  After changing the ':data' vector or
+writing to the pixel buffer, a call to 'canvas-refresh' redraws the canvas
+image.
+
++++
+** 'ignore' is now also a place, acting as a "blackhole" like "/dev/null".
+E.g., '(push (new-elem) (pcase (foo) (0 var1) (1 var2) (_ (ignore))))'.
+
++++
+** 'kill-all-local-variables' can kill locals silently and reset the buffer.
+This function's KILL-PERMANENT argument now accepts the value
+'permanent-local', which kills all locals ignoring any variable
+watchers.  That argument can also be 'reset', which does what
+'permanent-local' does, and also resets the buffer as if it were newly
+created.  Use these with caution to avoid unexpected behavior such as
+'default-directory' being reset to nil.
 
 ---
-** Battery status is now supported in all Cygwin builds.
-Previously it was supported only in the Cygwin-w32 build.
+** 'with-work-buffer' kills all locals silently and resets its buffers.
+When this macro returns a buffer to its buffer pool, it now kills all
+buffer locals silently, ignoring any variable watchers, and resets the
+buffer as if it were newly created.
 
-** Emacs now handles key combinations involving the macOS "command"
-and "option" modifier keys more correctly.
++++
+** The new function 'markers-in' returns the set of markers in a region.
 
-** The special handling of 'frame-title-format' on NS where setting it
-to 't' would enable the macOS proxy icon has been replaced with a
-separate variable, 'ns-use-proxy-icon'.  'frame-title-format' will now
-work as on other platforms.
++++
+** New buffer-local variable 'comment-start-line-regexp'.
+Modes that support both line and block comments should set this
+variable to a regexp that matches only the start of line comments, so
+Emacs can distinguish between line and block comments.
 
 ---
-** New primitive 'w32-read-registry'.
-This primitive lets Lisp programs access the MS-Windows Registry by
-retrieving values stored under a given key.  It is intended to be used
-for supporting features such as XDG-like location of important files
-and directories.
+** New variable 'completion-frontend-properties'.
+This variable generalizes the 'completion-lazy-hilit' variable added in
+Emacs 30.  It allows Lisp programs that present completion candidates
+("completion frontends") to provide additional information which can be
+used to adjust or optimize completion candidates computation.
+
+** D-Bus
+
++++
+*** Support error handler in asynchronous method calls.
+The HANDLER argument of 'dbus-call-method-asynchronously' can be a cons
+cell '(HANDLER . ERROR-HANDLER)'.  ERROR-HANDLER is invoked if the
+method call returns with a D-Bus error; the error is passed as argument.
+
+** Elisp Scope
+
+*** Custom analyzers can be associated with multiple functions.
+Elisp Scope macros that define custom analyzer functions, such as
+'elisp-scope-define-function-analyzer' and
+'elisp-scope-define-macro-analyzer', can now take a list of symbols to
+which the defined analyzer should apply (or a single symbol, as before).
+This makes it easy to specify the same analyzer for multiple functions.
+
+*** New macro 'elisp-scope-define-function-spec'.
+This macro in a declarative alternative to
+'elisp-scope-define-function-analyzer'.  It lets you tell Elisp Scope
+how to analyze the arguments of a function by declaring the
+specification of each argument, rather than implementing an analyzer
+function as you would with 'elisp-scope-define-function-analyzer'.
+
++++
+** New variable 'display-buffer-default-alist'.
+Lisp programs may let-bind this variable to specify conditional actions
+for nested 'display-buffer' calls.
+
++++
+** New button to diff failed erts-file test output in ERT.
+When a test fails, the erts-file tests buffer displayed by
+'ert-results-pop-to-erts-file-tests-for-test-at-point' now includes a
+button labeled "diff".  Pushing it displays a Diff mode buffer comparing
+the actual and expected output.
+
++++
+** 'math-tzone-names' and 'timezone-world-timezones' are now marked obsolete.
+Strings should use numeric abbreviations like "-0600" instead of
+alphabetic abbreviations like "CST", which are too often ambiguous.
+
++++
+** New 'font-lock-keyword' function declaration.
+The declaration '(font-lock-keyword t)' specifies that a normal
+function is to be highlighted by font-lock like a macro.
+
++++
+** New optional LESSP parameter for 'directory-files-recursively'.
+It allows control over the relative order of file names per directory
+in the resulting list.  The default remains sorting each directory
+according to 'string-lessp'.  A value of t returns files in their
+arbitrary directory order without sorting, which may be faster.
+The argument can also be a function of two parameters suitable as the
+':lessp' argument of 'sort'.  For example, 'string-collate-lessp' would
+result in the locale-specific collation order one might see in Dired.
+
+
+* Changes in Emacs 32.1 on Non-Free Operating Systems
+
++++
+*** Emacs has been updated to target Android 17.
+Emacs has been updated to require the SDK for Android 17 (API level 37)
+during compilation, and to target that version of the operating system.
+A corollary of this change is that on Android 17 and later systems, it
+must be granted permission to access nearby devices from Settings in
+order to establish network connections to hosts on local networks.
+
+---
+*** Emacs on MS-Windows now supports IME compositions on text-only frames.
+This support is only available on Windows versions of the NT family.
+
+---
+*** Emacs running on Windows Terminal now supports underline styles and colors.
+
+---
+*** 'process-attributes' now returns 'pcpu' and 'pmem' on macOS.
+As a result, 'M-x proced' shows populated %CPU and %Mem columns there.
+In addition, the 'utime', 'stime' and 'time' attributes, which were off
+by the Mach timebase factor on Apple Silicon, are now correct.
 
 
 ----------------------------------------------------------------------
@@ -782,5 +628,6 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.
 Local variables:
 coding: utf-8
 mode: outline
-paragraph-separate: "[ 	]*$"
+mode: emacs-news
+paragraph-separate: "[	 ]"
 end:

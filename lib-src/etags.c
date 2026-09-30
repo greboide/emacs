@@ -28,7 +28,7 @@ OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
 IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-Copyright (C) 1984, 1987-1989, 1993-1995, 1998-2018 Free Software
+Copyright (C) 1984, 1987-1989, 1993-1995, 1998-2026 Free Software
 Foundation, Inc.
 
 This file is not considered part of GNU Emacs.
@@ -78,25 +78,14 @@ University of California, as described above. */
  * together with a configuration file containing regexp definitions for etags.
  */
 
-char pot_etags_version[] = "@(#) pot revision number is 17.38.1.4";
-
 #ifdef DEBUG
 #  undef DEBUG
 #  define DEBUG true
 #else
-#  define DEBUG  false
-#  define NDEBUG		/* disable assert */
+#  define DEBUG false
 #endif
 
 #include <config.h>
-
-/* WIN32_NATIVE is for XEmacs.
-   MSDOS, WINDOWSNT, DOS_NT are for Emacs. */
-#ifdef WIN32_NATIVE
-# undef MSDOS
-# undef  WINDOWSNT
-# define WINDOWSNT
-#endif /* WIN32_NATIVE */
 
 #ifdef MSDOS
 # undef MSDOS
@@ -115,42 +104,48 @@ char pot_etags_version[] = "@(#) pot revision number is 17.38.1.4";
 # define O_CLOEXEC O_NOINHERIT
 #endif /* WINDOWSNT */
 
+#include <attribute.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <stdckdint.h>
+#include <stdcountof.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sysstdio.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <binary-io.h>
+#include <intprops.h>
 #include <unlocked-io.h>
+#include <verify.h>
 #include <c-ctype.h>
 #include <c-strcase.h>
 
 #include <assert.h>
-#ifdef NDEBUG
-# undef  assert			/* some systems have a buggy assert.h */
-# define assert(x) ((void) 0)
-#endif
-
 #include <getopt.h>
 #include <regex.h>
 
-/* Define CTAGS to make the program "ctags" compatible with the usual one.
- Leave it undefined to make the program "etags", which makes emacs-style
- tag tables and tags typedefs, #defines and struct/union/enum by default. */
-#ifdef CTAGS
-# undef  CTAGS
-# define CTAGS true
-#else
-# define CTAGS false
+/* Define MERCURY_HEURISTICS_RATIO as it was necessary to disambiguate
+   Mercury from Objective C, which have same file extensions .m
+   See comments before function test_objc_is_mercury for details.  */
+#ifndef  MERCURY_HEURISTICS_RATIO
+# define MERCURY_HEURISTICS_RATIO 0.5
 #endif
 
-static bool
-streq (char const *s, char const *t)
+/* Work around GCC bug 114882
+   <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=114882>.  */
+#if GNUC_PREREQ (14, 0, 0)
+# pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+#endif
+
+/* COPY to DEST from SRC (containing LEN bytes), and append a NUL byte.  */
+static void
+memcpyz (void *dest, void const *src, ptrdiff_t len)
 {
-  return strcmp (s, t) == 0;
+  char *e = mempcpy (dest, src, len);
+  *e = '\0';
 }
 
 static bool
@@ -239,13 +234,11 @@ endtoken (unsigned char c)
 }
 
 /*
- *	xnew, xrnew -- allocate, reallocate storage
+ *	xrnew -- reallocate storage
  *
- * SYNOPSIS:	Type *xnew (int n, Type);
- *		void xrnew (OldPointer, int n, Type);
+ * SYNOPSIS:	void xrnew (OldPointer, ptrdiff_t n, int multiplier);
  */
-#define xnew(n, Type)      ((Type *) xmalloc ((n) * sizeof (Type)))
-#define xrnew(op, n, Type) ((op) = (Type *) xrealloc (op, (n) * sizeof (Type)))
+#define xrnew(op, n, m) ((op) = xnrealloc (op, n, (m) * sizeof *(op)))
 
 typedef void Lang_function (FILE *);
 
@@ -288,8 +281,8 @@ typedef struct node_st
   bool valid;			/* write this tag on the tag file */
   bool is_func;			/* function tag: use regexp in CTAGS mode */
   bool been_warned;		/* warning already given for duplicated tag */
-  int lno;			/* line number tag is on */
-  long cno;			/* character number line starts on */
+  intmax_t lno;			/* line number tag is on */
+  intmax_t cno;			/* character number line starts on */
 } node;
 
 /*
@@ -301,8 +294,8 @@ typedef struct node_st
  */
 typedef struct
 {
-  long size;
-  int len;
+  ptrdiff_t size;
+  ptrdiff_t len;
   char *buffer;
 } linebuffer;
 
@@ -330,7 +323,6 @@ typedef struct regexp
   struct re_pattern_buffer *pat; /* the compiled pattern */
   struct re_registers regs;	/* re registers */
   bool error_signaled;		/* already signaled for this regexp */
-  bool force_explicit_name;	/* do not allow implicit tag name */
   bool ignore_case;		/* ignore case when matching */
   bool multi_line;		/* do a multi-line match on the whole file */
 } regexp;
@@ -356,6 +348,7 @@ static void HTML_labels (FILE *);
 static void Lisp_functions (FILE *);
 static void Lua_functions (FILE *);
 static void Makefile_targets (FILE *);
+static void Mercury_functions (FILE *);
 static void Pascal_functions (FILE *);
 static void Perl_functions (FILE *);
 static void PHP_functions (FILE *);
@@ -363,6 +356,7 @@ static void PS_functions (FILE *);
 static void Prolog_functions (FILE *);
 static void Python_functions (FILE *);
 static void Ruby_functions (FILE *);
+static void Rust_entries (FILE *);
 static void Scheme_functions (FILE *);
 static void TeX_commands (FILE *);
 static void Texinfo_nodes (FILE *);
@@ -371,10 +365,11 @@ static void just_read_file (FILE *);
 
 static language *get_language_from_langname (const char *);
 static void readline (linebuffer *, FILE *);
-static long readline_internal (linebuffer *, FILE *, char const *);
+static ptrdiff_t readline_internal (linebuffer *, FILE *, char const *, const bool);
 static bool nocase_tail (const char *);
 static void get_tag (char *, char **);
 static void get_lispy_tag (char *);
+static void test_objc_is_mercury (char *, language **);
 
 static void analyze_regex (char *);
 static void free_regexps (void);
@@ -391,15 +386,20 @@ static void process_file (FILE *, char *, language *);
 static void find_entries (FILE *);
 static void free_tree (node *);
 static void free_fdesc (fdesc *);
-static void pfnote (char *, bool, char *, int, int, long);
+static void pfnote (char *, bool, char *, ptrdiff_t, intmax_t, intmax_t);
 static void invalidate_nodes (fdesc *, node **);
 static void put_entries (node *);
+static void cleanup_tags_file (char const * const, char const * const);
 
+#if !MSDOS && !defined (DOS_NT)
+static char *escape_shell_arg_string (char *);
+#endif
+static void do_move_file (const char *, const char *);
 static char *concat (const char *, const char *, const char *);
 static char *skip_spaces (char *);
 static char *skip_non_spaces (char *);
 static char *skip_name (char *);
-static char *savenstr (const char *, int);
+static char *savenstr (const char *, ptrdiff_t);
 static char *savestr (const char *);
 static char *etags_getcwd (void);
 static char *relative_filename (char *, char *);
@@ -409,9 +409,11 @@ static bool filename_is_absolute (char *f);
 static void canonicalize_filename (char *);
 static char *etags_mktmp (void);
 static void linebuffer_init (linebuffer *);
-static void linebuffer_setlen (linebuffer *, int);
-static void *xmalloc (size_t);
-static void *xrealloc (void *, size_t);
+static void linebuffer_setlen (linebuffer *, ptrdiff_t);
+static void *xmalloc (ptrdiff_t) ATTRIBUTE_MALLOC_SIZE ((1));
+static void *xnmalloc (ptrdiff_t, ptrdiff_t) ATTRIBUTE_MALLOC_SIZE ((1,2));
+static void *xnrealloc (void *, ptrdiff_t, ptrdiff_t)
+  ATTRIBUTE_ALLOC_SIZE ((2,3));
 
 
 static char searchar = '/';	/* use /.../ searches */
@@ -426,12 +428,12 @@ static ptrdiff_t whatlen_max;	/* maximum length of any 'what' member */
 static fdesc *fdhead;		/* head of file description list */
 static fdesc *curfdp;		/* current file description */
 static char *infilename;	/* current input file name */
-static int lineno;		/* line number of current line */
-static long charno;		/* current character number */
-static long linecharno;		/* charno of start of current line */
+static intmax_t lineno;		/* line number of current line */
+static intmax_t charno;		/* current character number */
+static intmax_t linecharno;	/* charno of start of current line */
 static char *dbp;		/* pointer to start of current tag */
 
-static const int invalidcharno = -1;
+static intmax_t const invalidcharno = -1;
 
 static node *nodehead;		/* the head of the binary tree of tags */
 static node *last_node;		/* the last node created */
@@ -448,12 +450,12 @@ static bool typedefs_or_cplusplus; /* -T: create tags for C typedefs, level */
 				/* member functions. */
 static bool constantypedefs;	/* -d: create tags for C #define, enum */
 				/* constants and variables. */
-				/* -D: opposite of -d.  Default under ctags. */
+				/* -D: opposite of -d.  Default if ctags. */
 static int globals;		/* create tags for global variables */
 static int members;		/* create tags for C member variables */
 static int declarations;	/* --declarations: tag them and extern in C&Co*/
 static int no_line_directive;	/* ignore #line directives (undocumented) */
-static int no_duplicates;	/* no duplicate tags for ctags (undocumented) */
+static int no_duplicates;	/* no duplicate tags if ctags (undocumented) */
 static bool update;		/* -u: update tags */
 static bool vgrind_style;	/* -v: create vgrind style index output */
 static bool no_warnings;	/* -w: suppress warnings (undocumented) */
@@ -462,15 +464,19 @@ static bool cplusplus;		/* .[hc] means C++, not C (undocumented) */
 static bool ignoreindent;	/* -I: ignore indentation in C */
 static int packages_only;	/* --packages-only: in Ada, only tag packages*/
 static int class_qualify;	/* -Q: produce class-qualified tags in C++/Java */
+static bool ctags;		/* --ctags */
 static int debug;		/* --debug */
-
-/* STDIN is defined in LynxOS system headers */
-#ifdef STDIN
-# undef STDIN
-#endif
-
-#define STDIN 0x1001		/* returned by getopt_long on --parse-stdin */
+static int fallback_lang;	/* --(no-)fallback-lang: Fortran/C fallbacks */
+static int empty_files;		/* --(no-)empty-file-entries */
 static bool parsing_stdin;	/* --parse-stdin used */
+
+/* For long options that have no equivalent short option, use a
+   non-character as a pseudo short option, starting with CHAR_MAX + 1.  */
+enum
+  {
+    CTAGS_OPTION = CHAR_MAX + 1,
+    STDIN_OPTION
+  };
 
 static regexp *p_head;		/* list of all regexps */
 static bool need_filebuf;	/* some regexes are multi-line */
@@ -480,6 +486,7 @@ static struct option longopts[] =
   { "append",             no_argument,       NULL,               'a'   },
   { "packages-only",      no_argument,       &packages_only,     1     },
   { "c++",                no_argument,       NULL,               'C'   },
+  { "ctags",              no_argument,       NULL,        CTAGS_OPTION },
   { "debug",              no_argument,       &debug,             1     },
   { "declarations",       no_argument,       &declarations,      1     },
   { "no-line-directive",  no_argument,       &no_line_directive, 1     },
@@ -495,10 +502,10 @@ static struct option longopts[] =
   { "regex",              required_argument, NULL,               'r'   },
   { "no-regex",           no_argument,       NULL,               'R'   },
   { "ignore-case-regex",  required_argument, NULL,               'c'   },
-  { "parse-stdin",        required_argument, NULL,               STDIN },
+  { "parse-stdin",        required_argument, NULL,        STDIN_OPTION },
   { "version",            no_argument,       NULL,               'V'   },
 
-#if CTAGS /* Ctags options */
+  /* ctags options */
   { "backward-search",    no_argument,       NULL,               'B'   },
   { "cxref",              no_argument,       NULL,               'x'   },
   { "defines",            no_argument,       NULL,               'd'   },
@@ -509,11 +516,15 @@ static struct option longopts[] =
   { "vgrind",             no_argument,       NULL,               'v'   },
   { "no-warn",            no_argument,       NULL,               'w'   },
 
-#else /* Etags options */
+  /* etags options */
   { "no-defines",         no_argument,       NULL,               'D'   },
   { "no-globals",         no_argument,       &globals,           0     },
   { "include",            required_argument, NULL,               'i'   },
-#endif
+  { "no-fallback-lang",   no_argument,       &fallback_lang,     0     },
+  { "fallback-lang",      no_argument,       &fallback_lang,     1     },
+  { "no-empty-file-entries", no_argument,    &empty_files,       0     },
+  { "empty-file-entries", no_argument,       &empty_files,       1     },
+
   { NULL }
 };
 
@@ -525,6 +536,7 @@ static compressor compressors[] =
   { "GZ", "gzip -d -c"},
   { "bz2", "bzip2 -d -c" },
   { "xz", "xz -d -c" },
+  { "zst", "zstd -d -c" },
   { NULL }
 };
 
@@ -574,15 +586,17 @@ followed by a colon, are tags.";
    That is why default_C_entries is called for these. */
 static const char *default_C_suffixes [] =
   { "c", "h", NULL };
-#if CTAGS				/* C help for Ctags */
-static const char default_C_help [] =
+
+/* C help for ctags */
+static const char ctags_default_C_help[] =
 "In C code, any C function is a tag.  Use -t to tag typedefs.\n\
 Use -T to tag definitions of 'struct', 'union' and 'enum'.\n\
 Use -d to tag '#define' macro definitions and 'enum' constants.\n\
 Use --globals to tag global variables.\n\
 You can tag function declarations and external variables by\n\
 using '--declarations', and struct members by using '--members'.";
-#else					/* C help for Etags */
+
+/* C help for etags */
 static const char default_C_help [] =
 "In C code, any C function or typedef is a tag, and so are\n\
 definitions of 'struct', 'union' and 'enum'.  '#define' macro\n\
@@ -593,7 +607,6 @@ definitions and 'enum' constants are tags unless you specify\n\
 '--no-members' can make the tags table file much smaller.\n\
 You can tag function declarations and external variables by\n\
 using '--declarations'.";
-#endif	/* C help for Ctags and Etags */
 
 static const char *Cplusplus_suffixes [] =
   { "C", "c++", "cc", "cpp", "cxx", "H", "h++", "hh", "hpp", "hxx",
@@ -633,16 +646,17 @@ defined in the file.";
 static const char *Erlang_interpreters [] =
   { "escript", NULL };
 
-const char *Forth_suffixes [] =
+static const char *Forth_suffixes [] =
   { "fth", "tok", NULL };
 static const char Forth_help [] =
 "In Forth code, tags are words defined by ':',\n\
 constant, code, create, defer, value, variable, buffer:, field.";
 
 static const char *Fortran_suffixes [] =
-  { "F", "f", "f90", "for", NULL };
+  { "F", "f", "for", "f90", "f95", "f03", "f08", NULL };
 static const char Fortran_help [] =
-"In Fortran code, functions, subroutines and block data are tags.";
+"In Fortran code, modules, subroutines, functions, entries\n\
+and block data are tags.";
 
 static const char *Go_suffixes [] = {"go", NULL};
 static const char Go_help [] =
@@ -677,10 +691,22 @@ static const char Makefile_help [] =
 "In makefiles, targets are tags; additionally, variables are tags\n\
 unless you specify '--no-globals'.";
 
+/* Mercury and Objective C share the same .m file extensions.  */
+static const char *Mercury_suffixes [] =
+  {"m",
+   NULL};
+static const char Mercury_help [] =
+  "In Mercury code, tags are all declarations beginning a line with ':-'\n\
+and optionally Prolog-like definitions (first rule for a predicate or \
+function).\n\
+To enable this behavior, run etags using --declarations.";
+static bool with_mercury_definitions = false;
+static float mercury_heuristics_ratio = MERCURY_HEURISTICS_RATIO;
+
 static const char *Objc_suffixes [] =
-  { "lm",			/* Objective lex file */
-    "m",			/* Objective C file */
-     NULL };
+  { "lm",			/* Objective lex file  */
+    "m",			/* By default, Objective C file will be assumed.  */
+     NULL};
 static const char Objc_help [] =
 "In Objective C code, tags include Objective C definitions for classes,\n\
 class categories, methods and protocols.  Tags for variables and\n\
@@ -746,9 +772,15 @@ a line generate a tag.  Constants also generate a tag.";
 static const char *Ruby_interpreters [] =
   { "ruby", NULL };
 
+static const char *Rust_suffixes [] =
+  { "rs", NULL };
+static const char Rust_help [] =
+  "In Rust code, tags anything defined with 'fn', 'enum', \n\
+'struct' or 'macro_rules!'.";
+
 /* Can't do the `SCM' or `scm' prefix with a version number. */
 static const char *Scheme_suffixes [] =
-  { "oak", "sch", "scheme", "SCM", "scm", "SM", "sm", "ss", "t", NULL };
+  { "oak", "rkt", "sch", "scheme", "SCM", "scm", "SM", "sm", "ss", "t", NULL };
 static const char Scheme_help [] =
 "In Scheme code, tags include anything defined with 'def' or with a\n\
 construct whose name starts with 'def'.  They also include\n\
@@ -757,11 +789,27 @@ variables set with 'set!' at top level in the file.";
 static const char *TeX_suffixes [] =
   { "bib", "clo", "cls", "ltx", "sty", "TeX", "tex", NULL };
 static const char TeX_help [] =
-"In LaTeX text, the argument of any of the commands '\\chapter',\n\
-'\\section', '\\subsection', '\\subsubsection', '\\eqno', '\\label',\n\
-'\\ref', '\\cite', '\\bibitem', '\\part', '\\appendix', '\\entry',\n\
-'\\index', '\\def', '\\newcommand', '\\renewcommand',\n\
-'\\newenvironment' or '\\renewenvironment' is a tag.\n\
+"In LaTeX text, the argument of the commands '\\chapter', '\\section',\n\
+'\\subsection', '\\subsubsection', '\\eqno', '\\label', '\\ref',\n\
+'\\Ref', '\\footref', '\\cite', '\\bibitem', '\\part', '\\appendix',\n\
+'\\entry', '\\index', '\\def', '\\edef', '\\gdef', '\\xdef',\n\
+'\\newcommand', '\\renewcommand', '\\newrobustcmd', '\\renewrobustcmd',\n\
+'\\newenvironment', '\\renewenvironment', '\\DeclareRobustCommand',\n\
+'\\providecommand', '\\providerobustcmd', '\\NewDocumentCommand',\n\
+'\\RenewDocumentCommand', '\\ProvideDocumentCommand',\n\
+'\\DeclareDocumentCommand', '\\NewExpandableDocumentCommand',\n\
+'\\RenewExpandableDocumentCommand', '\\ProvideExpandableDocumentCommand',\n\
+'\\DeclareExpandableDocumentCommand', '\\NewDocumentEnvironment',\n\
+'\\RenewDocumentEnvironment', '\\ProvideDocumentEnvironment',\n\
+'\\DeclareDocumentEnvironment','\\csdef', '\\csedef', '\\csgdef',\n\
+'\\csxdef', '\\csletcs', '\\cslet', '\\letcs', '\\let',\n\
+'\\cs_new_protected_nopar', '\\cs_new_protected', '\\cs_new_nopar',\n\
+'\\cs_new_eq', '\\cs_new', '\\cs_set_protected_nopar',\n\
+'\\cs_set_protected', '\\cs_set_nopar', '\\cs_set_eq', '\\cs_set',\n\
+'\\cs_gset_protected_nopar', '\\cs_gset_protected', '\\cs_gset_nopar',\n\
+'\\cs_gset_eq', '\\cs_gset', '\\cs_generate_from_arg_count', or\n\
+'\\cs_generate_variant' is a tag.  So is the argument of any starred\n\
+variant of these commands.\n\
 \n\
 Other commands can be specified by setting the environment variable\n\
 'TEXTAGS' to a colon-separated list like, for example,\n\
@@ -804,6 +852,7 @@ static language lang_names [] =
 {
   { "ada",       Ada_help,       Ada_funcs,         Ada_suffixes       },
   { "asm",       Asm_help,       Asm_labels,        Asm_suffixes       },
+#define C_LANG_NAMES_INDEX 2
   { "c",         default_C_help, default_C_entries, default_C_suffixes },
   { "c++",       Cplusplus_help, Cplusplus_entries, Cplusplus_suffixes },
   { "c*",        no_lang_help,   Cstar_entries,     Cstar_suffixes     },
@@ -818,7 +867,9 @@ static language lang_names [] =
   { "lisp",      Lisp_help,      Lisp_functions,    Lisp_suffixes      },
   { "lua",       Lua_help,Lua_functions,Lua_suffixes,NULL,Lua_interpreters},
   { "makefile",  Makefile_help,Makefile_targets,NULL,Makefile_filenames},
+  /* objc listed before mercury as it is a better default for .m extensions.  */
   { "objc",      Objc_help,      plain_C_entries,   Objc_suffixes      },
+  { "mercury",   Mercury_help,   Mercury_functions, Mercury_suffixes   },
   { "pascal",    Pascal_help,    Pascal_functions,  Pascal_suffixes    },
   { "perl",Perl_help,Perl_functions,Perl_suffixes,NULL,Perl_interpreters},
   { "php",       PHP_help,       PHP_functions,     PHP_suffixes       },
@@ -830,6 +881,7 @@ static language lang_names [] =
                  NULL,           Python_interpreters },
   { "ruby",      Ruby_help,      Ruby_functions,    Ruby_suffixes,
                  Ruby_filenames, Ruby_interpreters },
+  { "rust",      Rust_help,      Rust_entries,      Rust_suffixes      },
   { "scheme",    Scheme_help,    Scheme_functions,  Scheme_suffixes    },
   { "tex",       TeX_help,       TeX_commands,      TeX_suffixes       },
   { "texinfo",   Texinfo_help,   Texinfo_nodes,     Texinfo_suffixes   },
@@ -867,27 +919,19 @@ followed by the name of an interpreter.  If no such sequence is found,\n\
 Fortran is tried first; if no tags are found, C is tried next.\n\
 When parsing any C file, a \"class\" or \"template\" keyword\n\
 switches to C++.");
-  puts ("Compressed files are supported using gzip, bzip2, and xz.\n\
+  puts ("Compressed files are supported using gzip, bzip2, xz, and zstd.\n\
 \n\
 For detailed help on a given language use, for example,\n\
 etags --help --lang=ada.");
 }
 
-#ifndef EMACS_NAME
-# define EMACS_NAME "standalone"
-#endif
-#ifndef VERSION
-# define VERSION "17.38.1.4"
-#endif
 static _Noreturn void
 print_version (void)
 {
-  char emacs_copyright[] = COPYRIGHT;
-
-  printf ("%s (%s %s)\n", (CTAGS) ? "ctags" : "etags", EMACS_NAME, VERSION);
-  puts (emacs_copyright);
-  puts ("This program is distributed under the terms in ETAGS.README");
-
+  fputs (("etags (" PACKAGE_NAME " " PACKAGE_VERSION ")\n"
+	  COPYRIGHT "\n"
+	  "This program is distributed under the terms in ETAGS.README\n"),
+	 stdout);
   exit (EXIT_SUCCESS);
 }
 
@@ -926,7 +970,7 @@ Relative ones are stored relative to the output file's directory.\n");
   puts ("--packages-only\n\
         For Ada files, only generate tags for packages.");
 
-  if (CTAGS)
+  if (ctags)
     puts ("-B, --backward-search\n\
         Write the search commands for the tag entries using '?', the\n\
         backward-search command instead of '/', the forward-search command.");
@@ -939,15 +983,22 @@ Relative ones are stored relative to the output file's directory.\n");
         Treat files whose name suffix defaults to C language as C++ files.");
   */
 
+  if (PRINT_UNDOCUMENTED_OPTIONS_HELP && !ctags)
+    puts ("--ctags\n\
+	Implement ctags behavior.");
+
   puts ("--declarations\n\
 	In C and derived languages, create tags for function declarations,");
-  if (CTAGS)
+  if (ctags)
     puts ("\tand create tags for extern variables if --globals is used.");
   else
     puts
       ("\tand create tags for extern variables unless --no-globals is used.");
 
-  if (CTAGS)
+  puts ("\tIn Mercury, tag both declarations starting a line with ':-' and\n\
+        first predicates or functions in clauses.");
+
+  if (ctags)
     puts ("-d, --defines\n\
         Create tag entries for C #define constants and enum constants, too.");
   else
@@ -955,7 +1006,7 @@ Relative ones are stored relative to the output file's directory.\n");
         Don't create tag entries for C #define constants and enum constants.\n\
 	This makes the tags file smaller.");
 
-  if (!CTAGS)
+  if (!ctags)
     puts ("-i FILE, --include=FILE\n\
         Include a note in tag file indicating that, when searching for\n\
         a tag, one should also consult the tags file FILE after\n\
@@ -965,7 +1016,7 @@ Relative ones are stored relative to the output file's directory.\n");
         Force the following files to be considered as written in the\n\
 	named language up to the next --language=LANG option.");
 
-  if (CTAGS)
+  if (ctags)
     puts ("--globals\n\
 	Create tag entries for global variables in some languages.");
   else
@@ -976,13 +1027,27 @@ Relative ones are stored relative to the output file's directory.\n");
   puts ("--no-line-directive\n\
         Ignore #line preprocessor directives in C and derived languages.");
 
-  if (CTAGS)
+  if (ctags)
     puts ("--members\n\
 	Create tag entries for members of structures in some languages.");
   else
     puts ("--no-members\n\
 	Do not create tag entries for members of structures\n\
 	in some languages.");
+
+  if (!ctags)
+    {
+      puts ("--fallback-lang\n\
+	If a file's language could not be determined, try to parse\n\
+	it as Fortran and C/C++.");
+      puts ("--no-fallback-lang\n\
+	Do not fall back to Fortran and C/C++ if a file's language\n\
+	could not be determined.");
+      puts ("--empty-file-entries\n\
+	Produce file entries for files with no tags.");
+      puts ("--no-empty-file-entries\n\
+	Do not output file entries for files with no tags.");
+    }
 
   puts ("-Q, --class-qualify\n\
         Qualify tag names with their class name in C++, ObjC, Java, and Perl.\n\
@@ -1017,7 +1082,7 @@ Relative ones are stored relative to the output file's directory.\n");
   puts ("--parse-stdin=NAME\n\
         Read from standard input and record tags as belonging to file NAME.");
 
-  if (CTAGS)
+  if (ctags)
     {
       puts ("-t, --typedefs\n\
         Generate tag entries for C and Ada typedefs.");
@@ -1026,7 +1091,7 @@ Relative ones are stored relative to the output file's directory.\n");
         and C++ member functions.");
     }
 
-  if (CTAGS)
+  if (ctags)
     puts ("-u, --update\n\
         Update the tag entries for the given files, leaving tag\n\
         entries for other files in place.  Currently, this is\n\
@@ -1035,7 +1100,7 @@ Relative ones are stored relative to the output file's directory.\n");
         tags file.  It is often faster to simply rebuild the entire\n\
         tag file than to use this.");
 
-  if (CTAGS)
+  if (ctags)
     {
       puts ("-v, --vgrind\n\
         Print on the standard output an index of items intended for\n\
@@ -1078,25 +1143,24 @@ int
 main (int argc, char **argv)
 {
   int i;
-  unsigned int nincluded_files;
+  int nincluded_files;
   char **included_files;
   argument *argbuffer;
   int current_arg, file_count;
   linebuffer filename_lb;
   bool help_asked = false;
   ptrdiff_t len;
-  char *optstring;
   int opt;
 
   progname = argv[0];
   nincluded_files = 0;
-  included_files = xnew (argc, char *);
+  included_files = xnmalloc (argc, sizeof *included_files);
   current_arg = 0;
   file_count = 0;
 
   /* Allocate enough no matter what happens.  Overkill, but each one
      is small. */
-  argbuffer = xnew (argc, argument);
+  argbuffer = xnmalloc (argc, sizeof *argbuffer);
 
   /*
    * Always find typedefs and structure tags.
@@ -1106,11 +1170,18 @@ main (int argc, char **argv)
   typedefs = typedefs_or_cplusplus = constantypedefs = true;
   globals = members = true;
 
+  /* By default, fall back to Fortran/C/C++ if no language is detected by the
+     file's name.  This could be reversed in a future version, but only for
+     ETAGS.  */
+  fallback_lang = true;
+
+  /* By default, output file entries for files that have no tags.  This affects
+     only ETAGS. */
+  empty_files = true;
+
   /* When the optstring begins with a '-' getopt_long does not rearrange the
      non-options arguments to be at the end, but leaves them alone. */
-  optstring = concat ("-ac:Cf:Il:o:Qr:RSVhH",
-		      (CTAGS) ? "BxdtTuvw" : "Di:",
-		      "");
+  static char const optstring[] = "-aBc:CdDf:hHi:Il:o:Qr:RStTuvVwx";
 
   while ((opt = getopt_long (argc, argv, optstring, longopts, NULL)) != EOF)
     switch (opt)
@@ -1131,7 +1202,13 @@ main (int argc, char **argv)
 	++file_count;
 	break;
 
-      case STDIN:
+      case CTAGS_OPTION:
+	/* Operate as ctags, not etags.  */
+	ctags = true;
+	lang_names[C_LANG_NAMES_INDEX].help = ctags_default_C_help;
+	break;
+
+      case STDIN_OPTION:
 	/* Parse standard input.  Idea by Vivek <vivek@etla.org>. */
 	argbuffer[current_arg].arg_type = at_stdin;
 	argbuffer[current_arg].what     = optarg;
@@ -1154,7 +1231,6 @@ main (int argc, char **argv)
 	  {
 	    error ("-o option may only be given once.");
 	    suggest_asking_for_help ();
-	    /* NOTREACHED */
 	  }
 	tagfile = optarg;
 	break;
@@ -1216,7 +1292,6 @@ main (int argc, char **argv)
       case 'w': no_warnings = true;				break;
       default:
 	suggest_asking_for_help ();
-	/* NOTREACHED */
       }
 
   /* No more options.  Store the rest of arguments. */
@@ -1235,17 +1310,15 @@ main (int argc, char **argv)
 
   if (help_asked)
     print_help (argbuffer);
-    /* NOTREACHED */
 
   if (nincluded_files == 0 && file_count == 0)
     {
       error ("no input files specified.");
       suggest_asking_for_help ();
-      /* NOTREACHED */
     }
 
   if (tagfile == NULL)
-    tagfile = savestr (CTAGS ? "tags" : "TAGS");
+    tagfile = savestr (ctags ? "tags" : "TAGS");
   cwd = etags_getcwd ();	/* the current working directory */
   if (cwd[strlen (cwd) - 1] != '/')
     {
@@ -1269,7 +1342,7 @@ main (int argc, char **argv)
   linebuffer_init (&filebuf);
   linebuffer_init (&token_name);
 
-  if (!CTAGS)
+  if (!ctags)
     {
       if (streq (tagfile, "-"))
 	{
@@ -1307,7 +1380,7 @@ main (int argc, char **argv)
 		  if (parsing_stdin)
 		    fatal ("cannot parse standard input "
 			   "AND read file names from it");
-		  while (readline_internal (&filename_lb, stdin, "-") > 0)
+		  while (readline_internal (&filename_lb, stdin, "-", false) > 0)
 		    process_file_name (filename_lb.buffer, lang);
 		}
 	      else
@@ -1327,20 +1400,23 @@ main (int argc, char **argv)
   free (filebuf.buffer);
   free (token_name.buffer);
 
-  if (!CTAGS || cxref_style)
+  if (!ctags || cxref_style)
     {
       /* Write the remaining tags to tagf (ETAGS) or stdout (CXREF). */
       put_entries (nodehead);
       free_tree (nodehead);
       nodehead = NULL;
-      if (!CTAGS)
+      if (!ctags)
 	{
 	  fdesc *fdp;
 
-	  /* Output file entries that have no tags. */
-	  for (fdp = fdhead; fdp != NULL; fdp = fdp->next)
-	    if (!fdp->written)
-	      fprintf (tagf, "\f\n%s,0\n", fdp->taggedfname);
+	  /* Output file entries that have no tags, unless disabled. */
+	  if (empty_files)
+	    {
+	      for (fdp = fdhead; fdp != NULL; fdp = fdp->next)
+		if (!fdp->written)
+		  fprintf (tagf, "\f\n%s,0\n", fdp->taggedfname);
+	    }
 
 	  while (nincluded_files-- > 0)
 	    fprintf (tagf, "\f\n%s,include\n", *included_files++);
@@ -1355,9 +1431,6 @@ main (int argc, char **argv)
   /* From here on, we are in (CTAGS && !cxref_style) */
   if (update)
     {
-      char *cmd =
-	xmalloc (strlen (tagfile) + whatlen_max +
-		 sizeof "mv..OTAGS;grep -Fv '\t\t' OTAGS >;rm OTAGS");
       for (i = 0; i < current_arg; ++i)
 	{
 	  switch (argbuffer[i].arg_type)
@@ -1368,17 +1441,8 @@ main (int argc, char **argv)
 	    default:
 	      continue;		/* the for loop */
 	    }
-	  char *z = stpcpy (cmd, "mv ");
-	  z = stpcpy (z, tagfile);
-	  z = stpcpy (z, " OTAGS;grep -Fv '\t");
-	  z = stpcpy (z, argbuffer[i].what);
-	  z = stpcpy (z, "\t' OTAGS >");
-	  z = stpcpy (z, tagfile);
-	  strcpy (z, ";rm OTAGS");
-	  if (system (cmd) != EXIT_SUCCESS)
-	    fatal ("failed to execute shell command");
+          cleanup_tags_file (tagfile, argbuffer[i].what);
 	}
-      free (cmd);
       append_to_tagfile = true;
     }
 
@@ -1391,22 +1455,83 @@ main (int argc, char **argv)
   if (fclose (tagf) == EOF)
     pfatal (tagfile);
 
-  if (CTAGS)
+  if (ctags)
     if (append_to_tagfile || update)
       {
-	char *cmd = xmalloc (2 * strlen (tagfile) + sizeof "sort -u -o..");
 	/* Maybe these should be used:
 	   setenv ("LC_COLLATE", "C", 1);
 	   setenv ("LC_ALL", "C", 1); */
-	char *z = stpcpy (cmd, "sort -u -o ");
+	char *cmd = xmalloc (8 * strlen (tagfile) + sizeof "sort -u -o '' ''");
+#if defined WINDOWSNT || MSDOS
+	/* Quote "like this".  No need to escape the quotes in the file name,
+	   since it is not allowed in file names on these systems.  */
+	char *z = stpcpy (cmd, "sort -u -o \"");
 	z = stpcpy (z, tagfile);
-	*z++ = ' ';
-	strcpy (z, tagfile);
+	z = stpcpy (z, "\" \"");
+	z = stpcpy (z, tagfile);
+	stpcpy (z, "\"");
+#else
+	/* Quote 'like this', and escape the apostrophe in the file name.  */
+	char *z = stpcpy (cmd, "sort -u -o '");
+	char *escaped_tagfile = z;
+	for (; *tagfile; *z++ = *tagfile++)
+	  if (*tagfile == '\'')
+	    z = stpcpy (z, "'\\'");
+	ptrdiff_t escaped_tagfile_len = z - escaped_tagfile;
+	z = stpcpy (z, "' '");
+	z = mempcpy (z, escaped_tagfile, escaped_tagfile_len);
+	strcpy (z, "'");
+#endif
 	return system (cmd);
       }
   return EXIT_SUCCESS;
 }
 
+/*
+ * Equivalent to: mv tags OTAGS;grep -Fv ' filename ' OTAGS >tags;rm OTAGS
+ */
+static void
+cleanup_tags_file (const char* tagfile, const char* match_file_name)
+{
+  FILE *otags_f = fopen ("OTAGS", "wb");
+  FILE *tag_f = fopen (tagfile, "rb");
+
+  if (otags_f == NULL)
+    pfatal ("OTAGS");
+
+  if (tag_f == NULL)
+    pfatal (tagfile);
+
+  int buf_len = strlen (match_file_name) + sizeof ("\t\t ") + 1;
+  char *buf = xmalloc (buf_len);
+  snprintf (buf, buf_len, "\t%s\t", match_file_name);
+
+  linebuffer line;
+  linebuffer_init (&line);
+  while (readline_internal (&line, tag_f, tagfile, true) > 0)
+    {
+      if (ferror (tag_f))
+        pfatal (tagfile);
+
+      if (strstr (line.buffer, buf) == NULL)
+        {
+          fprintf (otags_f, "%s\n", line.buffer);
+          if (ferror (tag_f))
+            pfatal (tagfile);
+        }
+    }
+  free (buf);
+  free (line.buffer);
+
+  if (fclose (otags_f) == EOF)
+    pfatal ("OTAGS");
+
+  if (fclose (tag_f) == EOF)
+    pfatal (tagfile);
+
+  do_move_file ("OTAGS", tagfile);
+  return;
+}
 
 /*
  * Return a compressor given the file name.  If EXTPTR is non-zero,
@@ -1496,7 +1621,7 @@ get_language_from_interpreter (char *interpreter)
  * Return a language given the file name.
  */
 static language *
-get_language_from_filename (char *file, int case_sensitive)
+get_language_from_filename (char *file, bool case_sensitive)
 {
   language *lang;
   const char **name, **ext, *suffix;
@@ -1637,26 +1762,29 @@ process_file_name (char *file, language *lang)
       else
 	{
 #if MSDOS || defined (DOS_NT)
-	  char *cmd1 = concat (compr->command, " \"", real_name);
-	  char *cmd = concat (cmd1, "\" > ", tmp_name);
+	  int buf_len =
+	    strlen (compr->command)
+	    + strlen (" \"\" > \"\"") + strlen (real_name)
+	    + strlen (tmp_name) + 1;
+	  char *cmd = xmalloc (buf_len);
+	  snprintf (cmd, buf_len, "%s \"%s\" > \"%s\"",
+		    compr->command, real_name, tmp_name);
 #else
-	  char *cmd1 = concat (compr->command, " '", real_name);
-	  char *cmd = concat (cmd1, "' > ", tmp_name);
+	  char *new_real_name = escape_shell_arg_string (real_name);
+	  char *new_tmp_name = escape_shell_arg_string (tmp_name);
+	  int buf_len =
+	    strlen (compr->command) + strlen ("  > ") + strlen (new_real_name)
+	    + strlen (new_tmp_name) + 1;
+	  char *cmd = xmalloc (buf_len);
+	  snprintf (cmd, buf_len, "%s %s > %s",
+		    compr->command, new_real_name, new_tmp_name);
+	  free (new_real_name);
+	  free (new_tmp_name);
 #endif
-	  free (cmd1);
-	  int tmp_errno;
-	  if (system (cmd) == -1)
-	    {
-	      inf = NULL;
-	      tmp_errno = EINVAL;
-	    }
-	  else
-	    {
-	      inf = fopen (tmp_name, "r" FOPEN_BINARY);
-	      tmp_errno = errno;
-	    }
+	  inf = (system (cmd) == -1
+		 ? NULL
+		 : fopen (tmp_name, "r" FOPEN_BINARY));
 	  free (cmd);
-	  errno = tmp_errno;
 	}
 
       if (!inf)
@@ -1695,7 +1823,7 @@ process_file (FILE *fh, char *fn, language *lang)
 
   infilename = fn;
   /* Create a new input file description entry. */
-  fdp = xnew (1, fdesc);
+  fdp = xmalloc (sizeof *fdp);
   *fdp = emptyfdesc;
   fdp->next = fdhead;
   fdp->infname = savestr (fn);
@@ -1725,7 +1853,7 @@ process_file (FILE *fh, char *fn, language *lang)
   /* If not Ctags, and if this is not metasource and if it contained no #line
      directives, we can write the tags and free all nodes pointing to
      curfdp. */
-  if (!CTAGS
+  if (!ctags
       && curfdp->usecharno	/* no #line directives in this file */
       && !curfdp->lang->metasource)
     {
@@ -1785,6 +1913,11 @@ find_entries (FILE *inf)
   if (parser == NULL)
     {
       lang = get_language_from_filename (curfdp->infname, true);
+
+      /* Disambiguate file names between Objc and Mercury. */
+      if (lang != NULL && strcmp (lang->name, "objc") == 0)
+	test_objc_is_mercury (curfdp->infname, &lang);
+
       if (lang != NULL && lang->function != NULL)
 	{
 	  curfdp->lang = lang;
@@ -1794,7 +1927,7 @@ find_entries (FILE *inf)
 
   /* Else look for sharp-bang as the first two characters. */
   if (parser == NULL
-      && readline_internal (&lb, inf, infilename) > 0
+      && readline_internal (&lb, inf, infilename, false) > 0
       && lb.len >= 2
       && lb.buffer[0] == '#'
       && lb.buffer[1] == '!')
@@ -1819,7 +1952,7 @@ find_entries (FILE *inf)
 	}
       *cp = '\0';
 
-      if (strlen (lp) > 0)
+      if (*lp)
 	{
 	  lang = get_language_from_interpreter (lp);
 	  if (lang != NULL && lang->function != NULL)
@@ -1843,22 +1976,30 @@ find_entries (FILE *inf)
 	}
     }
 
-  /* Else try Fortran or C. */
+  /* Else try Fortran or C if that fallback is not disabled. */
   if (parser == NULL)
     {
-      node *old_last_node = last_node;
-
-      curfdp->lang = get_language_from_langname ("fortran");
-      find_entries (inf);
-
-      if (old_last_node == last_node)
-	/* No Fortran entries found.  Try C. */
+      if (fallback_lang)
 	{
-	  reset_input (inf);
-	  curfdp->lang = get_language_from_langname (cplusplus ? "c++" : "c");
+	  node *old_last_node = last_node;
+
+	  curfdp->lang = get_language_from_langname ("fortran");
 	  find_entries (inf);
+
+	  if (old_last_node == last_node)
+	    /* No Fortran entries found.  Try C. */
+	    {
+	      reset_input (inf);
+	      curfdp->lang = get_language_from_langname (cplusplus
+							 ? "c++" : "c");
+	      find_entries (inf);
+	    }
+	  return;
 	}
-      return;
+      /* If fallbacks are disabled, treat files without a language as if
+	 '--language=none' was specified for them. */
+      curfdp->lang = get_language_from_langname ("none");
+      parser = curfdp->lang->function;
     }
 
   if (!no_line_directive
@@ -1930,26 +2071,26 @@ find_entries (FILE *inf)
  */
 static void
 make_tag (const char *name, 	/* tag name, or NULL if unnamed */
-	  int namelen,		/* tag length */
+	  ptrdiff_t namelen,	/* tag length */
 	  bool is_func,		/* tag is a function */
 	  char *linestart,	/* start of the line where tag is */
-	  int linelen,          /* length of the line where tag is */
-	  int lno,		/* line number */
-	  long int cno)		/* character number */
+	  ptrdiff_t linelen,	/* length of the line where tag is */
+	  intmax_t lno,		/* line number */
+	  intmax_t cno)		/* character number */
 {
   bool named = (name != NULL && namelen > 0);
   char *nname = NULL;
 
   if (debug)
-    fprintf (stderr, "%s on %s:%d: %s\n",
+    fprintf (stderr, "%s on %s:%"PRIdMAX": %s\n",
 	     named ? name : "(unnamed)", curfdp->taggedfname, lno, linestart);
 
-  if (!CTAGS && named)		/* maybe set named to false */
+  if (!ctags && named)		/* maybe set named to false */
     /* Let's try to make an implicit tag name, that is, create an unnamed tag
        such that etags.el can guess a name from it. */
     {
-      int i;
-      register const char *cp = name;
+      ptrdiff_t i;
+      const char *cp = name;
 
       for (i = 0; i < namelen; i++)
 	if (notinname (*cp++))
@@ -1975,25 +2116,27 @@ make_tag (const char *name, 	/* tag name, or NULL if unnamed */
 
 /* Record a tag. */
 static void
-pfnote (char *name, bool is_func, char *linestart, int linelen, int lno,
-	long int cno)
-                		/* tag name, or NULL if unnamed */
-                  		/* tag is a function */
-                     		/* start of the line where tag is */
-                 		/* length of the line where tag is */
-             			/* line number */
-              			/* character number */
+pfnote (char *name,		/* tag name, or NULL if unnamed */
+	bool is_func,		/* tag is a function */
+	char *linestart,	/* start of the line where tag is */
+	ptrdiff_t linelen,	/* length of the line where tag is */
+	intmax_t lno,		/* line number */
+	intmax_t cno)		/* character number */
+
 {
   register node *np;
 
-  assert (name == NULL || name[0] != '\0');
-  if (CTAGS && name == NULL)
+  if ((ctags && name == NULL)
+      /* We used to have an assertion here for the case below, but if we hit
+	 that case, it just means our parser got confused, and there's nothing
+	 to do about such empty "tags".  */
+      || (!ctags && name && name[0] == '\0'))
     return;
 
-  np = xnew (1, node);
+  np = xmalloc (sizeof *np);
 
   /* If ctags mode, change name "main" to M<thisfilename>. */
-  if (CTAGS && !cxref_style && streq (name, "main"))
+  if (ctags && !cxref_style && streq (name, "main"))
     {
       char *fp = strrchr (curfdp->taggedfname, '/');
       np->name = concat ("M", fp == NULL ? curfdp->taggedfname : fp + 1, "");
@@ -2018,9 +2161,9 @@ pfnote (char *name, bool is_func, char *linestart, int linelen, int lno,
   else
     np->cno = invalidcharno;
   np->left = np->right = NULL;
-  if (CTAGS && !cxref_style)
+  if (ctags && !cxref_style)
     {
-      if (strlen (linestart) < 50)
+      if (strnlen (linestart, 50) < 50)
 	np->regex = concat (linestart, "$", "");
       else
 	np->regex = savenstr (linestart, 50);
@@ -2045,7 +2188,7 @@ push_node (node *np, stkentry **stack_top)
 {
   if (np)
     {
-      stkentry *new = xnew (1, stkentry);
+      stkentry *new = xmalloc (sizeof *new);
 
       new->np = np;
       new->next = *stack_top;
@@ -2145,7 +2288,7 @@ add_node (node *np, node **cur_node_p)
       return;
     }
 
-  if (!CTAGS)
+  if (!ctags)
     /* Etags Mode */
     {
       /* For each file name, tags are in a linked sublist on the right
@@ -2209,7 +2352,8 @@ add_node (node *np, node **cur_node_p)
 		  if (!no_warnings)
 		    {
 		      fprintf (stderr,
-			       "Duplicate entry in file %s, line %d: %s\n",
+			       ("Duplicate entry in file %s, "
+				"line %"PRIdMAX": %s\n"),
 			       np->fdp->infname, lineno, np->name);
 		      fprintf (stderr, "Second entry ignored\n");
 		    }
@@ -2243,7 +2387,7 @@ invalidate_nodes (fdesc *badfdp, node **npp)
   node *np = *npp;
   stkentry *stack = NULL;
 
-  if (CTAGS)
+  if (ctags)
     {
       while (np)
 	{
@@ -2305,12 +2449,12 @@ invalidate_nodes (fdesc *badfdp, node **npp)
 }
 
 
-static int total_size_of_entries (node *);
-static int number_len (long) ATTRIBUTE_CONST;
+static ptrdiff_t total_size_of_entries (node *);
+static int number_len (intmax_t) ATTRIBUTE_CONST;
 
 /* Length of a non-negative number's decimal representation. */
 static int
-number_len (long int num)
+number_len (intmax_t num)
 {
   int len = 1;
   while ((num /= 10) > 0)
@@ -2324,10 +2468,10 @@ number_len (long int num)
  * This count is irrelevant with etags.el since emacs 19.34 at least,
  * but is still supplied for backward compatibility.
  */
-static int
-total_size_of_entries (register node *np)
+static ptrdiff_t
+total_size_of_entries (node *np)
 {
-  register int total = 0;
+  ptrdiff_t total = 0;
 
   for (; np != NULL; np = np->right)
     if (np->valid)
@@ -2335,7 +2479,7 @@ total_size_of_entries (register node *np)
 	total += strlen (np->regex) + 1;		/* pat\177 */
 	if (np->name != NULL)
 	  total += strlen (np->name) + 1;		/* name\001 */
-	total += number_len ((long) np->lno) + 1;	/* lno, */
+	total += number_len (np->lno) + 1;		/* lno, */
 	if (np->cno != invalidcharno)			/* cno */
 	  total += number_len (np->cno);
 	total += 1;					/* newline */
@@ -2353,13 +2497,13 @@ put_entry (node *np)
   /* Output this entry */
   if (np->valid)
     {
-      if (!CTAGS)
+      if (!ctags)
 	{
 	  /* Etags mode */
 	  if (fdp != np->fdp)
 	    {
 	      fdp = np->fdp;
-	      fprintf (tagf, "\f\n%s,%d\n",
+	      fprintf (tagf, "\f\n%s,%"PRIdPTR"\n",
 		       fdp->taggedfname, total_size_of_entries (np));
 	      fdp->written = true;
 	    }
@@ -2370,9 +2514,9 @@ put_entry (node *np)
 	      fputs (np->name, tagf);
 	      fputc ('\001', tagf);
 	    }
-	  fprintf (tagf, "%d,", np->lno);
+	  fprintf (tagf, "%"PRIdMAX",", np->lno);
 	  if (np->cno != invalidcharno)
-	    fprintf (tagf, "%ld", np->cno);
+	    fprintf (tagf, "%"PRIdMAX, np->cno);
 	  fputs ("\n", tagf);
 	}
       else
@@ -2384,10 +2528,10 @@ put_entry (node *np)
 	  if (cxref_style)
 	    {
 	      if (vgrind_style)
-		fprintf (stdout, "%s %s %d\n",
+		fprintf (stdout, "%s %s %"PRIdMAX"\n",
 			 np->name, np->fdp->taggedfname, (np->lno + 63) / 64);
 	      else
-		fprintf (stdout, "%-16s %3d %-16s %s\n",
+		fprintf (stdout, "%-16s %3"PRIdMAX" %-16s %s\n",
 			 np->name, np->lno, np->fdp->taggedfname, np->regex);
 	    }
 	  else
@@ -2409,7 +2553,7 @@ put_entry (node *np)
 		}
 	      else
 		{		/* anything else; text pattern inadequate */
-		  fprintf (tagf, "%d", np->lno);
+		  fprintf (tagf, "%"PRIdMAX, np->lno);
 		}
 	      putc ('\n', tagf);
 	    }
@@ -2425,7 +2569,7 @@ put_entries (node *np)
   if (np == NULL)
     return;
 
-  if (CTAGS)
+  if (ctags)
     {
       while (np)
 	{
@@ -2538,6 +2682,7 @@ SYSCALL,	0,			st_C_gnumacro
 ENTRY,		0,			st_C_gnumacro
 PSEUDO,		0,			st_C_gnumacro
 ENUM_BF,	0,			st_C_enum_bf
+@SuppressWarnings,	(C_JAVA & ~C_PLPL),	st_C_attribute
 # These are defined inside C functions, so currently they are not met.
 # EXFUN used in glibc, DEFVAR_* in emacs.
 #EXFUN,		0,			st_C_gnumacro
@@ -2549,44 +2694,44 @@ and replace lines between %< and %> with its output, then:
  - make in_word_set static and not inline
  - remove any 'register' qualifications from variable decls. */
 /*%<*/
-/* C code produced by gperf version 3.0.1 */
-/* Command-line: gperf -m 5 */
+/* ANSI-C code produced by gperf version 3.1 */
+/* Command-line: gperf -m 5 gperf.inp  */
 /* Computed positions: -k'2-3' */
 
 struct C_stab_entry { const char *name; int c_ext; enum sym_type type; };
-/* maximum key range = 34, duplicates = 0 */
+/* maximum key range = 36, duplicates = 0 */
 
 static int
 hash (const char *str, int len)
 {
   static char const asso_values[] =
     {
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36,  3,
-      27, 36, 36, 36, 36, 36, 36, 36, 26, 36,
-      36, 36, 36, 25,  0,  0, 36, 36, 36,  0,
-      36, 36, 36, 36, 36,  1, 36, 16, 36,  6,
-      23,  0,  0, 36, 22,  0, 36, 36,  5,  0,
-       0, 15,  1, 36,  6, 36,  8, 19, 36, 16,
-       4,  5, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
-      36, 36, 36, 36, 36, 36
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 29,
+       3, 38, 38, 38, 38, 38, 38, 38, 23, 38,
+      38, 38, 38,  0,  5,  4, 38, 38, 38, 24,
+      38, 38, 38, 38, 38,  1, 38, 16, 38,  6,
+      23,  0,  0, 38, 22,  0, 38, 38,  5,  0,
+       0, 15,  1, 38,  6, 38,  8, 19, 38, 16,
+       4,  5, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38, 38, 38, 38, 38,
+      38, 38, 38, 38, 38, 38
     };
   int hval = len;
 
@@ -2603,22 +2748,22 @@ hash (const char *str, int len)
 }
 
 static struct C_stab_entry *
-in_word_set (register const char *str, register unsigned int len)
+in_word_set (const char *str, ptrdiff_t len)
 {
   enum
     {
-      TOTAL_KEYWORDS = 34,
+      TOTAL_KEYWORDS = 35,
       MIN_WORD_LENGTH = 2,
-      MAX_WORD_LENGTH = 15,
+      MAX_WORD_LENGTH = 17,
       MIN_HASH_VALUE = 2,
-      MAX_HASH_VALUE = 35
+      MAX_HASH_VALUE = 37
     };
 
   static struct C_stab_entry wordlist[] =
     {
       {""}, {""},
       {"if",		0,			st_C_ignore},
-      {"GTY",           0,                      st_C_attribute},
+      {""},
       {"@end",		0,			st_C_objend},
       {"union",		0,			st_C_struct},
       {"define",		0,			st_C_define},
@@ -2646,10 +2791,12 @@ in_word_set (register const char *str, register unsigned int len)
       {"undef",		0,			st_C_define},
       {"package",	(C_JAVA & ~C_PLPL),	st_C_ignore},
       {"__attribute__",	0,			st_C_attribute},
-      {"ENTRY",		0,			st_C_gnumacro},
       {"SYSCALL",	0,			st_C_gnumacro},
+      {"GTY",            0,                      st_C_attribute},
+      {"ENTRY",		0,			st_C_gnumacro},
       {"ENUM_BF",	0,			st_C_enum_bf},
       {"PSEUDO",		0,			st_C_gnumacro},
+      {"@SuppressWarnings",	(C_JAVA & ~C_PLPL),	st_C_attribute},
       {"DEFUN",		0,			st_C_gnumacro}
     };
 
@@ -2670,9 +2817,9 @@ in_word_set (register const char *str, register unsigned int len)
 /*%>*/
 
 static enum sym_type
-C_symtype (char *str, int len, int c_ext)
+C_symtype (char *str, ptrdiff_t len, int c_ext)
 {
-  register struct C_stab_entry *se = in_word_set (str, len);
+  struct C_stab_entry *se = in_word_set (str, len);
 
   if (se == NULL || (se->c_ext && !(c_ext & se->c_ext)))
     return st_none;
@@ -2782,8 +2929,8 @@ static enum
 static struct tok
 {
   char *line;			/* string containing the token */
-  int offset;			/* where the token starts in LINE */
-  int length;			/* token length */
+  ptrdiff_t offset;		/* where the token starts in LINE */
+  ptrdiff_t length;		/* token length */
   /*
     The previous members can be used to pass strings around for generic
     purposes.  The following ones specifically refer to creating tags.  In this
@@ -2794,23 +2941,23 @@ static struct tok
 				   invalidated whenever a state machine is
 				   reset prematurely */
   bool named;			/* create a named tag */
-  int lineno;			/* source line number of tag */
-  long linepos;			/* source char number of tag */
+  intmax_t lineno;		/* source line number of tag */
+  intmax_t linepos;		/* source char number of tag */
 } token;			/* latest token read */
 
 /*
  * Variables and functions for dealing with nested structures.
  * Idea by Mykola Dzyuba <mdzyuba@yahoo.com> (2001)
  */
-static void pushclass_above (int, char *, int);
-static void popclass_above (int);
+static void pushclass_above (ptrdiff_t, char *, ptrdiff_t);
+static void popclass_above (ptrdiff_t);
 static void write_classname (linebuffer *, const char *qualifier);
 
 static struct {
   char **cname;			/* nested class names */
-  int *bracelev;		/* nested class brace level */
-  int nl;			/* class nesting level (elements used) */
-  int size;			/* length of the array */
+  ptrdiff_t *bracelev;		/* nested class brace level */
+  ptrdiff_t nl;			/* class nesting level (elements used) */
+  ptrdiff_t size;		/* length of the array */
 } cstack;			/* stack for nested declaration tags */
 /* Current struct nesting depth (namespace, class, struct, union, enum). */
 #define nestlev		(cstack.nl)
@@ -2819,17 +2966,17 @@ static struct {
 			 && bracelev == cstack.bracelev[nestlev-1] + 1)
 
 static void
-pushclass_above (int bracelev, char *str, int len)
+pushclass_above (ptrdiff_t bracelev, char *str, ptrdiff_t len)
 {
-  int nl;
+  ptrdiff_t nl;
 
   popclass_above (bracelev);
   nl = cstack.nl;
   if (nl >= cstack.size)
     {
-      int size = cstack.size *= 2;
-      xrnew (cstack.cname, size, char *);
-      xrnew (cstack.bracelev, size, int);
+      xrnew (cstack.cname, cstack.size, 2);
+      xrnew (cstack.bracelev, cstack.size, 2);
+      cstack.size *= 2;
     }
   assert (nl == 0 || cstack.bracelev[nl-1] < bracelev);
   cstack.cname[nl] = (str == NULL) ? NULL : savenstr (str, len);
@@ -2838,11 +2985,9 @@ pushclass_above (int bracelev, char *str, int len)
 }
 
 static void
-popclass_above (int bracelev)
+popclass_above (ptrdiff_t bracelev)
 {
-  int nl;
-
-  for (nl = cstack.nl - 1;
+  for (ptrdiff_t nl = cstack.nl - 1;
        nl >= 0 && cstack.bracelev[nl] >= bracelev;
        nl--)
     {
@@ -2854,8 +2999,7 @@ popclass_above (int bracelev)
 static void
 write_classname (linebuffer *cn, const char *qualifier)
 {
-  int i, len;
-  int qlen = strlen (qualifier);
+  ptrdiff_t len;
 
   if (cstack.nl == 0 || cstack.cname[0] == NULL)
     {
@@ -2869,18 +3013,22 @@ write_classname (linebuffer *cn, const char *qualifier)
       linebuffer_setlen (cn, len);
       strcpy (cn->buffer, cstack.cname[0]);
     }
-  for (i = 1; i < cstack.nl; i++)
+  for (ptrdiff_t i = 1; i < cstack.nl; i++)
     {
       char *s = cstack.cname[i];
       if (s == NULL)
 	continue;
-      linebuffer_setlen (cn, len + qlen + strlen (s));
-      len += sprintf (cn->buffer + len, "%s%s", qualifier, s);
+      int qlen = strlen (qualifier);
+      ptrdiff_t slen = strlen (s);
+      linebuffer_setlen (cn, len + qlen + slen);
+      memcpyz (stpcpy (cn->buffer + len, qualifier), s, slen);
+      len += qlen + slen;
     }
 }
 
 
-static bool consider_token (char *, int, int, int *, int, int, bool *);
+static bool consider_token (char *, ptrdiff_t, int, int *,
+			    ptrdiff_t, ptrdiff_t, bool *);
 static void make_C_tag (bool);
 
 /*
@@ -2901,23 +3049,20 @@ static void make_C_tag (bool);
  */
 
 static bool
-consider_token (char *str, int len, int c, int *c_extp,
-		int bracelev, int parlev, bool *is_func_or_var)
-                        	/* IN: token pointer */
-                      		/* IN: token length */
-                    		/* IN: first char after the token */
-                 		/* IN, OUT: C extensions mask */
-                  		/* IN: brace level */
-                		/* IN: parenthesis level */
-                          	/* OUT: function or variable found */
+consider_token (char *str,	      /* IN: token pointer */
+		ptrdiff_t len,	      /* IN: token length */
+		int c,		      /* IN: first char after the token */
+		int *c_extp,	      /* IN, OUT: C extensions mask */
+		ptrdiff_t bracelev,   /* IN: brace level */
+		ptrdiff_t parlev,     /* IN: parenthesis level */
+		bool *is_func_or_var) /* OUT: function or variable found */
 {
   /* When structdef is stagseen, scolonseen, or snone with bracelev > 0,
      structtype is the type of the preceding struct-like keyword, and
      structbracelev is the brace level where it has been seen. */
   static enum sym_type structtype;
-  static int structbracelev;
+  static ptrdiff_t structbracelev;
   static enum sym_type toktype;
-
 
   toktype = C_symtype (str, len, *c_extp);
 
@@ -3110,8 +3255,7 @@ consider_token (char *str, int len, int c, int *c_extp,
 	   fvdef = fvnone;
 	   objdef = omethodtag;
 	   linebuffer_setlen (&token_name, len);
-	   memcpy (token_name.buffer, str, len);
-	   token_name.buffer[len] = '\0';
+	   memcpyz (token_name.buffer, str, len);
 	   return true;
 	 }
        return false;
@@ -3125,11 +3269,10 @@ consider_token (char *str, int len, int c, int *c_extp,
 	   objdef = omethodtag;
 	   if (class_qualify)
 	     {
-	       int oldlen = token_name.len;
+	       ptrdiff_t oldlen = token_name.len;
 	       fvdef = fvnone;
 	       linebuffer_setlen (&token_name, oldlen + len);
-	       memcpy (token_name.buffer + oldlen, str, len);
-	       token_name.buffer[oldlen + len] = '\0';
+	       memcpyz (token_name.buffer + oldlen, str, len);
 	     }
 	   return true;
 	 }
@@ -3240,7 +3383,7 @@ consider_token (char *str, int len, int c, int *c_extp,
  */
 static struct
 {
-  long linepos;
+  intmax_t linepos;
   linebuffer lb;
 } lbs[2];
 
@@ -3310,23 +3453,22 @@ perhaps_more_input (FILE *inf)
  * 	C syntax and adds them to the list.
  */
 static void
-C_entries (int c_ext, FILE *inf)
-               			/* extension of C */
-               			/* input file */
+C_entries (int c_ext,		/* extension of C */
+	   FILE *inf)		/* input file */
 {
-  register char c;		/* latest char read; '\0' for end of line */
-  register char *lp;		/* pointer one beyond the character `c' */
-  int curndx, newndx;		/* indices for current and new lb */
-  register int tokoff;		/* offset in line of start of current token */
-  register int toklen;		/* length of current token */
+  char c;			/* latest char read; '\0' for end of line */
+  char *lp;			/* pointer one beyond the character `c' */
+  bool curndx, newndx;		/* indices for current and new lb */
+  ptrdiff_t tokoff;		/* offset in line of start of current token */
+  ptrdiff_t toklen;		/* length of current token */
   const char *qualifier;        /* string used to qualify names */
   int qlen;			/* length of qualifier */
-  int bracelev;			/* current brace level */
-  int bracketlev;		/* current bracket level */
-  int parlev;			/* current parenthesis level */
-  int attrparlev;		/* __attribute__ parenthesis level */
-  int templatelev;		/* current template level */
-  int typdefbracelev;		/* bracelev where a typedef struct body begun */
+  ptrdiff_t bracelev;		/* current brace level */
+  ptrdiff_t bracketlev;		/* current bracket level */
+  ptrdiff_t parlev;		/* current parenthesis level */
+  ptrdiff_t attrparlev;		/* __attribute__ parenthesis level */
+  ptrdiff_t templatelev;	/* current template level */
+  ptrdiff_t typdefbracelev;	/* bracelev where a typedef struct body begun */
   bool incomm, inquote, inchar, quotednl, midtoken;
   bool yacc_rules;		/* in the rules part of a yacc file */
   struct tok savetoken = {0};	/* token saved during preprocessor handling */
@@ -3338,8 +3480,8 @@ C_entries (int c_ext, FILE *inf)
     {
       cstack.size = (DEBUG) ? 1 : 4;
       cstack.nl = 0;
-      cstack.cname = xnew (cstack.size, char *);
-      cstack.bracelev = xnew (cstack.size, int);
+      cstack.cname = xnmalloc (cstack.size, sizeof *cstack.cname);
+      cstack.bracelev = xnmalloc (cstack.size, sizeof *cstack.bracelev);
     }
 
   tokoff = toklen = typdefbracelev = 0; /* keep compiler quiet */
@@ -3591,20 +3733,19 @@ C_entries (int c_ext, FILE *inf)
 			    {
 			      if (class_qualify)
 				{
-				  int len;
 				  write_classname (&token_name, qualifier);
-				  len = token_name.len;
+				  ptrdiff_t len = token_name.len;
 				  linebuffer_setlen (&token_name,
 						     len + qlen + toklen);
-				  sprintf (token_name.buffer + len, "%s%.*s",
-					   qualifier, toklen,
-					   newlb.buffer + tokoff);
+				  memcpyz (stpcpy (token_name.buffer + len,
+						   qualifier),
+					   newlb.buffer + tokoff, toklen);
 				}
 			      else
 				{
 				  linebuffer_setlen (&token_name, toklen);
-				  sprintf (token_name.buffer, "%.*s",
-					   toklen, newlb.buffer + tokoff);
+				  memcpyz (token_name.buffer,
+					   newlb.buffer + tokoff, toklen);
 				}
 			      token.named = true;
 			    }
@@ -3613,17 +3754,19 @@ C_entries (int c_ext, FILE *inf)
 			    {
 			      if (class_qualify)
 				{
-				  int len = strlen (objtag) + 2 + toklen;
+				  ptrdiff_t len = strlen (objtag) + 2 + toklen;
 				  linebuffer_setlen (&token_name, len);
-				  sprintf (token_name.buffer, "%s(%.*s)",
-					   objtag, toklen,
-					   newlb.buffer + tokoff);
+				  char *p1 = stpcpy (token_name.buffer, objtag);
+				  char *p2 = stpcpy (p1, "(");
+				  char *p3 = mempcpy (p2, newlb.buffer + tokoff,
+						      toklen);
+				  strcpy (p3, ")");
 				}
 			      else
 				{
 				  linebuffer_setlen (&token_name, toklen);
-				  sprintf (token_name.buffer, "%.*s",
-					   toklen, newlb.buffer + tokoff);
+				  memcpyz (token_name.buffer,
+					   newlb.buffer + tokoff, toklen);
 				}
 			      token.named = true;
 			    }
@@ -3637,8 +3780,8 @@ C_entries (int c_ext, FILE *inf)
 			    /* GNU DEFUN and similar macros */
 			    {
 			      bool defun = (newlb.buffer[tokoff] == 'F');
-			      int off = tokoff;
-			      int len = toklen;
+			      ptrdiff_t off = tokoff;
+			      ptrdiff_t len = toklen;
 
 			      if (defun)
 				{
@@ -3647,9 +3790,8 @@ C_entries (int c_ext, FILE *inf)
 
 				  /* First, tag it as its C name */
 				  linebuffer_setlen (&token_name, toklen);
-				  memcpy (token_name.buffer,
-					  newlb.buffer + tokoff, toklen);
-				  token_name.buffer[toklen] = '\0';
+				  memcpyz (token_name.buffer,
+					   newlb.buffer + tokoff, toklen);
 				  token.named = true;
 				  token.lineno = lineno;
 				  token.offset = tokoff;
@@ -3662,9 +3804,8 @@ C_entries (int c_ext, FILE *inf)
 			      /* Rewrite the tag so that emacs lisp DEFUNs
 				 can be found also by their elisp name */
 			      linebuffer_setlen (&token_name, len);
-			      memcpy (token_name.buffer,
-				      newlb.buffer + off, len);
-			      token_name.buffer[len] = '\0';
+			      memcpyz (token_name.buffer,
+				       newlb.buffer + off, len);
 			      if (defun)
 				while (--len >= 0)
 				  if (token_name.buffer[len] == '_')
@@ -3674,9 +3815,8 @@ C_entries (int c_ext, FILE *inf)
 			  else
 			    {
 			      linebuffer_setlen (&token_name, toklen);
-			      memcpy (token_name.buffer,
-				      newlb.buffer + tokoff, toklen);
-			      token_name.buffer[toklen] = '\0';
+			      memcpyz (token_name.buffer,
+				       newlb.buffer + tokoff, toklen);
 			      /* Name macros and members. */
 			      token.named = (structdef == stagseen
 					     || typdef == ttypeseen
@@ -3740,7 +3880,7 @@ C_entries (int c_ext, FILE *inf)
 		    {
 		    case fstartlist:
 		      /* This prevents tagging fb in
-			 void (__attribute__((noreturn)) *fb) (void);
+			 void (__attribute__ ((noreturn)) *fb) (void);
 			 Fixing this is not easy and not very important. */
 		      fvdef = finlist;
 		      continue;
@@ -3802,7 +3942,7 @@ C_entries (int c_ext, FILE *inf)
 	      objdef = omethodcolon;
 	      if (class_qualify)
 		{
-		  int toklen = token_name.len;
+		  ptrdiff_t toklen = token_name.len;
 		  linebuffer_setlen (&token_name, toklen + 1);
 		  strcpy (token_name.buffer + toklen, ":");
 		}
@@ -3927,7 +4067,9 @@ C_entries (int c_ext, FILE *inf)
 	    default:
 	      fvdef = fvnone;
 	    }
-	  if (structdef == stagseen)
+	  if (structdef == stagseen
+	      /* class Foo<K,V,T>...  */
+	      && !(cjava && templatelev > 0))
 	    structdef = snone;
 	  break;
 	case ']':
@@ -4073,7 +4215,7 @@ C_entries (int c_ext, FILE *inf)
 		    }
 		  if (uqname > token_name.buffer)
 		    {
-		      int uqlen = strlen (uqname);
+		      ptrdiff_t uqlen = strlen (uqname);
 		      linebuffer_setlen (&token_name, uqlen);
 		      memmove (token_name.buffer, uqname, uqlen + 1);
 		    }
@@ -4135,6 +4277,9 @@ C_entries (int c_ext, FILE *inf)
 	  if (definedef != dnone)
 	    break;
 	  bracelev -= 1;
+	  /* If we see a closing brace in column zero, and we weren't told to
+	     ignore indentation, we assume this the final brace of a function
+	     or struct definition, and reset bracelev to zero.  */
 	  if (!ignoreindent && lp == newlb.buffer + 1)
 	    {
 	      if (bracelev != 0)
@@ -4154,7 +4299,10 @@ C_entries (int c_ext, FILE *inf)
 	  /* Only if typdef == tinbody is typdefbracelev significant. */
 	  if (typdef == tinbody && bracelev <= typdefbracelev)
 	    {
-	      assert (bracelev == typdefbracelev);
+	      /* If we forcibly reset bracelevel to zero above, let's
+		 not shoot ourself in the foot and assert that we didn't.  */
+	      if (!(!ignoreindent && lp == newlb.buffer + 1))
+		assert (bracelev == typdefbracelev);
 	      typdef = tend;
 	    }
 	  break;
@@ -4200,9 +4348,9 @@ C_entries (int c_ext, FILE *inf)
 	      break;
 	    }
 	  FALLTHROUGH;
-	resetfvdef:
 	case '#': case '~': case '&': case '%': case '/':
 	case '|': case '^': case '!': case '.': case '?':
+	resetfvdef:
 	  if (definedef != dnone)
 	    break;
 	  /* These surely cannot follow a function tag in C. */
@@ -4288,18 +4436,18 @@ Yacc_entries (FILE *inf)
   while (perhaps_more_input (file_pointer)				\
 	 && (readline (&(line_buffer), file_pointer),			\
 	     (char_pointer) = (line_buffer).buffer,			\
-	     true))							\
+	     true))
 
 #define LOOKING_AT(cp, kw)  /* kw is the keyword, a literal string */	\
   ((assert ("" kw), true)   /* syntax error if not a literal string */	\
-   && strneq ((cp), kw, sizeof (kw)-1)		/* cp points at kw */	\
+   && strneq (cp, kw, sizeof (kw) - 1)		/* cp points at kw */	\
    && notinname ((cp)[sizeof (kw)-1])		/* end of kw */		\
    && ((cp) = skip_spaces ((cp) + sizeof (kw) - 1), true)) /* skip spaces */
 
 /* Similar to LOOKING_AT but does not use notinname, does not skip */
 #define LOOKING_AT_NOCASE(cp, kw) /* the keyword is a literal string */	\
   ((assert ("" kw), true) /* syntax error if not a literal string */	\
-   && strncaseeq ((cp), kw, sizeof (kw)-1)	/* cp points at kw */	\
+   && strncaseeq (cp, kw, sizeof (kw) - 1)	/* cp points at kw */	\
    && ((cp) += sizeof (kw) - 1, true))		/* skip spaces */
 
 /*
@@ -4421,6 +4569,10 @@ Fortran_functions (FILE *inf)
 	continue;
       switch (c_tolower (*dbp))
 	{
+	case 'm':
+	  if (nocase_tail ("module"))
+	    F_getit (inf);
+	  continue;
 	case 'f':
 	  if (nocase_tail ("function"))
 	    F_getit (inf);
@@ -4917,7 +5069,10 @@ Ruby_functions (FILE *inf)
 	 /* Ruby method names can end in a '='.  Also, operator overloading can
 	    define operators whose names include '='.  */
 	  while (!notinname (*cp) || *cp == '=')
-	    cp++;
+	    {
+	      cp++;
+	      if (*(cp - 1) == ':') name = cp;
+	    }
 
 	  /* Remove "self." from the method name.  */
 	  if (cp - name > self_size1
@@ -4989,14 +5144,13 @@ Ruby_functions (FILE *inf)
 		    if (writer)
 		      {
 			size_t name_len = cp - np + 1;
-			char *wr_name = xnew (name_len + 1, char);
+			char *wr_name = xmalloc (name_len + 1);
 
-			memcpy (wr_name, np, name_len - 1);
-			memcpy (wr_name + name_len - 1, "=", 2);
+			strcpy (mempcpy (wr_name, np, name_len - 1), "=");
 			pfnote (wr_name, true, lb.buffer, cp - lb.buffer + 1,
 				lineno, linecharno);
 			if (debug)
-			  fprintf (stderr, "%s on %s:%d: %s\n", wr_name,
+			  fprintf (stderr, "%s on %s:%"PRIdMAX": %s\n", wr_name,
 				   curfdp->taggedfname, lineno, lb.buffer);
 			continuation = false;
 		      }
@@ -5029,6 +5183,49 @@ Ruby_functions (FILE *inf)
 	      while (*cp && *cp != '#' && notinname (*cp))
 		cp++;
 	    }
+	}
+    }
+}
+
+
+/*
+ * Rust support
+ * Look for:
+ *  - fn: Function
+ *  - struct: Structure
+ *  - enum: Enumeration
+ *  - macro_rules!: Macro
+ */
+static void
+Rust_entries (FILE *inf)
+{
+  char *cp, *name;
+  bool is_func = false;
+
+  LOOP_ON_INPUT_LINES(inf, lb, cp)
+    {
+      cp = skip_spaces(cp);
+      name = cp;
+
+      /* Skip 'pub' keyword.  */
+      (void)LOOKING_AT (cp, "pub");
+
+      /* Look for define.  */
+      if ((is_func = LOOKING_AT (cp, "fn"))
+	  || LOOKING_AT (cp, "enum")
+	  || LOOKING_AT (cp, "struct")
+	  || (is_func = LOOKING_AT (cp, "macro_rules!")))
+	{
+	  cp = skip_spaces (cp);
+	  name = cp;
+
+	  while (!notinname (*cp))
+	    cp++;
+
+	  make_tag (name, cp - name, is_func,
+		    lb.buffer, cp - lb.buffer + 1,
+		    lineno, linecharno);
+	  is_func = false;
 	}
     }
 }
@@ -5190,8 +5387,8 @@ static void
 Pascal_functions (FILE *inf)
 {
   linebuffer tline;		/* mostly copied from C_entries */
-  long save_lcno;
-  int save_lineno, namelen, taglen;
+  intmax_t save_lcno, save_lineno;
+  ptrdiff_t namelen, taglen;
   char c, *name;
 
   bool				/* each of these flags is true if: */
@@ -5467,7 +5664,7 @@ Lua_functions (FILE *inf)
 	  if (tp_dot || tp_colon)
 	    {
 	      char *p = tp_dot > tp_colon ? tp_dot : tp_colon;
-	      int len_add = p - tag_name + 1;
+	      ptrdiff_t len_add = p - tag_name + 1;
 
 	      get_tag (bp + len_add, NULL);
 	    }
@@ -5608,9 +5805,20 @@ static linebuffer *TEX_toktab = NULL; /* Table with tag tokens */
 /* Default set of control sequences to put into TEX_toktab.
    The value of environment var TEXTAGS is prepended to this.  */
 static const char *TEX_defenv = "\
-:chapter:section:subsection:subsubsection:eqno:label:ref:cite:bibitem\
-:part:appendix:entry:index:def\
-:newcommand:renewcommand:newenvironment:renewenvironment";
+:label:ref:Ref:footref:chapter:section:subsection:subsubsection:eqno:cite\
+:bibitem:part:appendix:entry:index:def:edef:gdef:xdef:newcommand:renewcommand\
+:newenvironment:renewenvironment:DeclareRobustCommand:renewrobustcmd\
+:newrobustcmd:providecommand:providerobustcmd:NewDocumentCommand\
+:RenewDocumentCommand:ProvideDocumentCommand:DeclareDocumentCommand\
+:NewExpandableDocumentCommand:RenewExpandableDocumentCommand\
+:ProvideExpandableDocumentCommand:DeclareExpandableDocumentCommand\
+:NewDocumentEnvironment:RenewDocumentEnvironment\
+:ProvideDocumentEnvironment:DeclareDocumentEnvironment:csdef\
+:csedef:csgdef:csxdef:csletcs:cslet:letcs:let:cs_new_protected_nopar\
+:cs_new_protected:cs_new_nopar:cs_new_eq:cs_new:cs_set_protected_nopar\
+:cs_set_protected:cs_set_nopar:cs_set_eq:cs_set:cs_gset_protected_nopar\
+:cs_gset_protected:cs_gset_nopar:cs_gset_eq:cs_gset\
+:cs_generate_from_arg_count:cs_generate_variant";
 
 static void TEX_decode_env (const char *, const char *);
 
@@ -5668,20 +5876,140 @@ TeX_commands (FILE *inf)
 	    if (strneq (cp, key->buffer, key->len))
 	      {
 		char *p;
-		int namelen, linelen;
-		bool opgrp = false;
+		ptrdiff_t namelen, linelen;
+		bool opgrp = false, one_esc = false, is_explthree = false;
 
 		cp = skip_spaces (cp + key->len);
+
+		/* 1. The canonical expl3 syntax looks something like this:
+		   \cs_new:Npn \__hook_tl_gput:Nn { \ERROR }.  First, if we
+		   want to tag any such commands, we include only the part
+		   before the colon (cs_new) in TEX_defenv or TEXTAGS.  Second,
+		   etags skips the argument specifier (including the colon)
+		   after the tag token, so that it doesn't become the tag name.
+		   Third, we set the boolean 'is_explthree' to true so that we
+		   can remove the argument specifier from the actual tag name
+		   (__hook_tl_gput).  This all allows us to include expl3
+		   constructs in TEX_defenv or in the environment variable
+		   TEXTAGS without requiring a change of separator, and it also
+		   allows us to find the definition of variant commands (with
+		   different argument specifiers) defined using, for example,
+		   \cs_generate_variant:Nn.  Please note that the expl3 spec
+		   requires etags to pay more attention to whitespace in the
+		   code.
+
+		   2. We also automatically remove the asterisk from starred
+		   variants of all commands, without the need to include the
+		   starred commands explicitly in TEX_defenv or TEXTAGS. */
+		if (*cp == ':')
+		  {
+		    while (!c_isspace (*cp) && *cp != TEX_opgrp)
+		      cp++;
+		    cp = skip_spaces (cp);
+		    is_explthree = true;
+		  }
+		else if (*cp == '*')
+		  cp++;
+
+		/* Skip the optional arguments to commands in the tags list so
+		   that these arguments don't end up as the name of the tag.
+		   The name will instead come from the argument in curly braces
+		   that follows the optional ones.  The '\let' command gets
+		   special treatment. */
+		while (*cp != '\0' && *cp != '%'
+		       && !streq (key->buffer, "let"))
+		  {
+		    if (*cp == '[')
+		      {
+			while (*cp != ']' && *cp != '\0' && *cp != '%')
+			  cp++;
+		      }
+		    else if (*cp == '(')
+		      {
+			while (*cp != ')' && *cp != '\0' && *cp != '%')
+			  cp++;
+		      }
+		    else if (*cp == ']' || *cp == ')')
+		      cp++;
+		    else
+		      break;
+		  }
 		if (*cp == TEX_opgrp)
 		  {
 		    opgrp = true;
 		    cp++;
+		    cp = skip_spaces (cp); /* For expl3 code. */
 		  }
+
+		/* Removing the TeX escape character from tag names simplifies
+		   things for editors finding tagged commands in TeX buffers.
+		   This applies to Emacs but also to the tag-finding behavior
+		   of at least some of the editors that use ctags, though in
+		   the latter case this will remain suboptimal.  The
+		   undocumented ctags option '--no-duplicates' may help. */
+		if (*cp == TEX_esc)
+		  {
+		    cp++;
+		    one_esc = true;
+		  }
+
+		/* Testing !c_isspace && !c_ispunct is simpler, but halts
+		   processing at too many places.  The list as it stands tries
+		   both to ensure that tag names will derive from macro names
+		   rather than from optional parameters to those macros, and
+		   also to return findable names while still allowing for
+		   unorthodox constructs. */
 		for (p = cp;
-		     (!c_isspace (*p) && *p != '#' &&
-		      *p != TEX_opgrp && *p != TEX_clgrp);
+		     (!c_isspace (*p) && *p != '#' && *p != '=' &&
+		      *p != '[' && *p != '(' && *p != TEX_opgrp &&
+		      *p != TEX_clgrp && *p != '"' && *p != '\'' &&
+		      *p != '%' && *p != ',' && *p != '|' && *p != '$');
 		     p++)
-		  continue;
+		  /* In expl3 code we remove the argument specification from
+		     the tag name.  More generally we allow only one (deleted)
+		     escape char in a tag name, which (primarily) enables
+		     tagging a TeX command's different, possibly temporary,
+		     '\let' bindings. */
+		  if (is_explthree && *p == ':')
+		    break;
+		  else if (*p == TEX_esc)
+		    { /* Second part of test is for, e.g., \cslet. */
+		      if (!one_esc && !opgrp)
+			{
+			  one_esc = true;
+			  continue;
+			}
+		      else
+			break;
+		    }
+		  else
+		    continue;
+		/* For TeX files, tags without a name are basically cruft, and
+		   in some situations they can produce spurious and confusing
+		   matches.  Try to catch as many cases as possible where a
+		   command name is of the form '\(', but avoid, as far as
+		   possible, the spurious matches. */
+		if (p == cp)
+		  {
+		    switch (*p)
+		      { /* Include =? */
+		      case '(': case '[': case '"': case '\'':
+		      case '\\': case '!': case '=': case ',':
+		      case '|': case '$':
+			p++;
+			break;
+		      case '{': case '}': case '<': case '>':
+			if (!opgrp)
+			  {
+			      p++;
+			      if (*p == '\0' || *p == '%')
+				goto tex_next_line;
+			  }
+			break;
+		      default:
+			break;
+		      }
+		  }
 		namelen = p - cp;
 		linelen = lb.len;
 		if (!opgrp || *p == TEX_clgrp)
@@ -5690,9 +6018,18 @@ TeX_commands (FILE *inf)
 		      p++;
 		    linelen = p - lb.buffer + 1;
 		  }
-		make_tag (cp, namelen, true,
-			  lb.buffer, linelen, lineno, linecharno);
-		goto tex_next_line; /* We only tag a line once */
+		if (namelen)
+		  make_tag (cp, namelen, true,
+			    lb.buffer, linelen, lineno, linecharno);
+		/* Lines with more than one \def or \let are surprisingly
+		   common in TeX files, especially in the system files that
+		   form the basis of the various TeX formats.  This tags them
+		   all. */
+		/* goto tex_next_line; /\* We only tag a line once *\/ */
+		while (*cp != '\0' && *cp != '%' && *cp != TEX_esc)
+		  cp++;
+		if (*cp != TEX_esc)
+		  goto tex_next_line;
 	      }
 	}
     tex_next_line:
@@ -5705,8 +6042,8 @@ TeX_commands (FILE *inf)
 static void
 TEX_decode_env (const char *evarname, const char *defenv)
 {
-  register const char *env, *p;
-  int i, len;
+  const char *env, *p;
+  ptrdiff_t len = 1;
 
   /* Append default string to environment. */
   env = getenv (evarname);
@@ -5715,15 +6052,20 @@ TEX_decode_env (const char *evarname, const char *defenv)
   else
     env = concat (env, defenv, "");
 
+  /* If the environment variable doesn't start with a colon, increase
+     the length of the token table.  */
+  if (*env != ':')
+    len++;
+
   /* Allocate a token table */
-  for (len = 1, p = env; (p = strchr (p, ':')); )
+  for (p = env; (p = strchr (p, ':')); )
     if (*++p)
       len++;
-  TEX_toktab = xnew (len, linebuffer);
+  TEX_toktab = xnmalloc (len, sizeof *TEX_toktab);
 
   /* Unpack environment string into token table. Be careful about */
   /* zero-length strings (leading ':', "::" and trailing ':') */
-  for (i = 0; *env != '\0';)
+  for (ptrdiff_t i = 0; *env != '\0'; )
     {
       p = strchr (env, ':');
       if (!p)			/* End of environment string. */
@@ -5823,8 +6165,7 @@ HTML_labels (FILE *inf)
 		  for (end = dbp; *end != '\0' && intoken (*end); end++)
 		    continue;
 		linebuffer_setlen (&token_name, end - dbp);
-		memcpy (token_name.buffer, dbp, end - dbp);
-		token_name.buffer[end - dbp] = '\0';
+		memcpyz (token_name.buffer, dbp, end - dbp);
 
 		dbp = end;
 		intag = false;	/* we found what we looked for */
@@ -5891,20 +6232,15 @@ HTML_labels (FILE *inf)
  * Original code by Sunichirou Sugou (1989)
  * Rewritten by Anders Lindgren (1996)
  */
-static size_t prolog_pr (char *, char *);
+static ptrdiff_t prolog_pr (char *, char *, ptrdiff_t);
 static void prolog_skip_comment (linebuffer *, FILE *);
 static size_t prolog_atom (char *, size_t);
 
 static void
 Prolog_functions (FILE *inf)
 {
-  char *cp, *last;
-  size_t len;
-  size_t allocated;
-
-  allocated = 0;
-  len = 0;
-  last = NULL;
+  char *cp, *last = NULL;
+  ptrdiff_t lastlen = 0, allocated = 0;
 
   LOOP_ON_INPUT_LINES (inf, lb, cp)
     {
@@ -5914,17 +6250,21 @@ Prolog_functions (FILE *inf)
 	continue;
       else if (cp[0] == '/' && cp[1] == '*')	/* comment. */
 	prolog_skip_comment (&lb, inf);
-      else if ((len = prolog_pr (cp, last)) > 0)
+      else
 	{
-	  /* Predicate or rule.  Store the function name so that we
-	     only generate a tag for the first clause.  */
-	  if (last == NULL)
-	    last = xnew (len + 1, char);
-	  else if (len + 1 > allocated)
-	    xrnew (last, len + 1, char);
-	  allocated = len + 1;
-	  memcpy (last, cp, len);
-	  last[len] = '\0';
+	  ptrdiff_t len = prolog_pr (cp, last, lastlen);
+	  if (0 < len)
+	    {
+	      /* Store the predicate name to avoid generating duplicate
+		 tags later.  */
+	      if (allocated <= len)
+		{
+		  xrnew (last, len + 1, 1);
+		  allocated = len + 1;
+		}
+	      memcpyz (last, cp, len);
+	      lastlen = len;
+	    }
 	}
     }
   free (last);
@@ -5957,33 +6297,25 @@ prolog_skip_comment (linebuffer *plb, FILE *inf)
  * Return the size of the name of the predicate or rule, or 0 if no
  * header was found.
  */
-static size_t
-prolog_pr (char *s, char *last)
-
-                		/* Name of last clause. */
+static ptrdiff_t
+prolog_pr (char *s, char *last, ptrdiff_t lastlen)
 {
-  size_t pos;
-  size_t len;
-
-  pos = prolog_atom (s, 0);
-  if (! pos)
+  ptrdiff_t len = prolog_atom (s, 0);
+  if (len == 0)
     return 0;
+  ptrdiff_t pos = skip_spaces (s + len) - s;
 
-  len = pos;
-  pos = skip_spaces (s + pos) - s;
-
+  /* Save only the first clause.  */
   if ((s[pos] == '.'
        || (s[pos] == '(' && (pos += 1))
        || (s[pos] == ':' && s[pos + 1] == '-' && (pos += 2)))
-      && (last == NULL		/* save only the first clause */
-	  || len != strlen (last)
-	  || !strneq (s, last, len)))
-	{
-	  make_tag (s, len, true, s, pos, lineno, linecharno);
-	  return len;
-	}
-  else
-    return 0;
+      && ! (lastlen == len && memcmp (s, last, len) == 0))
+    {
+      make_tag (s, len, true, s, pos, lineno, linecharno);
+      return len;
+    }
+
+  return 0;
 }
 
 /*
@@ -6023,10 +6355,10 @@ prolog_atom (char *s, size_t pos)
 	      pos++;
 	      if (s[pos] != '\'')
 		break;
-	      pos++;		/* A double quote */
+	      pos++;		/* A double quote  */
 	    }
 	  else if (s[pos] == '\0')
-	    /* Multiline quoted atoms are ignored. */
+	    /* Multiline quoted atoms are ignored.  */
 	    return 0;
 	  else if (s[pos] == '\\')
 	    {
@@ -6045,26 +6377,527 @@ prolog_atom (char *s, size_t pos)
 
 
 /*
+ * Support for Mercury
+ *
+ * Assumes that the declarations start at column 0.
+ * Original code by Sunichirou Sugou (1989) for Prolog.
+ * Rewritten by Anders Lindgren (1996) for Prolog.
+ * Adapted by Fabrice Nicol (2021) for Mercury.
+ * Note: Prolog-support behavior is preserved if
+ * --declarations is used, corresponding to
+ * with_mercury_definitions=true.
+ */
+
+static ptrdiff_t mercury_pr (char *, char *, ptrdiff_t);
+static void mercury_skip_comment (linebuffer *, FILE *);
+static bool is_mercury_type = false;
+static bool is_mercury_quantifier = false;
+static bool is_mercury_declaration = false;
+typedef struct
+{
+  size_t pos;          /* Position reached in parsing tag name.  */
+  size_t namelength;   /* Length of tag name  */
+  size_t totlength;    /* Total length of parsed tag: this field is currently
+			  reserved for control and debugging.   */
+} mercury_pos_t;
+
+/*
+ * Objective-C and Mercury have identical file extension .m.
+ * To disambiguate between Objective C and Mercury, parse file
+ * with the following heuristics hook:
+ *   - if line starts with :-, choose Mercury unconditionally;
+ *   - if line starts with #, @, choose Objective-C;
+ *   - otherwise compute the following ratio:
+ *
+ *     r = (number of lines with :-
+ *          or % in non-commented parts or . at trimmed EOL)
+ *         / (number of lines - number of lines starting by any amount
+ *                        of whitespace, optionally followed by comment(s))
+ *
+ * Note: strings are neglected in counts.
+ *
+ * If r > mercury_heuristics_ratio, choose Mercury.
+ * Experimental tests show that a possibly optimal default value for
+ * this floor value is around 0.5.  This is the default value for
+ * MERCURY_HEURISTICS_RATIO, defined in the first lines of this file.
+ * The closer r is to 0.5, the closer the source code to pure Prolog.
+ * Idiomatic Mercury is scored either with r = 1.0 or higher.
+ * Objective-C is scored with r = 0.0.  When this fails, the r-score
+ * never rose above 0.1 in Objective-C tests.
+ */
+
+static void
+test_objc_is_mercury (char *this_file, language **lang)
+{
+  if (this_file == NULL) return;
+  FILE* fp = fopen (this_file, "r");
+  if (fp == NULL)
+    pfatal (this_file);
+
+  bool blank_line = false; /* Line starting with any amount of white space
+			      followed by optional comment(s).  */
+  bool commented_line = false;
+  bool found_dot = false;
+  bool only_space_before = true;
+  bool start_of_line = true;
+  int c;
+  intmax_t lines = 1;
+  intmax_t mercury_dots = 0;
+  intmax_t percentage_signs = 0;
+  intmax_t rule_signs = 0;
+  float ratio = 0;
+
+  while ((c = fgetc (fp)) != EOF)
+    {
+      switch (c)
+	{
+	case '\n':
+	  if (! blank_line) ++lines;
+	  blank_line = true;
+	  commented_line = false;
+	  start_of_line = true;
+	  if (found_dot) ++mercury_dots;
+	  found_dot = false;
+	  only_space_before = true;
+	  break;
+	case '.':
+	  found_dot = ! commented_line;
+	  only_space_before = false;
+	  break;
+	case  '%': /* More frequent in Mercury.  May be modulo in Obj.-C.  */
+	  if (! commented_line)
+	    {
+	      ++percentage_signs;
+	      /* Cannot tell if it is a comment or modulo yet for sure.
+                 Yet works for heuristic purposes.  */
+	      commented_line = true;
+	    }
+	  found_dot = false;
+	  start_of_line = false;
+	  only_space_before = false;
+	  break;
+	case  '/':
+	  {
+	    int d = fgetc (fp);
+	    found_dot = false;
+	    only_space_before = false;
+	    if (! commented_line)
+	      {
+		if (d == '*')
+		  commented_line = true;
+		else
+		  /* If d == '/', cannot tell if it is an Obj.-C comment:
+		     may be Mercury integ. division.  */
+		    blank_line = false;
+	      }
+	  }
+	  FALLTHROUGH;
+        case  ' ':
+        case '\t':
+	  start_of_line = false;
+	  break;
+        case ':':
+	  c = fgetc (fp);
+	  if (start_of_line)
+	    {
+	      if (c == '-')
+		{
+		  ratio = 1.0; /* Failsafe, not an operator in Obj.-C.  */
+		  goto out;
+		}
+	      start_of_line = false;
+	    }
+	  else
+	    {
+	      /* p :- q.  Frequent in Mercury.
+		 Rare or in quoted exprs in Obj.-C.  */
+	      if (c == '-' && ! commented_line)
+		++rule_signs;
+	    }
+	  blank_line = false;
+	  found_dot = false;
+	  only_space_before = false;
+          break;
+	case '@':
+        case '#':
+	  if (start_of_line || only_space_before)
+	    {
+	      ratio = 0.0;
+	      goto out;
+	    }
+	  FALLTHROUGH;
+	default:
+	  start_of_line = false;
+	  blank_line = false;
+	  found_dot = false;
+	  only_space_before = false;
+	}
+    }
+
+  /* Fallback heuristic test.  Not failsafe but errless in practice.  */
+  ratio = ((float) rule_signs + percentage_signs + mercury_dots) / lines;
+
+ out:
+  if (fclose (fp) == EOF)
+    pfatal (this_file);
+
+  if (ratio > mercury_heuristics_ratio)
+    {
+      /* Change the language from Objective-C to Mercury.  */
+      static language lang0 = { "mercury", Mercury_help, Mercury_functions,
+	Mercury_suffixes };
+      *lang = &lang0;
+    }
+}
+
+static void
+Mercury_functions (FILE *inf)
+{
+  char *cp, *last = NULL;
+  ptrdiff_t lastlen = 0, allocated = 0;
+  if (declarations) with_mercury_definitions = true;
+
+  LOOP_ON_INPUT_LINES (inf, lb, cp)
+    {
+      if (cp[0] == '\0')   /* Empty line.  */
+	continue;
+      else if (c_isspace (cp[0]) || cp[0] == '%')
+	/*  A Prolog-type comment or anything other than a declaration.  */
+	continue;
+      else if (cp[0] == '/' && cp[1] == '*')  /* Mercury C-type comment.  */
+        mercury_skip_comment (&lb, inf);
+      else
+	{
+	  is_mercury_declaration = (cp[0] == ':' && cp[1] == '-');
+
+          if (is_mercury_declaration
+	      || with_mercury_definitions)
+	    {
+	      ptrdiff_t len = mercury_pr (cp, last, lastlen);
+	      if (0 < len)
+		{
+		  /* Store the declaration to avoid generating duplicate
+		     tags later.  */
+		  if (allocated <= len)
+		    {
+		      xrnew (last, len + 1, 1);
+		      allocated = len + 1;
+		    }
+		  memcpyz (last, cp, len);
+		  lastlen = len;
+		}
+	    }
+	}
+    }
+  free (last);
+}
+
+static void
+mercury_skip_comment (linebuffer *plb, FILE *inf)
+{
+  char *cp;
+
+  do
+    {
+      for (cp = plb->buffer; *cp != '\0'; ++cp)
+	if (cp[0] == '*' && cp[1] == '/')
+	  return;
+      readline (plb, inf);
+    }
+  while (perhaps_more_input (inf));
+}
+
+/*
+ * A declaration is added if it matches:
+ *     <beginning of line>:-<whitespace><Mercury Term><whitespace>(
+ * If with_mercury_definitions == true, we also add:
+ *     <beginning of line><Mercury item><whitespace>(
+ * or  <beginning of line><Mercury item><whitespace>:-
+ * As for Prolog support, different arities and types are not taken into
+ * consideration.
+ * Item is added to the tags database if it doesn't match the
+ * name of the previous declaration.
+ *
+ * Consume a Mercury declaration.
+ * Return the number of bytes consumed, or 0 if there was an error.
+ *
+ * A Mercury declaration must be one of:
+ *  :- type
+ *  :- solver type
+ *  :- pred
+ *  :- func
+ *  :- inst
+ *  :- mode
+ *  :- typeclass
+ *  :- instance
+ *  :- pragma
+ *  :- promise
+ *  :- initialise
+ *  :- finalise
+ *  :- mutable
+ *  :- module
+ *  :- interface
+ *  :- implementation
+ *  :- import_module
+ *  :- use_module
+ *  :- include_module
+ *  :- end_module
+ * followed on the same line by an alphanumeric sequence, starting with a lower
+ * case letter or by a single-quoted arbitrary string.
+ * Single quotes can escape themselves.  Backslash quotes everything.
+ *
+ * Return the size of the name of the declaration or 0 if no header was found.
+ * As quantifiers may precede functions or predicates, we must list them too.
+ */
+
+static const char *Mercury_decl_tags[] = {"type", "solver type", "pred",
+  "func", "inst", "mode", "typeclass", "instance", "pragma", "promise",
+  "initialise", "finalise", "mutable", "module", "interface", "implementation",
+  "import_module", "use_module", "include_module", "end_module", "some", "all"};
+
+/* Return true if array of char BUF, of length LEN, equals STR.  */
+
+static bool
+memstreq (char const *buf, ptrdiff_t len, char const *str)
+{
+  return strlen (str) == len && memeq (buf, str, len);
+}
+
+static mercury_pos_t
+mercury_decl (char *s, size_t pos)
+{
+  mercury_pos_t null_pos = {0, 0, 0};
+
+  if (s == NULL) return null_pos;
+
+  size_t origpos = pos;
+  char *decl_type = s + origpos;
+
+  while (c_isalnum (s[pos]) || s[pos] == '_')
+    pos++;
+
+  ptrdiff_t decl_type_length = pos - origpos;
+
+  /* Mercury declaration tags.  Consume them, then check the declaration item
+     following :- is legitimate, then go on as in the prolog case.  */
+
+  bool found_decl_tag = false;
+
+  if (is_mercury_quantifier)
+    {
+      if (! (memstreq (decl_type, decl_type_length, "pred")
+	     || memstreq (decl_type, decl_type_length, "func")))
+	return null_pos; /* Bad syntax.  */
+
+      is_mercury_quantifier = false; /* Reset to base value.  */
+      found_decl_tag = true;
+    }
+  else
+    {
+      for (int j = 0; j < countof (Mercury_decl_tags); ++j)
+	{
+	  if (memstreq (decl_type, decl_type_length, Mercury_decl_tags[j]))
+	    {
+	      found_decl_tag = true;
+	      if (memstreq (decl_type, decl_type_length, "type"))
+		is_mercury_type = true;
+
+	      if (memstreq (decl_type, decl_type_length, "some")
+		  || memstreq (decl_type, decl_type_length, "all"))
+		{
+		  is_mercury_quantifier = true;
+		}
+
+	      break;  /* Found declaration tag of rank j.  */
+	    }
+	  else
+	    /* 'solver type' has a blank in the middle,
+	       so this is the hard case.  */
+	    if (memstreq (decl_type, decl_type_length, "solver"))
+	      {
+		do
+		  pos++;
+		while (c_isalnum (s[pos]) || s[pos] == '_');
+
+		decl_type_length = pos - origpos;
+
+		if (memstreq (decl_type, decl_type_length, "solver type"))
+		  {
+		    found_decl_tag = false;
+		    break;  /* Found declaration tag of rank j.  */
+		  }
+	      }
+	}
+    }
+
+  /* If with_mercury_definitions == false
+   * this is a Mercury syntax error, ignoring... */
+
+  if (with_mercury_definitions)
+    {
+      if (found_decl_tag)
+	pos = skip_spaces (s + pos) - s; /* Skip len blanks again.  */
+      else
+	/* Prolog-like behavior
+	 * we have parsed the predicate once, yet inappropriately
+	 * so restarting again the parsing step.  */
+	pos = 0;
+    }
+  else
+    {
+      if (found_decl_tag)
+	pos = skip_spaces (s + pos) - s; /* Skip len blanks again.  */
+      else
+	return null_pos;
+    }
+
+  /* From now on it is the same as for Prolog except for module dots.  */
+
+  size_t start_of_name = pos;
+
+  if (c_islower (s[pos]) || s[pos] == '_' )
+    {
+      /* The name is unquoted.
+         Do not confuse module dots with end-of-declaration dots.  */
+      int module_dot_pos = 0;
+
+      while (c_isalnum (s[pos])
+             || s[pos] == '_'
+             || (s[pos] == '.' /* A module dot.  */
+                 && (c_isalnum (s[pos + 1]) || s[pos + 1] == '_')
+		 && (module_dot_pos = pos)))  /* Record module dot position.
+				                 Erase module from name.  */
+	++pos;
+
+      if (module_dot_pos)
+	{
+	  start_of_name = module_dot_pos + 2;
+	  ++pos;
+        }
+
+      mercury_pos_t position = {pos, pos - start_of_name + 1, pos - origpos};
+      return position;
+    }
+  else if (s[pos] == '\'')
+    {
+      ++pos;
+      for (;;)
+	{
+	  if (s[pos] == '\'')
+	    {
+	      ++pos;
+	      if (s[pos] != '\'')
+		break;
+	      ++pos; /* A double quote.  */
+	    }
+	  else if (s[pos] == '\0')  /* Multiline quoted atoms are ignored.  */
+	    return null_pos;
+	  else if (s[pos] == '\\')
+	    {
+	      if (s[pos+1] == '\0')
+		return null_pos;
+	      pos += 2;
+	    }
+	  else
+	    ++pos;
+	}
+
+      mercury_pos_t position = {pos, pos - start_of_name + 1, pos - origpos};
+      return position;
+    }
+  else if (is_mercury_quantifier && s[pos] == '[')   /* :- some [T] pred/func.  */
+    {
+      char *close_bracket = strchr (s + pos + 1, ']');
+      if (!close_bracket)
+	return null_pos;
+      pos = skip_spaces (close_bracket + 1) - s;
+      mercury_pos_t position = mercury_decl (s, pos);
+      position.totlength += pos - origpos;
+      return position;
+    }
+  else if (s[pos] == '.')  /* as in ':- interface.'  */
+    {
+      mercury_pos_t position = {pos, pos - origpos + 1, pos - origpos};
+      return position;
+    }
+  else
+    return null_pos;
+}
+
+static ptrdiff_t
+mercury_pr (char *s, char *last, ptrdiff_t lastlen)
+{
+  size_t len0 = 0;
+  is_mercury_type = false;
+  is_mercury_quantifier = false;
+  bool stop_at_rule = false;
+
+  if (is_mercury_declaration)
+    {
+      /* Skip len0 blanks only for declarations.  */
+      len0 = skip_spaces (s + 2) - s;
+    }
+
+  mercury_pos_t position = mercury_decl (s, len0);
+  size_t pos = position.pos;
+  int offset = 0;  /* may be < 0  */
+  if (pos == 0) return 0;
+
+  /* Skip white space for:
+     a. rules in definitions before :-
+     b. 0-arity predicates with inlined modes.
+     c. possibly multiline type definitions  */
+
+  while (c_isspace (s[pos])) { ++pos; ++offset; }
+
+  if (( ((s[pos] == '.' && (pos += 1))     /* case 1
+                                              This is a statement dot,
+                                              not a module dot. */
+	 || c_isalnum(s[pos])              /* 0-arity procedures  */
+	 || (s[pos] == '(' && (pos += 1))  /* case 2: arity > 0   */
+	 || ((s[pos] == ':')               /* case 3: rules  */
+	     && s[pos + 1] == '-' && (stop_at_rule = true)))
+     && (lastlen != pos || memcmp (s, last, pos) != 0)
+	)
+      /* Types are often declared on several lines so keeping just
+	 the first line.  */
+
+      || is_mercury_type)  /* When types are implemented.  */
+    {
+      size_t namelength = position.namelength;
+      if (stop_at_rule && offset) --offset;
+
+      /* Left-trim type definitions.  */
+
+      while (pos > namelength + offset
+	     && c_isspace (s[pos - namelength - offset]))
+	--offset;
+
+      make_tag (s + pos - namelength - offset, namelength - 1, true,
+				s, pos - offset - 1, lineno, linecharno);
+      return pos;
+    }
+
+  return 0;
+}
+
+
+/*
  * Support for Erlang
  *
  * Generates tags for functions, defines, and records.
  * Assumes that Erlang functions start at column 0.
  * Original code by Anders Lindgren (1996)
  */
-static int erlang_func (char *, char *);
+static ptrdiff_t erlang_func (char *, char *, ptrdiff_t, ptrdiff_t *);
 static void erlang_attribute (char *);
-static int erlang_atom (char *);
+static ptrdiff_t erlang_atom (char *);
 
 static void
 Erlang_functions (FILE *inf)
 {
-  char *cp, *last;
-  int len;
-  int allocated;
-
-  allocated = 0;
-  len = 0;
-  last = NULL;
+  char *cp, *last = NULL;
+  ptrdiff_t lastlen = 0, allocated = 0;
 
   LOOP_ON_INPUT_LINES (inf, lb, cp)
     {
@@ -6083,21 +6916,25 @@ Erlang_functions (FILE *inf)
 	    {
 	      free (last);
 	      last = NULL;
+	      allocated = lastlen = 0;
 	    }
 	}
-      else if ((len = erlang_func (cp, last)) > 0)
+      else
 	{
-	  /*
-	   * Function.  Store the function name so that we only
-	   * generates a tag for the first clause.
-	   */
-	  if (last == NULL)
-	    last = xnew (len + 1, char);
-	  else if (len + 1 > allocated)
-	    xrnew (last, len + 1, char);
-	  allocated = len + 1;
-	  memcpy (last, cp, len);
-	  last[len] = '\0';
+	  ptrdiff_t name_offset;
+	  ptrdiff_t len = erlang_func (cp, last, lastlen, &name_offset);
+	  if (0 < len)
+	    {
+	      /* Store the function name to avoid generating duplicate
+		 tags later.  */
+	      if (allocated <= len)
+		{
+		  xrnew (last, len + 1, 1);
+		  allocated = len + 1;
+		}
+	      memcpyz (last, cp + name_offset, len);
+	      lastlen = len;
+	    }
 	}
     }
   free (last);
@@ -6114,30 +6951,28 @@ Erlang_functions (FILE *inf)
  * Return the size of the name of the function, or 0 if no function
  * was found.
  */
-static int
-erlang_func (char *s, char *last)
-
-                		/* Name of last clause. */
+static ptrdiff_t
+erlang_func (char *s, char *last, ptrdiff_t lastlen, ptrdiff_t *name_offset)
 {
-  int pos;
-  int len;
-
-  pos = erlang_atom (s);
-  if (pos < 1)
+  char *name = s;
+  ptrdiff_t len = erlang_atom (s);
+  if (len == 0)
     return 0;
+  ptrdiff_t pos = skip_spaces (s + len) - s;
 
-  len = pos;
-  pos = skip_spaces (s + pos) - s;
+  /* If the name is quoted, the quotes are not part of the name. */
+  bool quoted = 2 < len && name[0] == '\'' && name[len - 1] == '\'';
+  name += quoted;
+  len -= 2 * quoted;
 
   /* Save only the first clause. */
   if (s[pos++] == '('
-      && (last == NULL
-	  || len != (int)strlen (last)
-	  || !strneq (s, last, len)))
-	{
-	  make_tag (s, len, true, s, pos, lineno, linecharno);
-	  return len;
-	}
+      && ! (lastlen == len && memcmp (name, last, len) == 0))
+    {
+      make_tag (s, len, true, s, pos, lineno, linecharno);
+      *name_offset = quoted;
+      return len;
+    }
 
   return 0;
 }
@@ -6160,9 +6995,19 @@ erlang_attribute (char *s)
   if ((LOOKING_AT (cp, "-define") || LOOKING_AT (cp, "-record"))
       && *cp++ == '(')
     {
-      int len = erlang_atom (skip_spaces (cp));
+      cp = skip_spaces (cp);
+      ptrdiff_t len = erlang_atom (cp);
+      ptrdiff_t pos = cp + len - s;
       if (len > 0)
-	make_tag (cp, len, true, s, cp + len - s, lineno, linecharno);
+	{
+	  /* If the name is quoted, the quotes are not part of the name. */
+	  if (len > 2 && cp[0] == '\'' && cp[len - 1] == '\'')
+	    {
+	      cp++;
+	      len -= 2;
+	    }
+	  make_tag (cp, len, true, s, pos, lineno, linecharno);
+	}
     }
   return;
 }
@@ -6172,10 +7017,10 @@ erlang_attribute (char *s)
  * Consume an Erlang atom (or variable).
  * Return the number of bytes consumed, or -1 if there was an error.
  */
-static int
+static ptrdiff_t
 erlang_atom (char *s)
 {
-  int pos = 0;
+  ptrdiff_t pos = 0;
 
   if (c_isalpha (s[pos]) || s[pos] == '_')
     {
@@ -6293,7 +7138,7 @@ analyze_regex (char *regex_arg)
 	if (regexfp == NULL)
 	  pfatal (regexfile);
 	linebuffer_init (&regexbuf);
-	while (readline_internal (&regexbuf, regexfp, regexfile) > 0)
+	while (readline_internal (&regexbuf, regexfp, regexfile, false) > 0)
 	  analyze_regex (regexbuf.buffer);
 	free (regexbuf.buffer);
 	if (fclose (regexfp) != 0)
@@ -6341,13 +7186,12 @@ add_regex (char *regexp_pattern, language *lang)
   struct re_pattern_buffer *patbuf;
   regexp *rp;
   bool
-    force_explicit_name = true, /* do not use implicit tag names */
     ignore_case = false,	/* case is significant */
     multi_line = false,		/* matches are done one line at a time */
     single_line = false;	/* dot does not match newline */
 
 
-  if (strlen (regexp_pattern) < 3)
+  if (strnlen (regexp_pattern, 3) < 3)
     {
       error ("null regexp");
       return;
@@ -6380,7 +7224,8 @@ add_regex (char *regexp_pattern, language *lang)
       case 'N':
 	if (modifiers == name)
 	  error ("forcing explicit tag name but no name, ignoring");
-	force_explicit_name = true;
+	/* This option has no effect and is present only for backward
+	   compatibility.  */
 	break;
       case 'i':
 	ignore_case = true;
@@ -6397,11 +7242,11 @@ add_regex (char *regexp_pattern, language *lang)
 	break;
       }
 
-  patbuf = xnew (1, struct re_pattern_buffer);
+  patbuf = xmalloc (sizeof *patbuf);
   *patbuf = zeropattern;
   if (ignore_case)
     {
-      static char lc_trans[UCHAR_MAX + 1];
+      static unsigned char lc_trans[UCHAR_MAX + 1];
       int i;
       for (i = 0; i < UCHAR_MAX + 1; i++)
 	lc_trans[i] = c_tolower (i);
@@ -6428,14 +7273,13 @@ add_regex (char *regexp_pattern, language *lang)
     }
 
   rp = p_head;
-  p_head = xnew (1, regexp);
+  p_head = xmalloc (sizeof *p_head);
   p_head->pattern = savestr (regexp_pattern);
   p_head->p_next = rp;
   p_head->lang = lang;
   p_head->pat = patbuf;
   p_head->name = savestr (name);
   p_head->error_signaled = false;
-  p_head->force_explicit_name = force_explicit_name;
   p_head->ignore_case = ignore_case;
   p_head->multi_line = multi_line;
 }
@@ -6448,10 +7292,9 @@ static char *
 substitute (char *in, char *out, struct re_registers *regs)
 {
   char *result, *t;
-  int size, dig, diglen;
 
   result = NULL;
-  size = strlen (out);
+  ptrdiff_t size = strlen (out);
 
   /* Pass 1: figure out how much to allocate by finding all \N strings. */
   if (out[size - 1] == '\\')
@@ -6461,8 +7304,8 @@ substitute (char *in, char *out, struct re_registers *regs)
        t = strchr (t + 2, '\\'))
     if (c_isdigit (t[1]))
       {
-	dig = t[1] - '0';
-	diglen = regs->end[dig] - regs->start[dig];
+	int dig = t[1] - '0';
+	ptrdiff_t diglen = regs->end[dig] - regs->start[dig];
 	size += diglen - 2;
       }
     else
@@ -6470,13 +7313,13 @@ substitute (char *in, char *out, struct re_registers *regs)
 
   /* Allocate space and do the substitutions. */
   assert (size >= 0);
-  result = xnew (size + 1, char);
+  result = xmalloc (size + 1);
 
   for (t = result; *out != '\0'; out++)
     if (*out == '\\' && c_isdigit (*++out))
       {
-	dig = *out - '0';
-	diglen = regs->end[dig] - regs->start[dig];
+	int dig = *out - '0';
+	ptrdiff_t diglen = regs->end[dig] - regs->start[dig];
 	memcpy (t, in + regs->start[dig], diglen);
 	t += diglen;
       }
@@ -6485,7 +7328,7 @@ substitute (char *in, char *out, struct re_registers *regs)
   *t = '\0';
 
   assert (t <= result + size);
-  assert (t - result == (int)strlen (result));
+  assert (t == result + strlen (result));
 
   return result;
 }
@@ -6522,7 +7365,7 @@ regex_tag_multiline (void)
 
   for (rp = p_head; rp != NULL; rp = rp->p_next)
     {
-      int match = 0;
+      ptrdiff_t match = 0;
 
       if (!rp->multi_line)
 	continue;		/* skip normal regexps */
@@ -6576,20 +7419,15 @@ regex_tag_multiline (void)
 		name = NULL;
 	      else /* make a named tag */
 		name = substitute (buffer, rp->name, &rp->regs);
-	      if (rp->force_explicit_name)
-		{
-		  /* Force explicit tag name, if a name is there. */
-		  pfnote (name, true, buffer + linecharno,
-			  charno - linecharno + 1, lineno, linecharno);
 
-		  if (debug)
-		    fprintf (stderr, "%s on %s:%d: %s\n",
-			     name ? name : "(unnamed)", curfdp->taggedfname,
-			     lineno, buffer + linecharno);
-		}
-	      else
-		make_tag (name, strlen (name), true, buffer + linecharno,
-			  charno - linecharno + 1, lineno, linecharno);
+	      /* Force explicit tag name, if a name is there. */
+	      pfnote (name, true, buffer + linecharno,
+		      charno - linecharno, lineno, linecharno);
+
+	      if (debug)
+		fprintf (stderr, "%s on %s:%"PRIdMAX": %s\n",
+			 name ? name : "(unnamed)", curfdp->taggedfname,
+			 lineno, buffer + linecharno);
 	      break;
 	    }
 	}
@@ -6600,7 +7438,7 @@ regex_tag_multiline (void)
 static bool
 nocase_tail (const char *cp)
 {
-  int len = 0;
+  ptrdiff_t len = 0;
 
   while (*cp != '\0' && c_tolower (*cp) == c_tolower (dbp[len]))
     cp++, len++;
@@ -6648,19 +7486,22 @@ get_lispy_tag (register char *bp)
 
 /*
  * Read a line of text from `stream' into `lbp', excluding the
- * newline or CR-NL, if any.  Return the number of characters read from
- * `stream', which is the length of the line including the newline.
+ * newline or CR-NL (if `leave_cr` is false), if any.  Return the
+ * number of characters read from `stream', which is the length
+ * of the line including the newline.
  *
- * On DOS or Windows we do not count the CR character, if any before the
- * NL, in the returned length; this mirrors the behavior of Emacs on those
+ * On DOS or Windows, if `leave_cr` is false, we do not count the
+ * CR character, if any before the NL, in the returned length;
+ * this mirrors the behavior of Emacs on those
  * platforms (for text files, it translates CR-NL to NL as it reads in the
  * file).
  *
  * If multi-line regular expressions are requested, each line read is
  * appended to `filebuf'.
  */
-static long
-readline_internal (linebuffer *lbp, FILE *stream, char const *filename)
+static ptrdiff_t
+readline_internal (linebuffer *lbp, FILE *stream, char const *filename,
+		   const bool leave_cr)
 {
   char *buffer = lbp->buffer;
   char *p = lbp->buffer;
@@ -6675,9 +7516,9 @@ readline_internal (linebuffer *lbp, FILE *stream, char const *filename)
       if (p == pend)
 	{
 	  /* We're at the end of linebuffer: expand it. */
+	  xrnew (buffer, lbp->size, 2);
+	  p = buffer + lbp->size;
 	  lbp->size *= 2;
-	  xrnew (buffer, lbp->size, char);
-	  p += buffer - lbp->buffer;
 	  pend = buffer + lbp->size;
 	  lbp->buffer = buffer;
 	}
@@ -6690,19 +7531,19 @@ readline_internal (linebuffer *lbp, FILE *stream, char const *filename)
 	  break;
 	}
       if (c == '\n')
-	{
-	  if (p > buffer && p[-1] == '\r')
-	    {
-	      p -= 1;
-	      chars_deleted = 2;
-	    }
-	  else
-	    {
-	      chars_deleted = 1;
-	    }
-	  *p = '\0';
-	  break;
-	}
+        {
+          if (!leave_cr && p > buffer && p[-1] == '\r')
+            {
+              p -= 1;
+              chars_deleted = 2;
+            }
+          else
+            {
+              chars_deleted = 1;
+            }
+          *p = '\0';
+          break;
+        }
       *p++ = c;
     }
   lbp->len = p - buffer;
@@ -6713,13 +7554,12 @@ readline_internal (linebuffer *lbp, FILE *stream, char const *filename)
       while (filebuf.size <= filebuf.len + lbp->len + 1) /* +1 for \n */
 	{
 	  /* Expand filebuf. */
+	  xrnew (filebuf.buffer, filebuf.size, 2);
 	  filebuf.size *= 2;
-	  xrnew (filebuf.buffer, filebuf.size, char);
 	}
-      memcpy (filebuf.buffer + filebuf.len, lbp->buffer, lbp->len);
-      filebuf.len += lbp->len;
-      filebuf.buffer[filebuf.len++] = '\n';
-      filebuf.buffer[filebuf.len] = '\0';
+      strcpy (mempcpy (filebuf.buffer + filebuf.len, lbp->buffer, lbp->len),
+	      "\n");
+      filebuf.len += lbp->len + 1;
     }
 
   return lbp->len + chars_deleted;
@@ -6733,10 +7573,8 @@ readline_internal (linebuffer *lbp, FILE *stream, char const *filename)
 static void
 readline (linebuffer *lbp, FILE *stream)
 {
-  long result;
-
   linecharno = charno;		/* update global char number of line start */
-  result = readline_internal (lbp, stream, infilename); /* read line */
+  ptrdiff_t result = readline_internal (lbp, stream, infilename, false);
   lineno += 1;			/* increment global line number */
   charno += result;		/* increment global char number */
 
@@ -6748,26 +7586,26 @@ readline (linebuffer *lbp, FILE *stream)
       /* Check whether this is a #line directive. */
       if (result > 12 && strneq (lbp->buffer, "#line ", 6))
 	{
-	  unsigned int lno;
-	  int start = 0;
+	  char *lno_start = lbp->buffer + 6;
+	  char *lno_end;
+	  intmax_t lno = strtoimax (lno_start, &lno_end, 10);
+	  char *quoted_filename
+	    = lno_start < lno_end ? skip_spaces (lno_end) : NULL;
 
-	  if (sscanf (lbp->buffer, "#line %u \"%n", &lno, &start) >= 1
-	      && start > 0)	/* double quote character found */
+	  if (quoted_filename && *quoted_filename == '"')
 	    {
-	      char *endp = lbp->buffer + start;
+	      char *endp = quoted_filename;
+	      while (*++endp && *endp != '"')
+		endp += *endp == '\\' && endp[1];
 
-	      while ((endp = strchr (endp, '"')) != NULL
-		     && endp[-1] == '\\')
-		endp++;
-	      if (endp != NULL)
+	      if (*endp)
 		/* Ok, this is a real #line directive.  Let's deal with it. */
 		{
 		  char *taggedabsname;	/* absolute name of original file */
 		  char *taggedfname;	/* name of original file as given */
-		  char *name;		/* temp var */
+		  char *name = quoted_filename + 1;
 
 		  discard_until_line_directive = false; /* found it */
-		  name = lbp->buffer + start;
 		  *endp = '\0';
 		  canonicalize_filename (name);
 		  taggedabsname = absolute_filename (name, tagfiledir);
@@ -6823,7 +7661,7 @@ readline (linebuffer *lbp, FILE *stream)
 		      if (fdp == NULL) /* not found */
 			{
 			  fdp = fdhead;
-			  fdhead = xnew (1, fdesc);
+			  fdhead = xmalloc (sizeof *fdhead);
 			  *fdhead = *curfdp; /* copy curr. file description */
 			  fdhead->next = fdp;
 			  fdhead->infname = savestr (curfdp->infname);
@@ -6861,7 +7699,7 @@ readline (linebuffer *lbp, FILE *stream)
     } /* if #line directives should be considered */
 
   {
-    int match;
+    ptrdiff_t match;
     regexp *rp;
     char *name;
 
@@ -6906,18 +7744,14 @@ readline (linebuffer *lbp, FILE *stream)
 		name = NULL;
 	      else /* make a named tag */
 		name = substitute (lbp->buffer, rp->name, &rp->regs);
-	      if (rp->force_explicit_name)
-		{
-		  /* Force explicit tag name, if a name is there. */
-		  pfnote (name, true, lbp->buffer, match, lineno, linecharno);
-		  if (debug)
-		    fprintf (stderr, "%s on %s:%d: %s\n",
-			     name ? name : "(unnamed)", curfdp->taggedfname,
-			     lineno, lbp->buffer);
-		}
-	      else
-		make_tag (name, strlen (name), true,
-			  lbp->buffer, match, lineno, linecharno);
+
+	      /* Force explicit tag name, if a name is there. */
+	      pfnote (name, true, lbp->buffer, match, lineno, linecharno);
+
+	      if (debug)
+		fprintf (stderr, "%s on %s:%"PRIdMAX": %s\n",
+			 name ? name : "(unnamed)", curfdp->taggedfname,
+			 lineno, lbp->buffer);
 	      break;
 	    }
 	}
@@ -6927,7 +7761,7 @@ readline (linebuffer *lbp, FILE *stream)
 
 /*
  * Return a pointer to a space of size strlen(cp)+1 allocated
- * with xnew where the string CP has been copied.
+ * with xmalloc where the string CP has been copied.
  */
 static char *
 savestr (const char *cp)
@@ -6936,13 +7770,13 @@ savestr (const char *cp)
 }
 
 /*
- * Return a pointer to a space of size LEN+1 allocated with xnew where
- * the string CP has been copied for at most the first LEN characters.
+ * Return a pointer to a space of size LEN+1 allocated with xmalloc
+ * with a copy of CP (containing LEN bytes) followed by a NUL byte.
  */
 static char *
-savenstr (const char *cp, int len)
+savenstr (const char *cp, ptrdiff_t len)
 {
-  char *dp = xnew (len + 1, char);
+  char *dp = xmalloc (len + 1);
   dp[len] = '\0';
   return memcpy (dp, cp, len);
 }
@@ -7024,13 +7858,9 @@ verror (char const *format, va_list ap)
 static char *
 concat (const char *s1, const char *s2, const char *s3)
 {
-  int len1 = strlen (s1), len2 = strlen (s2), len3 = strlen (s3);
-  char *result = xnew (len1 + len2 + len3 + 1, char);
-
-  strcpy (result, s1);
-  strcpy (result + len1, s2);
-  strcpy (result + len1 + len2, s3);
-
+  ptrdiff_t len1 = strlen (s1), len2 = strlen (s2), len3 = strlen (s3);
+  char *result = xmalloc (len1 + len2 + len3 + 1);
+  strcpy (stpcpy (stpcpy (result, s1), s2), s3);
   return result;
 }
 
@@ -7040,16 +7870,16 @@ concat (const char *s1, const char *s2, const char *s3)
 static char *
 etags_getcwd (void)
 {
-  int bufsize = 200;
-  char *path = xnew (bufsize, char);
+  ptrdiff_t bufsize = 200;
+  char *path = xmalloc (bufsize);
 
   while (getcwd (path, bufsize) == NULL)
     {
       if (errno != ERANGE)
 	pfatal ("getcwd");
-      bufsize *= 2;
       free (path);
-      path = xnew (bufsize, char);
+      path = xnmalloc (bufsize, 2 * sizeof *path);
+      bufsize *= 2;
     }
 
   canonicalize_filename (path);
@@ -7084,9 +7914,7 @@ etags_mktmp (void)
   int fd = mkostemp (templt, O_CLOEXEC);
   if (fd < 0 || close (fd) != 0)
     {
-      int temp_errno = errno;
       free (templt);
-      errno = temp_errno;
       templt = NULL;
     }
 #if defined (DOS_NT)
@@ -7104,34 +7932,125 @@ etags_mktmp (void)
   return templt;
 }
 
+#if !MSDOS && !defined (DOS_NT)
+/*
+ * Add single quotes around a string, and escape any single quotes.
+ * Return a newly-allocated string.
+ *
+ * For example:
+ * escape_shell_arg_string ("test.txt")  => "'test.txt'"
+ * escape_shell_arg_string ("'test.txt") => "''\''test.txt'"
+ */
+static char *
+escape_shell_arg_string (char *str)
+{
+  char *p = str;
+  int need_space = 2;		/* ' at begin and end */
+
+  while (*p != '\0')
+    {
+      if (*p == '\'')
+	need_space += 4;	/* ' to '\'', length is 4 */
+      else
+	need_space++;
+
+      p++;
+    }
+
+  char *new_str = xmalloc (need_space + 1);
+  new_str[0] = '\'';
+  new_str[need_space-1] = '\'';
+
+  int i = 1;			/* skip first byte */
+  p = str;
+  while (*p != '\0')
+    {
+      new_str[i] = *p;
+      if (*p == '\'')
+	{
+	  new_str[i+1] = '\\';
+	  new_str[i+2] = '\'';
+	  new_str[i+3] = '\'';
+	  i += 3;
+	}
+
+      i++;
+      p++;
+    }
+
+  new_str[need_space] = '\0';
+  return new_str;
+}
+#endif
+
+static void
+do_move_file (const char *src_file, const char *dst_file)
+{
+  if (rename (src_file, dst_file) == 0)
+    return;
+
+  FILE *src_f = fopen (src_file, "rb");
+  FILE *dst_f = fopen (dst_file, "wb");
+
+  if (src_f == NULL)
+    pfatal (src_file);
+
+  if (dst_f == NULL)
+    pfatal (dst_file);
+
+  int c;
+  while ((c = fgetc (src_f)) != EOF)
+    {
+      if (ferror (src_f))
+        pfatal (src_file);
+
+      if (ferror (dst_f))
+        pfatal (dst_file);
+
+      if (fputc (c, dst_f) == EOF)
+        pfatal ("cannot write");
+    }
+
+  if (fclose (src_f) == EOF)
+    pfatal (src_file);
+
+  if (fclose (dst_f) == EOF)
+    pfatal (dst_file);
+
+  if (unlink (src_file) < 0 && errno != ENOENT)
+    pfatal ("unlink error");
+
+  return;
+}
+
 /* Return a newly allocated string containing the file name of FILE
    relative to the absolute directory DIR (which should end with a slash). */
 static char *
 relative_filename (char *file, char *dir)
 {
   char *fp, *dp, *afn, *res;
-  int i;
+  ptrdiff_t i;
+  char *dir_last_slash UNINIT;
 
   /* Find the common root of file and dir (with a trailing slash). */
   afn = absolute_filename (file, cwd);
   fp = afn;
   dp = dir;
   while (*fp++ == *dp++)
-    continue;
-  fp--, dp--;			/* back to the first differing char */
+    if (dp[-1] == '/')
+      dir_last_slash = dp - 1;
 #ifdef DOS_NT
-  if (fp == afn && afn[0] != '/') /* cannot build a relative name */
-    return afn;
+  if (fp - 1 == afn && afn[0] != '/')
+    return afn; /* Cannot build a relative name.  */
 #endif
-  do				/* look at the equal chars until '/' */
-    fp--, dp--;
-  while (*fp != '/');
+  fp -= dp - dir_last_slash;
+  dp = dir_last_slash;
 
   /* Build a sequence of "../" strings for the resulting relative file name. */
   i = 0;
   while ((dp = strchr (dp + 1, '/')) != NULL)
     i += 1;
-  res = xnew (3*i + strlen (fp + 1) + 1, char);
+  res = xmalloc (3*i + strlen (fp + 1) + 1);
   char *z = res;
   while (i-- > 0)
     z = stpcpy (z, "../");
@@ -7286,39 +8205,65 @@ static void
 linebuffer_init (linebuffer *lbp)
 {
   lbp->size = (DEBUG) ? 3 : 200;
-  lbp->buffer = xnew (lbp->size, char);
+  lbp->buffer = xmalloc (lbp->size);
   lbp->buffer[0] = '\0';
   lbp->len = 0;
 }
 
 /* Set the minimum size of a string contained in a linebuffer. */
 static void
-linebuffer_setlen (linebuffer *lbp, int toksize)
+linebuffer_setlen (linebuffer *lbp, ptrdiff_t toksize)
 {
-  while (lbp->size <= toksize)
+  if (lbp->size <= toksize)
     {
-      lbp->size *= 2;
-      xrnew (lbp->buffer, lbp->size, char);
+      ptrdiff_t multiplier = toksize / lbp->size + 1;
+      xrnew (lbp->buffer, lbp->size, multiplier);
+      lbp->size *= multiplier;
     }
   lbp->len = toksize;
 }
 
-/* Like malloc but get fatal error if memory is exhausted. */
-static void * ATTRIBUTE_MALLOC
-xmalloc (size_t size)
+/* Memory allocators with a fatal error if memory is exhausted.  */
+
+static void
+memory_full (void)
 {
+  fatal ("virtual memory exhausted");
+}
+
+static void *
+xmalloc (ptrdiff_t size)
+{
+  if (SIZE_MAX < size)
+    memory_full ();
   void *result = malloc (size);
   if (result == NULL)
-    fatal ("virtual memory exhausted");
+    memory_full ();
   return result;
 }
 
 static void *
-xrealloc (void *ptr, size_t size)
+xnmalloc (ptrdiff_t nitems, ptrdiff_t item_size)
 {
-  void *result = realloc (ptr, size);
-  if (result == NULL)
-    fatal ("virtual memory exhausted");
+  ptrdiff_t nbytes;
+  assume (0 <= nitems);
+  assume (0 < item_size);
+  if (ckd_mul (&nbytes, nitems, item_size))
+    memory_full ();
+  return xmalloc (nbytes);
+}
+
+static void *
+xnrealloc (void *pa, ptrdiff_t nitems, ptrdiff_t item_size)
+{
+  ptrdiff_t nbytes;
+  assume (0 <= nitems);
+  assume (0 < item_size);
+  if (ckd_mul (&nbytes, nitems, item_size) || SIZE_MAX < nbytes)
+    memory_full ();
+  void *result = realloc (pa, nbytes);
+  if (!result)
+    memory_full ();
   return result;
 }
 

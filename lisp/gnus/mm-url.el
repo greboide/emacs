@@ -1,6 +1,6 @@
-;;; mm-url.el --- a wrapper of url functions/commands for Gnus
+;;; mm-url.el --- a wrapper of url functions/commands for Gnus  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2001-2018 Free Software Foundation, Inc.
+;; Copyright (C) 2001-2026 Free Software Foundation, Inc.
 
 ;; Author: Shenghuo Zhu <zsh@cs.rochester.edu>
 
@@ -21,34 +21,26 @@
 
 ;;; Commentary:
 
-;; Some code is stolen from w3 and url packages. Some are moved from
+;; Some code is stolen from w3 and url packages.  Some are moved from
 ;; nnweb.
 
 ;; TODO: Support POST, cookie.
 
 ;;; Code:
 
-(eval-when-compile (require 'cl-lib))
-
 (require 'mm-util)
 (require 'gnus)
 
 (defvar url-current-object)
-(defvar url-package-name)
-(defvar url-package-version)
 
 (defgroup mm-url nil
   "A wrapper of url package and external url command for Gnus."
   :group 'gnus)
 
-(defcustom mm-url-use-external (not
-				(condition-case nil
-				    (require 'url)
-				  (error nil)))
+(defcustom mm-url-use-external nil
   "If non-nil, use external grab program `mm-url-program'."
   :version "22.1"
-  :type 'boolean
-  :group 'mm-url)
+  :type 'boolean)
 
 (defvar mm-url-predefined-programs
   '((wget "wget" "--user-agent=mm-url" "-q" "-O" "-")
@@ -71,14 +63,12 @@ Likely values are `wget', `w3m', `lynx' and `curl'."
 	  (symbol :tag "w3m" w3m)
 	  (symbol :tag "lynx" lynx)
 	  (symbol :tag "curl" curl)
-	  (string :tag "other"))
-  :group 'mm-url)
+	  (string :tag "other")))
 
 (defcustom mm-url-arguments nil
   "The arguments for `mm-url-program'."
   :version "22.1"
-  :type '(repeat string)
-  :group 'mm-url)
+  :type '(repeat string))
 
 
 ;;; Internal variables
@@ -302,7 +292,7 @@ If `mm-url-use-external' is non-nil, use `mm-url-program'."
 		args (append (cdr item) (list url))))
       (setq program mm-url-program
 	    args (append mm-url-arguments (list url))))
-    (unless (eq 0 (apply 'call-process program nil t nil args))
+    (unless (eq 0 (apply #'call-process program nil t nil args))
       (error "Couldn't fetch %s" url))))
 
 (defvar mm-url-timeout 30
@@ -318,7 +308,7 @@ If FOLLOW-REFRESH is non-nil, redirect refresh url in META."
 	(done nil)
 	(first t)
 	result)
-    (while (and (not (zerop (cl-decf times)))
+    (while (and (not (zerop (decf times)))
 		(not done))
       (with-timeout (mm-url-timeout)
 	(unless first
@@ -389,8 +379,7 @@ spaces.  Die Die Die."
 	  ((= char ?  ) "+")
 	  ((memq char mm-url-unreserved-chars) (char-to-string char))
 	  (t (upcase (format "%%%02x" char)))))
-       (encode-coding-string chunk (car (find-coding-systems-string chunk)))
-       "")))
+       (encode-coding-string chunk (car (find-coding-systems-string chunk))))))
 
 (defun mm-url-encode-www-form-urlencoded (pairs)
   "Return PAIRS encoded for forms."

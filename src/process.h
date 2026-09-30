@@ -1,5 +1,5 @@
 /* Definitions for asynchronous process control in GNU Emacs.
-   Copyright (C) 1985, 1994, 2001-2018 Free Software Foundation, Inc.
+   Copyright (C) 1985, 1994, 2001-2026 Free Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -83,13 +83,20 @@ struct Lisp_Process
     Lisp_Object mark;
 
     /* Symbol indicating status of process.
-       This may be a symbol: run, open, closed, listen, or failed.
+       This may be a symbol: run, listen, or failed.
        Or it may be a pair (connect . ADDRINFOS) where ADDRINFOS is
        a list of remaining (PROTOCOL . ADDRINFO) pairs to try.
        Or it may be (failed ERR) where ERR is an integer, string or symbol.
        Or it may be a list, whose car is stop, exit or signal
        and whose cdr is a pair (EXIT_CODE . COREDUMP_FLAG)
-       or (SIGNAL_NUMBER . COREDUMP_FLAG).  */
+       or (SIGNAL_NUMBER . COREDUMP_FLAG).
+       The symbols open and closed are not used here: an open network
+       process has an internal status of "run" and a closed network
+       process an internal status of "exit".
+       Stopped network processes do not set this status to "stop";
+       instead, they set command to t. "stop" is only used here to
+       indicate stopped system processes.
+     */
     Lisp_Object status;
 
     /* Coding-system for decoding the input from this process.  */
@@ -117,9 +124,7 @@ struct Lisp_Process
 
     /* The thread a process is linked to, or nil for any thread.  */
     Lisp_Object thread;
-
-    /* After this point, there are no Lisp_Objects any more.  */
-    /* alloc.c assumes that `pid' is the first such non-Lisp slot.  */
+    /* After this point, there are no Lisp_Objects.  */
 
     /* Process ID.  A positive value is a child process ID.
        Zero is for pseudo-processes such as network or serial connections,
@@ -155,11 +160,14 @@ struct Lisp_Process
     unsigned int adaptive_read_buffering : 2;
     /* Skip reading this process on next read.  */
     bool_bf read_output_skip : 1;
+    /* Maximum number of bytes to read in a single chunk. */
+    ptrdiff_t readmax;
     /* True means kill silently if Emacs is exited.
        This is the inverse of the `query-on-exit' flag.  */
     bool_bf kill_without_query : 1;
-    /* True if communicating through a pty.  */
-    bool_bf pty_flag : 1;
+    /* True if communicating through a pty for input or output.  */
+    bool_bf pty_in : 1;
+    bool_bf pty_out : 1;
     /* Flag to set coding-system of the process buffer from the
        coding_system used to decode process output.  */
     bool_bf inherit_coding_system_flag : 1;
@@ -194,7 +202,8 @@ struct Lisp_Process
     gnutls_session_t gnutls_state;
     gnutls_certificate_client_credentials gnutls_x509_cred;
     gnutls_anon_client_credentials_t gnutls_anon_cred;
-    gnutls_x509_crt_t gnutls_certificate;
+    gnutls_x509_crt_t *gnutls_certificates;
+    int gnutls_certificates_length;
     unsigned int gnutls_peer_verification;
     unsigned int gnutls_extra_peer_verification;
     int gnutls_log_level;
@@ -202,7 +211,7 @@ struct Lisp_Process
     bool_bf gnutls_p : 1;
     bool_bf gnutls_complete_negotiation_p : 1;
 #endif
-};
+  } GCALIGNED_STRUCT;
 
 INLINE bool
 PROCESSP (Lisp_Object a)
@@ -254,6 +263,8 @@ pset_gnutls_cred_type (struct Lisp_Process *p, Lisp_Object val)
 /* True means don't run process sentinels.  This is used
    when exiting.  */
 extern bool inhibit_sentinels;
+/* True means that Glib clobbers Emacs SIGCHLD handler.  */
+extern bool glib_installs_sigchld_handler;
 
 /* Exit statuses for GNU programs that exec other programs.  */
 enum
@@ -265,7 +276,7 @@ enum
 
 /* Defined in callproc.c.  */
 
-extern Lisp_Object encode_current_directory (void);
+extern Lisp_Object get_current_directory (bool);
 extern void record_kill_process (struct Lisp_Process *, Lisp_Object);
 
 /* Defined in sysdep.c.  */
@@ -285,6 +296,7 @@ extern bool kbd_on_hold_p (void);
 typedef void (*fd_callback) (int fd, void *data);
 
 extern void add_read_fd (int fd, fd_callback func, void *data);
+extern void add_non_keyboard_read_fd (int fd, fd_callback func, void *data);
 extern void delete_read_fd (int fd);
 extern void add_write_fd (int fd, fd_callback func, void *data);
 extern void delete_write_fd (int fd);
@@ -292,13 +304,16 @@ extern void catch_child_signal (void);
 extern void restore_nofile_limit (void);
 
 #ifdef WINDOWSNT
-extern Lisp_Object network_interface_list (void);
+extern Lisp_Object network_interface_list (bool full, unsigned short match);
 extern Lisp_Object network_interface_info (Lisp_Object);
 #endif
 
 extern Lisp_Object remove_slash_colon (Lisp_Object);
 
 extern void update_processes_for_thread_death (Lisp_Object);
+extern void dissociate_controlling_tty (void);
+
+extern int open_channel_for_module (Lisp_Object);
 
 INLINE_HEADER_END
 

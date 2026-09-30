@@ -1,7 +1,7 @@
 /* A general interface to the widgets of different toolkits.
 
 Copyright (C) 1992, 1993 Lucid, Inc.
-Copyright (C) 1994-1996, 1999-2018 Free Software Foundation, Inc.
+Copyright (C) 1994-1996, 1999-2026 Free Software Foundation, Inc.
 
 This file is part of the Lucid Widget Library.
 
@@ -60,12 +60,6 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 /* List of all widgets managed by the library. */
 static widget_info*
 all_widget_info = NULL;
-
-#ifdef USE_MOTIF
-const char *lwlib_toolkit_type = "motif";
-#else
-const char *lwlib_toolkit_type = "lucid";
-#endif
 
 static widget_value *merge_widget_value (widget_value *,
                                          widget_value *,
@@ -211,9 +205,7 @@ mark_widget_destroyed (Widget widget, XtPointer closure, XtPointer call_data)
 static widget_instance *
 allocate_widget_instance (widget_info* info, Widget parent, Boolean pop_up_p)
 {
-  widget_instance* instance =
-    (widget_instance*) xmalloc (sizeof (widget_instance));
-  memset (instance, 0, sizeof *instance);
+  widget_instance *instance = xzalloc (sizeof *instance);
   instance->parent = parent;
   instance->pop_up_p = pop_up_p;
   instance->info = info;
@@ -1056,7 +1048,7 @@ lw_get_all_values (LWLIB_ID id)
 widget_value*
 lw_get_widget_value_for_widget (widget_instance *instance, Widget w)
 {
-  char* name = XtName (w);
+  char const *name = XtName (w);
   widget_value* cur;
   for (cur = instance->info->val; cur; cur = cur->next)
     if (!strcmp (cur->name, name))
@@ -1078,7 +1070,7 @@ lw_internal_update_other_instances (Widget widget,
                                     XtPointer call_data)
 {
   widget_instance* instance = (widget_instance*)closure;
-  char* name = XtName (widget);
+  char const *name = XtName (widget);
   widget_info* info;
   widget_instance* cur;
   widget_value* val;
@@ -1233,8 +1225,7 @@ lw_separator_p (const char *label, enum menu_separator *type, int motif_p)
 {
   int separator_p = 0;
 
-  if (strlen (label) >= 3
-      && memcmp (label, "--:", 3) == 0)
+  if (strncmp (label, "--:",  3) == 0)
     {
       static struct separator_table
       {
@@ -1276,7 +1267,7 @@ lw_separator_p (const char *label, enum menu_separator *type, int motif_p)
 	    break;
 	  }
     }
-  else if (strlen (label) > 3
+  else if (strnlen (label, 4) == 4
 	   && memcmp (label, "--", 2) == 0
 	   && label[2] != '-')
     {
@@ -1325,10 +1316,14 @@ lw_separator_p (const char *label, enum menu_separator *type, int motif_p)
     {
       /* Old-style separator, maybe.  It's a separator if it contains
 	 only dashes.  */
-      while (*label == '-')
-	++label;
-      separator_p = *label == 0;
-      *type = SEPARATOR_SHADOW_ETCHED_IN;
+      if (*label == '-')
+	{
+	  while (*label == '-')
+	    ++label;
+	  separator_p = *label == 0;
+
+	  *type = SEPARATOR_SHADOW_ETCHED_IN;
+	}
     }
 
   return separator_p;
